@@ -53,8 +53,16 @@ fn parse_line(line: &str) -> Option<Pane> {
     })
 }
 
+/// `tmux -u`: força UTF-8. Sem locale (app aberto pelo Dock), o tmux troca o TAB do `-F` por "_"
+/// e o parse das listas quebra ("pane não encontrado").
+pub fn cmd() -> Command {
+    let mut c = Command::new(crate::harness::which("tmux").unwrap_or_else(|| "tmux".into()));
+    c.arg("-u");
+    c
+}
+
 fn tmux(args: &[&str]) -> Result<String> {
-    let out = Command::new("tmux").args(args).output().context("falha ao executar tmux")?;
+    let out = cmd().args(args).output().context("falha ao executar tmux")?;
     if !out.status.success() {
         bail!("tmux {:?}: {}", args, String::from_utf8_lossy(&out.stderr).trim());
     }
@@ -63,7 +71,7 @@ fn tmux(args: &[&str]) -> Result<String> {
 
 /// Lista todos os panes. Se não houver servidor tmux rodando, devolve lista vazia.
 pub fn list_panes() -> Result<Vec<Pane>> {
-    let out = Command::new("tmux").args(["list-panes", "-a", "-F", LIST_FORMAT]).output().context("falha ao executar tmux")?;
+    let out = cmd().args(["list-panes", "-a", "-F", LIST_FORMAT]).output().context("falha ao executar tmux")?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         if err.contains("no server running") || err.contains("No such file") || err.contains("error connecting") {
@@ -161,12 +169,26 @@ pub fn kill_session(name: &str) -> Result<()> {
 }
 
 pub fn has_session(name: &str) -> bool {
-    Command::new("tmux").args(["has-session", "-t", &exact(name)]).output().map(|o| o.status.success()).unwrap_or(false)
+    cmd().args(["has-session", "-t", &exact(name)]).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sem locale (como no app aberto pelo Dock), `tmux -u` mantém o TAB do formato.
+    #[test]
+    fn lista_sem_locale() {
+        if crate::harness::which("tmux").is_none() {
+            return;
+        }
+        let name = format!("kabul-test-locale-{}", std::process::id());
+        new_session(&name, Some("/tmp"), Some("sleep 30")).unwrap();
+        let out = cmd().env_remove("LANG").env_remove("LC_ALL").env_remove("LC_CTYPE").args(["list-panes", "-a", "-F", LIST_FORMAT]).output().unwrap();
+        let panes = parse_list_panes(&String::from_utf8_lossy(&out.stdout));
+        let _ = kill_session(&name);
+        assert!(panes.iter().any(|p| p.session == name), "pane não encontrado sem locale");
+    }
 
     #[test]
     fn parse_fixture() {
@@ -204,7 +226,7 @@ mod tests {
 pub mod stream {
     use anyhow::{Context, Result};
     use std::io::{BufRead, BufReader, Write};
-    use std::process::{Child, ChildStdin, Command, Stdio};
+    use std::process::{Child, ChildStdin, Stdio};
     use std::sync::mpsc::{channel, Receiver};
 
     /// Desfaz os escapes `\ooo` e `\\` do modo de controle.
@@ -249,7 +271,7 @@ pub mod stream {
 
     impl TermStream {
         pub fn attach(session: &str) -> Result<Self> {
-            let mut child = Command::new(crate::harness::which("tmux").unwrap_or_else(|| "tmux".into()))
+            let mut child = crate::tmux::cmd()
                 .args(["-C", "attach-session", "-t", &crate::tmux::exact(session)])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -328,7 +350,7 @@ pub mod stream {
                 }
             }
             drop(t);
-            let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &name]).status();
+            let _ = crate::tmux::cmd().args(["kill-session", "-t", &name]).status();
             assert!(String::from_utf8_lossy(&got).contains("kabul-42"), "{}", String::from_utf8_lossy(&got));
         }
     }

@@ -32,6 +32,8 @@ impl ClaudeCode {
         push("--effort", &opts.effort);
         push("--permission-mode", &opts.permission_mode);
         push("--resume", &opts.resume);
+        push("--settings", &opts.settings_json);
+        push("--append-system-prompt", &opts.system_prompt);
         if opts.fork && opts.resume.is_some() {
             a.push("--fork-session".into());
         }

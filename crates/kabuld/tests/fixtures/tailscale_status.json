@@ -1,0 +1,27 @@
+{
+  "Version": "1.90.0",
+  "BackendState": "Running",
+  "Self": {
+    "HostName": "mac-de-dev",
+    "DNSName": "mac-de-dev.tailnet-exemplo.ts.net.",
+    "TailscaleIPs": ["100.100.0.1", "fd7a:115c:a1e0::1"],
+    "OS": "macOS",
+    "Online": true
+  },
+  "Peer": {
+    "nodekey:aaaa": {
+      "HostName": "iphone-de-dev",
+      "DNSName": "iphone-de-dev.tailnet-exemplo.ts.net.",
+      "TailscaleIPs": ["100.100.0.3", "fd7a:115c:a1e0::3"],
+      "OS": "iOS",
+      "Online": false
+    },
+    "nodekey:bbbb": {
+      "HostName": "mac-escritorio",
+      "DNSName": "mac-escritorio.tailnet-exemplo.ts.net.",
+      "TailscaleIPs": ["100.100.0.2", "fd7a:115c:a1e0::2"],
+      "OS": "macOS",
+      "Online": true
+    }
+  }
+}

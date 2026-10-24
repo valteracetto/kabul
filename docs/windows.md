@@ -13,11 +13,31 @@ macOS e, quando der, já nasce atrás de uma trait.
 | Detecção de agente por `ps -A -o pid,ppid,command` | `crates/kabul-core/src/agent.rs` | `sysinfo` (crate) para a árvore de processos |
 | Captura `claude --cloud` / `--remote-control` pelo tmux | `cloud_start`, `mirror_start` | ConPTY pela mesma trait (os dois exigem TTY) |
 
+## kabuld (celular, outras máquinas, colaboração)
+
+O kabuld nasceu com as partes de rede, segredos e push portáteis. O que depende de Unix fica isolado:
+
+| Hoje | Onde | No Windows |
+|---|---|---|
+| Espelho de sessões: `tmux list-panes`, `capture-pane`, `display-message`, `ps -A` para a árvore de processos | `crates/kabuld/src/sessions.rs` | Mesma trait `TerminalBackend` do app (ConPTY + multiplexador do kabuld). Detecção de agente com `sysinfo` |
+| Terminal compartilhado (`tmux -C`, `send-keys -H`, `resize-window`) | `crates/kabuld/src/terminal.rs` | Backend ConPTY. A barra de teclas já manda bytes, não nomes do tmux |
+| `term_open` cria a sessão com `sh -c ... exec $SHELL -l` | `crates/kabuld/src/hub.rs` | PowerShell ou Git Bash pelo backend |
+| Permissão 0600 nos arquivos `kabuld-*.json` (`#[cfg(unix)]`) | `secrets.rs`, `push.rs` | ACL do usuário (`%APPDATA%` já é por usuário) |
+| CLI do Tailscale: `which tailscale`, com fallback para o app do Mac | `crates/kabuld/src/net.rs` | `tailscale.exe` em `%ProgramFiles%\Tailscale` |
+| Pasta padrão do estado (Application Support) | `Config::from_env` | Vem de `Store::default_paths` (ver "Caminhos e git") |
+
+Já portáteis:
+- segredos pela crate `keyring` (Credential Manager);
+- rede pela trait `NetTransport` (Tailscale tem os mesmos comandos no Windows);
+- Web Push em Rust puro (`web-push-native` + `ureq`);
+- axum/tokio;
+- PWA no navegador.
+
 ## Segredos
 
 | Hoje | Onde | No Windows |
 |---|---|---|
-| `security add/find/delete-generic-password` (Keychain) | `crates/kabul-core/src/linear.rs`, `crates/kabul-core/src/github.rs` | Crate `keyring` (Credential Manager no Windows, Keychain no macOS, Secret Service no Linux) |
+| `security add/find/delete-generic-password` (Keychain) | `crates/kabul-core/src/linear.rs`, `crates/kabul-core/src/github.rs` | Crate `keyring` (Credential Manager no Windows, Keychain no macOS, Secret Service no Linux), que o kabuld já usa (`crates/kabuld/src/secrets.rs`) |
 
 ## Integração com o sistema
 
@@ -27,6 +47,11 @@ macOS e, quando der, já nasce atrás de uma trait.
 | `osascript display notification` | `notify` | `tauri-plugin-notification` (também resolve o clique que abre o chat certo) |
 | `open` / `open -a <App>` | `open_in`, `open_external` | `tauri-plugin-opener` / `ShellExecuteW`; "Abrir em" com Explorer, VS Code, Cursor, Windows Terminal, PowerShell e JetBrains, a partir do registro e de `%LOCALAPPDATA%` |
 | Lista de apps em `/Applications` e `/System/...`; ícones via JXA (`NSWorkspace`) | `OPEN_APPS`, `ensure_icons` | Lista própria por SO; ícone via `SHGetFileInfo` / `ExtractIconEx` |
+| Nome do computador por `scutil --get ComputerName` (seletor de máquina) | `crates/kabul-core/src/machine.rs` | Já cai para `COMPUTERNAME` (Windows) e `hostname` |
+| Som de conclusão com `afplay /System/Library/Sounds/<nome>.aiff` ("Test") | `sound_play` | Sons próprios empacotados e `PlaySound`/`rodio`; a lista de nomes muda por SO |
+| Ambiente do shell de login (`$SHELL -l -i -c 'env -0'`) para o app aberto pelo Dock | `crates/kabul-core/src/shell_env.rs` (`#[cfg(unix)]`) | No Windows o processo já herda o PATH do usuário; `read_login_env` devolve `None` e só o LANG/PATH extra são aplicados |
+| Menu do app com Serviços/Ocultar/Mostrar todos | `apps/desktop/src-tauri/src/menu.rs` (`#[cfg(target_os = "macos")]`) | O resto do menu é do Tauri e funciona no Windows (barra de menu na janela) |
+| `tmux -u` para forçar UTF-8 | `crates/kabul-core/src/tmux.rs` | Some com o backend ConPTY (trait `TerminalBackend`) |
 | `caffeinate -i -w <pid>` | `chat_start` | `SetThreadExecutionState(ES_CONTINUOUS \| ES_SYSTEM_REQUIRED)` enquanto houver agente rodando |
 | `sysctl -n hw.memsize` (cabe na memória?) | `crates/kabul-core/src/local.rs` | `sysinfo` (RAM, e VRAM separada quando houver GPU dedicada) |
 | `fix_path` com `/opt/homebrew/bin` etc. e `which()` com pastas do macOS | `main.rs`, `harness::which` | `which` (crate) e pastas por SO (`%APPDATA%\npm`, `%LOCALAPPDATA%\Programs`, `.exe`/`.cmd`) |

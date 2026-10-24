@@ -1,4 +1,6 @@
-//! Catálogo de modelos por harness. Gemini/Antigravity vem de `agy models`; os outros são fixos.
+//! Catálogo de modelos por harness. Codex vem do `model/list` do app-server (da conta logada) e
+//! Gemini/Antigravity de `agy models`, os dois com cache (memória e disco) e fallback; o Claude não
+//! tem listagem no CLI e usa os aliases estáveis (`opus`, `sonnet`, `haiku`).
 use crate::harness::HarnessKind;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
@@ -55,11 +57,11 @@ pub fn claude_models() -> Vec<Model> {
     ]
 }
 
-/// Ids do Codex não confirmados nesta máquina (o binário do codex está quebrado aqui).
+/// Último recurso, sem `model/list` nem cache: ids que o Codex aceitava na última verificação.
 pub fn codex_models() -> Vec<Model> {
     vec![
-        m(HarnessKind::Codex, "gpt-6.1-sol", "GPT-6.1 Sol", "openai", &["low", "medium", "high", "xhigh"]),
-        m(HarnessKind::Codex, "gpt-6.1", "GPT-6.1", "openai", &["low", "medium", "high", "xhigh"]),
+        m(HarnessKind::Codex, "gpt-6-luna", "GPT-6-Luna", "openai", &["low", "medium", "high", "xhigh", "max"]),
+        m(HarnessKind::Codex, "gpt-5.6-terra", "GPT-5.6-Terra", "openai", &["low", "medium", "high", "xhigh", "max"]),
     ]
 }
 
@@ -96,7 +98,99 @@ pub fn parse_agy_models(out: &str) -> Vec<Model> {
 }
 
 pub fn agy_models() -> Vec<Model> {
-    Command::new("agy").arg("models").output().ok().filter(|o| o.status.success()).map(|o| parse_agy_models(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default()
+    let bin = crate::harness::which("agy").map(|p| p.display().to_string()).unwrap_or_else(|| "agy".into());
+    Command::new(bin).arg("models").output().ok().filter(|o| o.status.success()).map(|o| parse_agy_models(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default()
+}
+
+/// Parse da resposta de `model/list` do app-server do Codex (`result.data[]`).
+pub fn parse_codex_model_list(v: &serde_json::Value) -> Vec<Model> {
+    use serde_json::Value;
+    let mut out: Vec<(bool, Model)> = v
+        .pointer("/result/data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|d| !d.get("hidden").and_then(Value::as_bool).unwrap_or(false))
+        .filter_map(|d| {
+            let id = d.get("model").or_else(|| d.get("id")).and_then(Value::as_str)?;
+            let mut model = m(HarnessKind::Codex, id, d.get("displayName").and_then(Value::as_str).unwrap_or(id), "openai", &[]);
+            model.efforts = d.get("supportedReasoningEfforts").and_then(Value::as_array).into_iter().flatten().filter_map(|e| e.get("reasoningEffort").and_then(Value::as_str).map(String::from)).collect();
+            model.efforts.sort_by_key(|e| EFFORTS.iter().position(|y| y == e).unwrap_or(EFFORTS.len()));
+            Some((d.get("isDefault").and_then(Value::as_bool).unwrap_or(false), model))
+        })
+        .collect();
+    // O padrão da conta vem primeiro (ordenação estável mantém o resto).
+    out.sort_by_key(|(default, _)| !default);
+    out.into_iter().map(|(_, m)| m).collect()
+}
+
+/// Pergunta ao app-server do Codex os modelos da conta (`initialize` → `initialized` → `model/list`).
+/// `env` é o do perfil da conta (CODEX_HOME). `None` se o Codex não responder a tempo.
+pub fn codex_list(env: &[(String, String)], timeout: std::time::Duration) -> Option<Vec<Model>> {
+    use std::io::{BufRead, Write};
+    let bin = crate::harness::which("codex")?;
+    let mut child = Command::new(bin).args(["app-server", "--listen", "stdio://"]).envs(env.iter().cloned()).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().ok()?;
+    let mut stdin = child.stdin.take()?;
+    let stdout = child.stdout.take()?;
+    let lines = [
+        serde_json::json!({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "kabul", "title": "Kabul", "version": env!("CARGO_PKG_VERSION")}}}),
+        serde_json::json!({"method": "initialized"}),
+        serde_json::json!({"id": 2, "method": "model/list", "params": {}}),
+    ];
+    for l in &lines {
+        writeln!(stdin, "{l}").ok()?;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                if v.get("id").and_then(serde_json::Value::as_i64) == Some(2) {
+                    let _ = tx.send(v);
+                    return;
+                }
+            }
+        }
+    });
+    let got = rx.recv_timeout(timeout).ok();
+    drop(stdin);
+    let _ = child.kill();
+    let _ = child.wait();
+    got.map(|v| parse_codex_model_list(&v)).filter(|v| !v.is_empty())
+}
+
+/// Cache de listas de modelos: memória (10 min) e disco (fallback quando o CLI não responde).
+fn cached(home: Option<&std::path::Path>, name: &str, fetch: impl FnOnce() -> Option<Vec<Model>>) -> Option<Vec<Model>> {
+    use std::sync::Mutex;
+    static MEM: Mutex<Vec<(String, std::time::Instant, Vec<Model>)>> = Mutex::new(Vec::new());
+    if let Some((_, _, v)) = MEM.lock().unwrap().iter().find(|(k, t, _)| k == name && t.elapsed() < std::time::Duration::from_secs(600)) {
+        return Some(v.clone());
+    }
+    let file = home.map(|h| h.join("cache").join(format!("models-{name}.json")));
+    match fetch() {
+        Some(v) => {
+            let mut mem = MEM.lock().unwrap();
+            mem.retain(|(k, _, _)| k != name);
+            mem.push((name.into(), std::time::Instant::now(), v.clone()));
+            if let Some(f) = &file {
+                let _ = std::fs::create_dir_all(f.parent().unwrap());
+                let _ = std::fs::write(f, serde_json::to_vec(&v).unwrap_or_default());
+            }
+            Some(v)
+        }
+        None => file.and_then(|f| std::fs::read(f).ok()).and_then(|b| serde_json::from_slice(&b).ok()),
+    }
+}
+
+/// Catálogo com as listas dinâmicas (Codex pela conta padrão, Gemini pelo agy) e cache em `home`.
+pub fn catalog_for(home: &std::path::Path) -> Vec<Model> {
+    let mut v = claude_models();
+    let accs = crate::accounts::Accounts::open(home);
+    let prof = accs.default_for("codex");
+    let env = crate::accounts::env_for(&prof);
+    let key = format!("codex-{}", prof.id.replace([':', '/'], "_"));
+    v.extend(cached(Some(home), &key, || codex_list(&env, std::time::Duration::from_secs(15))).unwrap_or_else(codex_models));
+    v.extend(cached(Some(home), "agy", || Some(agy_models()).filter(|x| !x.is_empty())).unwrap_or_default());
+    v
 }
 
 /// Modelos locais/custom já com o harness escolhido pelo registro.
@@ -134,10 +228,11 @@ pub fn local_models(sources: &[crate::local::SourceStatus], reg: &crate::registr
     v
 }
 
+/// Catálogo sem cache em disco (CLI e testes).
 pub fn catalog() -> Vec<Model> {
     let mut v = claude_models();
-    v.extend(codex_models());
-    v.extend(agy_models());
+    v.extend(cached(None, "codex-cli", || codex_list(&[], std::time::Duration::from_secs(15))).unwrap_or_else(codex_models));
+    v.extend(cached(None, "agy-cli", || Some(agy_models()).filter(|x| !x.is_empty())).unwrap_or_default());
     v
 }
 
@@ -155,6 +250,19 @@ mod tests {
     use super::*;
 
     const OUT: &str = "Fetching available models...\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ngemini-4-argon-low\tGemini 4 Argon (Low)\nclaude-opus-5-5-low\tClaude Opus 5.5 (Low)\ngpt-oss-120b-medium\tGPT-OSS 120B (Medium)\nsem-esforco\tSem Esforço\n";
+
+    #[test]
+    fn lista_do_codex() {
+        let v: serde_json::Value = serde_json::from_str(r#"{"id":2,"result":{"data":[
+            {"id":"gpt-5.6-terra","model":"gpt-5.6-terra","displayName":"GPT-5.6-Terra","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"ultra"},{"reasoningEffort":"high"},{"reasoningEffort":"low"}],"isDefault":false},
+            {"id":"gpt-6-luna","model":"gpt-6-luna","displayName":"GPT-6-Luna","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"max"}],"isDefault":true},
+            {"id":"interno","model":"interno","displayName":"X","hidden":true,"supportedReasoningEfforts":[],"isDefault":false}]}}"#).unwrap();
+        let m = parse_codex_model_list(&v);
+        assert_eq!(m.iter().map(|x| x.key.as_str()).collect::<Vec<_>>(), ["codex:gpt-6-luna", "codex:gpt-5.6-terra"]);
+        assert_eq!(m[1].efforts, ["low", "high", "ultra"]);
+        assert_eq!((m[0].label.as_str(), m[0].harness), ("GPT-6-Luna", HarnessKind::Codex));
+        assert_eq!(cli_model(&m[0], Some("max")), "gpt-6-luna");
+    }
 
     #[test]
     fn agrupa_agy() {

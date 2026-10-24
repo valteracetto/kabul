@@ -56,6 +56,110 @@ fn sequence(dir: &Path, steps: &[(&str, Vec<&str>)], dry_run: bool) -> Result<Ou
 
 // ---------------- branch alvo e escopo do diff ----------------
 
+/// Remote do repo (Configurações › Git › Remote; padrão `origin`).
+pub fn remote(repo: &Repo) -> String {
+    let (s, _) = crate::settings::load(Path::new(&repo.path), &repo.default_branch);
+    s.remote.filter(|r| !r.trim().is_empty()).unwrap_or_else(|| "origin".into())
+}
+
+/// Remotes configurados no repo (`git remote`).
+pub fn remotes(repo_path: &Path) -> Vec<String> {
+    git(repo_path, &["remote"]).map(|s| s.lines().map(String::from).filter(|l| !l.is_empty()).collect()).unwrap_or_default()
+}
+
+pub fn merge_flag(method: &str) -> &'static str {
+    match method {
+        "merge" => "--merge",
+        "rebase" => "--rebase",
+        _ => "--squash",
+    }
+}
+
+/// Onde abrir o PR: `github` (o link do PR), `linear` (a issue ligada, se houver) ou `graphite`.
+pub fn pr_open_url(target: &str, pr_url: &str, linear_url: Option<&str>) -> String {
+    match target {
+        "linear" => linear_url.unwrap_or(pr_url).to_string(),
+        "graphite" => {
+            // https://github.com/<owner>/<repo>/pull/<n> → https://app.graphite.dev/github/pr/<owner>/<repo>/<n>
+            let parts: Vec<&str> = pr_url.trim_end_matches('/').split('/').collect();
+            match parts.as_slice() {
+                [.., owner, name, "pull", n] => format!("https://app.graphite.dev/github/pr/{owner}/{name}/{n}"),
+                _ => pr_url.to_string(),
+            }
+        }
+        _ => pr_url.to_string(),
+    }
+}
+
+/// Identidade do git (nome, e-mail) e de onde vem: `repo` (config local) ou `global`.
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+pub struct Identity {
+    pub name: String,
+    pub email: String,
+    pub scope: String,
+    pub global_name: String,
+    pub global_email: String,
+}
+
+pub fn identity(repo_path: &Path) -> Identity {
+    let get = |args: &[&str]| git(repo_path, args).unwrap_or_default();
+    let (ln, le) = (get(&["config", "--local", "user.name"]), get(&["config", "--local", "user.email"]));
+    let (gn, ge) = (get(&["config", "--global", "user.name"]), get(&["config", "--global", "user.email"]));
+    let local = !ln.is_empty() || !le.is_empty();
+    Identity { name: if ln.is_empty() { gn.clone() } else { ln }, email: if le.is_empty() { ge.clone() } else { le }, scope: if local { "repo".into() } else { "global".into() }, global_name: gn, global_email: ge }
+}
+
+/// Grava nome/e-mail no config local do repo (vale para todos os worktrees); vazio remove.
+pub fn set_identity(repo_path: &Path, name: &str, email: &str) -> Result<()> {
+    for (k, v) in [("user.name", name), ("user.email", email)] {
+        if v.trim().is_empty() {
+            let _ = git(repo_path, &["config", "--local", "--unset", k]);
+        } else {
+            git(repo_path, &["config", "--local", k, v.trim()])?;
+        }
+    }
+    Ok(())
+}
+
+/// Marca quais checks são obrigatórios (nomes de `gh pr checks --required`).
+pub fn mark_required(checks: &mut [Value], required: &[String]) {
+    for c in checks.iter_mut() {
+        let name = c.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+        if let Some(o) = c.as_object_mut() {
+            o.insert("required".into(), Value::Bool(required.contains(&name)));
+        }
+    }
+}
+
+/// Checks que falharam e bloqueiam o merge: só os obrigatórios, ou todos com "optional as blocking".
+pub fn blocking_failures(checks: &[Value], optional_blocking: bool) -> Vec<String> {
+    checks
+        .iter()
+        .filter(|c| c.get("bucket").and_then(Value::as_str) == Some("fail"))
+        .filter(|c| optional_blocking || c.get("required").and_then(Value::as_bool).unwrap_or(true))
+        .filter_map(|c| c.get("name").and_then(Value::as_str).map(String::from))
+        .collect()
+}
+
+/// Checks do PR (`gh pr checks`), com `required` marcado.
+pub fn pr_checks(ws: &Workspace) -> Result<(Vec<Value>, Option<String>)> {
+    let p = Path::new(&ws.path);
+    let (_, out, err) = run(p, &gh(), &["pr", "checks", "--json", "name,state,bucket,link,workflow,startedAt,completedAt,description"])?;
+    match serde_json::from_str::<Vec<Value>>(&out) {
+        Ok(mut checks) => {
+            let (_, req, _) = run(p, &gh(), &["pr", "checks", "--required", "--json", "name"])?;
+            let names: Vec<String> = serde_json::from_str::<Vec<Value>>(&req).unwrap_or_default().iter().filter_map(|c| c.get("name").and_then(Value::as_str).map(String::from)).collect();
+            mark_required(&mut checks, &names);
+            Ok((checks.clone(), checks.is_empty().then(|| "O PR não tem checks configurados.".into())))
+        }
+        Err(_) => {
+            let e = err.trim().to_string();
+            let msg = if e.contains("no pull requests found") || e.contains("no default remote") || e.contains("not a git repository") || e.contains("none of the git remotes") { "Sem PR aberto para esta branch.".to_string() } else if e.is_empty() { "Sem checks.".into() } else { e };
+            Ok((vec![], Some(msg)))
+        }
+    }
+}
+
 /// Branch alvo do workspace (a do workspace, senão a padrão do repo).
 pub fn target(repo: &Repo, ws: &Workspace) -> String {
     ws.target_branch.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| repo.default_branch.clone())
@@ -64,7 +168,7 @@ pub fn target(repo: &Repo, ws: &Workspace) -> String {
 /// Ref da branch alvo: `origin/<alvo>` se existir, senão `<alvo>`.
 pub fn target_ref(repo: &Repo, ws: &Workspace) -> String {
     let t = target(repo, ws);
-    let remote = format!("origin/{t}");
+    let remote = format!("{}/{t}", remote(repo));
     if git(Path::new(&ws.path), &["rev-parse", "--verify", "-q", &remote]).is_ok() {
         remote
     } else if git(Path::new(&ws.path), &["rev-parse", "--verify", "-q", &t]).is_ok() {
@@ -204,15 +308,21 @@ pub fn status(repo: &Repo, ws: &Workspace) -> Result<GitStatus> {
     })
 }
 
-/// Traz os commits da própria branch no origin (não da alvo).
-pub fn pull(ws: &Workspace, dry_run: bool) -> Result<Outcome> {
+/// Traz os commits da própria branch no remote (não da alvo).
+pub fn pull(ws: &Workspace, remote: &str, dry_run: bool) -> Result<Outcome> {
     let p = Path::new(&ws.path);
     let branch = git(p, &["branch", "--show-current"]).unwrap_or_else(|_| ws.branch.clone());
-    sequence(p, &[("git", vec!["pull", "--no-rebase", "--no-edit", "origin", branch.as_str()])], dry_run)
+    sequence(p, &[("git", vec!["pull", "--no-rebase", "--no-edit", remote, branch.as_str()])], dry_run)
 }
 
-pub fn push(ws: &Workspace, dry_run: bool) -> Result<Outcome> {
-    sequence(Path::new(&ws.path), &[("git", vec!["push", "-u", "origin", "HEAD"])], dry_run)
+/// `git push [-u] <remote> HEAD` (o `-u` vem de Configurações › Git › "Set upstream").
+pub fn push(ws: &Workspace, remote: &str, set_upstream: bool, dry_run: bool) -> Result<Outcome> {
+    let mut args = vec!["push"];
+    if set_upstream {
+        args.push("-u");
+    }
+    args.extend([remote, "HEAD"]);
+    sequence(Path::new(&ws.path), &[("git", args)], dry_run)
 }
 
 // ---------------- busca ----------------
@@ -348,12 +458,7 @@ pub fn pr_view(ws: &Workspace) -> Result<Option<PrInfo>> {
 
 /// `squash` (padrão), `merge` ou `rebase`.
 pub fn pr_merge(ws: &Workspace, method: &str, delete_branch: bool, dry_run: bool) -> Result<Outcome> {
-    let flag = match method {
-        "merge" => "--merge",
-        "rebase" => "--rebase",
-        _ => "--squash",
-    };
-    let mut args = vec!["pr", "merge", flag];
+    let mut args = vec!["pr", "merge", merge_flag(method)];
     if delete_branch {
         args.push("--delete-branch");
     }
@@ -487,9 +592,10 @@ mod tests {
         assert!(discard(&w, "../fora").is_err());
 
         // Push (dry-run só lista; de verdade vai para o origin local) e pull.
-        let o = push(&w, true).unwrap();
+        let o = push(&w, "origin", true, true).unwrap();
         assert_eq!((o.dry_run, o.commands.as_slice()), (true, ["git push -u origin HEAD".to_string()].as_slice()));
-        push(&w, false).unwrap();
+        assert_eq!(push(&w, "origin", false, true).unwrap().commands, ["git push origin HEAD"]);
+        push(&w, &remote(&r), true, false).unwrap();
         let st = status(&r, &w).unwrap();
         assert_eq!((st.upstream.as_deref(), st.ahead, st.behind), (Some("origin/dev/kabul"), 0, 0));
         // Outro clone empurra um commit na mesma branch: fica 1 atrás; pull traz.
@@ -501,8 +607,8 @@ mod tests {
         g(&other, &["push", "-q"]);
         g(wp, &["fetch", "-q"]);
         assert_eq!(status(&r, &w).unwrap().behind, 1);
-        assert_eq!(pull(&w, true).unwrap().commands, ["git pull --no-rebase --no-edit origin dev/kabul"]);
-        pull(&w, false).unwrap();
+        assert_eq!(pull(&w, "origin", true).unwrap().commands, ["git pull --no-rebase --no-edit origin dev/kabul"]);
+        pull(&w, "origin", false).unwrap();
         assert!(wp.join("b.txt").exists());
 
         // Conflito com a alvo: main muda a mesma linha.
@@ -514,7 +620,42 @@ mod tests {
         g(wp, &["commit", "-qam", "meu"]);
         let st = status(&r, &w).unwrap();
         assert_eq!((st.behind_target, st.conflicts.clone()), (1, vec!["a.txt".to_string()]));
+
+        // Identidade do git no repo (local) por cima da global.
+        set_identity(&repo, "Dev Kabul", "dev@example.com").unwrap();
+        let id = identity(wp);
+        assert_eq!((id.name.as_str(), id.email.as_str(), id.scope.as_str()), ("Dev Kabul", "dev@example.com", "repo"));
+        set_identity(&repo, "", "").unwrap();
+        assert_eq!(identity(&repo).scope, "global");
+
+        // Remote e branch base vindos das configurações do repo.
+        g(&repo, &["remote", "add", "upstream", origin.to_str().unwrap()]);
+        g(&repo, &["fetch", "-q", "upstream"]);
+        g(&repo, &["push", "-q", "upstream", "main:release"]);
+        g(&repo, &["fetch", "-q", "upstream"]);
+        assert_eq!(remotes(&repo), ["origin", "upstream"]);
+        std::fs::create_dir_all(repo.join(".kabul")).unwrap();
+        std::fs::write(repo.join(".kabul/settings.local.toml"), "remote = \"upstream\"\nbase_branch = \"release\"\n").unwrap();
+        assert_eq!(remote(&r), "upstream");
+        assert_eq!(Store::base_ref(&r), "upstream/release");
+        let w3 = s.create_workspace(&r.id).unwrap();
+        assert_eq!(git(Path::new(&w3.path), &["rev-parse", "HEAD"]).unwrap(), git(&repo, &["rev-parse", "upstream/release"]).unwrap());
+        assert_eq!(target_ref(&r, &w3), "upstream/main");
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn abrir_pr_em_e_checks_obrigatorios() {
+        let u = "https://github.com/dev/demo/pull/7";
+        assert_eq!(pr_open_url("github", u, Some("https://linear.app/x/issue/ENG-1")), u);
+        assert_eq!(pr_open_url("linear", u, Some("https://linear.app/x/issue/ENG-1")), "https://linear.app/x/issue/ENG-1");
+        assert_eq!(pr_open_url("linear", u, None), u);
+        assert_eq!(pr_open_url("graphite", u, None), "https://app.graphite.dev/github/pr/dev/demo/7");
+        let mut c: Vec<Value> = serde_json::from_str(r#"[{"name":"build","bucket":"fail"},{"name":"lint","bucket":"fail"},{"name":"e2e","bucket":"pass"}]"#).unwrap();
+        mark_required(&mut c, &["build".into()]);
+        assert_eq!(c[1]["required"], Value::Bool(false));
+        assert_eq!(blocking_failures(&c, false), ["build"]);
+        assert_eq!(blocking_failures(&c, true), ["build", "lint"]);
     }
 
     #[test]

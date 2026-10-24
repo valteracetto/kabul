@@ -1,3 +1,4 @@
+import { addRepo } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 const WIDTHS = [900, 1280, 1440, 1920, 2560];
@@ -48,9 +49,7 @@ async function setup(page: Page) {
   await page.getByTestId("create-ws").click();
   await expect(page.getByTestId("create-modal")).toBeVisible();
   if (!(await page.getByTestId("repo-pop").isVisible())) await page.getByTestId("create-repo").click();
-  if (!(await page.getByTestId("repo-path").isVisible())) { await page.getByTestId("add-project").click(); }
-  await page.getByTestId("repo-path").fill("/mock/repos/um-repositorio-com-nome-bem-comprido");
-  await page.getByTestId("repo-path").press("Enter");
+  await addRepo(page, "/mock/repos/um-repositorio-com-nome-bem-comprido");
   await expect(page.getByTestId("repo-pop")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.locator('[data-testid^="new-ws-"]').first().click();

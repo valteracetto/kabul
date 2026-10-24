@@ -1,3 +1,4 @@
+import { addRepo } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 const host = (page: Page) => page.locator(".ws-host:not([hidden])");
@@ -5,8 +6,7 @@ const chat = (page: Page) => page.locator(".ws-host:not([hidden]) .center-body:n
 async function setup(page: Page) {
   await page.goto("/?mock");
   await page.getByTestId("create-ws").click();
-  await page.getByTestId("repo-path").fill("/mock/repos/demo");
-  await page.getByTestId("repo-path").press("Enter");
+  await addRepo(page, "/mock/repos/demo");
   await page.getByTestId("create-go").click();
   await expect(page.getByTestId("ws-row")).toHaveCount(1);
 }

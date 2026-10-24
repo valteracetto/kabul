@@ -1,16 +1,52 @@
-//! Leitura read-only do banco do Conductor (`conductor.db`).
-//! Só lê metadados (ids, status, título, modelo, branch); nunca mensagens, prompts ou scripts.
+//! Sessões importadas de outro app de agentes: leitura read-only de um banco SQLite com as tabelas
+//! `repos`, `workspaces` e `sessions`. Só lê metadados (ids, status, título, modelo, branch); nunca
+//! mensagens, prompts ou scripts. O caminho vem de `KABUL_IMPORT_DB`, da configuração ou da detecção.
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-pub fn default_path() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/com.conductor.app/conductor.db"))
+/// Tabelas que identificam um banco compatível.
+const TABLES: [&str; 3] = ["repos", "workspaces", "sessions"];
+
+fn compatible(path: &Path) -> bool {
+    let Ok(c) = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX) else { return false };
+    TABLES.iter().all(|t| c.query_row("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1", [t], |_| Ok(())).is_ok())
+}
+
+/// Pastas de dados de apps do sistema (macOS: Application Support; Windows: %APPDATA%; Linux: ~/.local/share).
+fn app_data_dirs() -> Vec<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let mut v = vec![home.join("Library/Application Support"), home.join(".local/share")];
+    if let Some(a) = std::env::var_os("APPDATA") {
+        v.push(PathBuf::from(a));
+    }
+    v
+}
+
+/// Caminho do banco a importar: `KABUL_IMPORT_DB`, senão o primeiro `*.db` compatível achado
+/// diretamente dentro das pastas de dados de apps (`<app>/<arquivo>.db`).
+pub fn detect() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("KABUL_IMPORT_DB").map(PathBuf::from).filter(|p| p.is_file()) {
+        return Some(p);
+    }
+    for base in app_data_dirs() {
+        let Ok(apps) = std::fs::read_dir(&base) else { continue };
+        for app in apps.flatten().filter(|e| e.path().is_dir()) {
+            let Ok(files) = std::fs::read_dir(app.path()) else { continue };
+            for f in files.flatten() {
+                let p = f.path();
+                if p.extension().and_then(|e| e.to_str()) == Some("db") && compatible(&p) {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ConductorWorkspace {
+pub struct ImportedWorkspace {
     pub id: String,
     pub repo_name: Option<String>,
     pub directory_name: Option<String>,
@@ -21,7 +57,7 @@ pub struct ConductorWorkspace {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ConductorSession {
+pub struct ImportedSession {
     pub id: String,
     pub workspace_id: Option<String>,
     pub status: Option<String>,
@@ -31,11 +67,11 @@ pub struct ConductorSession {
     pub updated_at: Option<String>,
 }
 
-pub struct ConductorDb {
+pub struct SessionImporter {
     conn: Connection,
 }
 
-impl ConductorDb {
+impl SessionImporter {
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
             .with_context(|| format!("abrindo {} read-only", path.display()))?;
@@ -43,11 +79,15 @@ impl ConductorDb {
         Ok(Self { conn })
     }
 
-    pub fn open_default() -> Result<Self> {
-        Self::open(&default_path().context("HOME não definido")?)
+    /// Abre o banco detectado (ou o de `path`, se dado).
+    pub fn open_detected(path: Option<&Path>) -> Result<Self> {
+        match path {
+            Some(p) => Self::open(p),
+            None => Self::open(&detect().context("nenhum banco de sessões para importar foi encontrado")?),
+        }
     }
 
-    pub fn workspaces(&self) -> Result<Vec<ConductorWorkspace>> {
+    pub fn workspaces(&self) -> Result<Vec<ImportedWorkspace>> {
         let mut st = self.conn.prepare(
             "SELECT w.local_id, r.name, w.directory_name, w.workspace_name, w.branch, w.state, w.workspace_path
              FROM workspaces w LEFT JOIN repos r ON r.id = w.repository_id
@@ -55,7 +95,7 @@ impl ConductorDb {
              ORDER BY w.updated_at DESC",
         )?;
         let rows = st.query_map([], |r| {
-            Ok(ConductorWorkspace {
+            Ok(ImportedWorkspace {
                 id: r.get(0)?,
                 repo_name: r.get(1)?,
                 directory_name: r.get(2)?,
@@ -68,14 +108,14 @@ impl ConductorDb {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn sessions(&self) -> Result<Vec<ConductorSession>> {
+    pub fn sessions(&self) -> Result<Vec<ImportedSession>> {
         let mut st = self.conn.prepare(
             "SELECT id, workspace_id, status, title, model, agent_type, updated_at
              FROM sessions WHERE COALESCE(is_hidden,0) = 0
              ORDER BY updated_at DESC",
         )?;
         let rows = st.query_map([], |r| {
-            Ok(ConductorSession {
+            Ok(ImportedSession {
                 id: r.get(0)?,
                 workspace_id: r.get(1)?,
                 status: r.get(2)?,
@@ -111,7 +151,8 @@ mod tests {
             )
             .unwrap();
         }
-        let db = ConductorDb::open(&p).unwrap();
+        assert!(compatible(&p));
+        let db = SessionImporter::open(&p).unwrap();
         let ws = db.workspaces().unwrap();
         assert_eq!(ws.len(), 1);
         assert_eq!(ws[0].repo_name.as_deref(), Some("playground"));

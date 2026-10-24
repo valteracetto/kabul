@@ -115,7 +115,7 @@ impl Workspace {
         format!("kabul-{}", self.name)
     }
 
-    /// Variáveis para scripts e agentes (KABUL_* e, por compatibilidade, CONDUCTOR_*).
+    /// Variáveis para scripts e agentes (KABUL_* e, por compatibilidade, o prefixo legado de `crate::compat`).
     pub fn env(&self, repo: &Repo) -> Vec<(String, String)> {
         let vals = [
             ("WORKSPACE_NAME", self.name.clone()),
@@ -127,7 +127,8 @@ impl Workspace {
             ("PORT", self.port.to_string()),
             ("IS_LOCAL", "1".into()),
         ];
-        vals.iter().flat_map(|(k, v)| [(format!("KABUL_{k}"), v.clone()), (format!("CONDUCTOR_{k}"), v.clone())]).collect()
+        let legacy = crate::compat::legacy_env_prefix();
+        vals.iter().flat_map(|(k, v)| [(format!("KABUL_{k}"), v.clone()), (format!("{legacy}{k}"), v.clone())]).collect()
     }
 
     /// `env()` mais as variáveis do repo (Configurações › Environment, camadas compartilhada e local).
@@ -259,13 +260,16 @@ impl Store {
         self.save()
     }
 
-    /// Ref base para worktree e diff: `origin/<padrão>` se existir, senão `<padrão>`.
+    /// Ref base para worktree e diff: `<remote>/<base>` se existir, senão `<base>`. Base e remote vêm
+    /// de Configurações › Git do repo (padrões: a branch padrão e `origin`).
     pub fn base_ref(repo: &Repo) -> String {
-        let remote = format!("origin/{}", repo.default_branch);
+        let (s, _) = crate::settings::load(Path::new(&repo.path), &repo.default_branch);
+        let base = s.base_branch.filter(|b| !b.trim().is_empty()).unwrap_or_else(|| repo.default_branch.clone());
+        let remote = format!("{}/{base}", s.remote.as_deref().filter(|r| !r.trim().is_empty()).unwrap_or("origin"));
         if git(Path::new(&repo.path), &["rev-parse", "--verify", "-q", &remote]).is_ok() {
             remote
         } else {
-            repo.default_branch.clone()
+            base
         }
     }
 
@@ -359,6 +363,36 @@ impl Store {
     }
 
     /// Renomeia a branch do workspace (`git branch -m`).
+    /// Primeira mensagem: renomeia a branch `<prefixo>/<cidade>` para um slug da mensagem (se o usuário
+    /// não fixou o nome). Com `rename_ws`, o título do workspace acompanha a branch.
+    pub fn auto_branch(&mut self, id: &str, text: &str, rename_ws: bool) -> Result<Option<Workspace>> {
+        let w = self.workspace(id)?.clone();
+        if w.user_set_branch || !(w.branch == w.name || w.branch.ends_with(&format!("/{}", w.name))) {
+            return Ok(None);
+        }
+        let s = slug(text);
+        if s.len() < 3 {
+            return Ok(None);
+        }
+        let prefix = w.branch.rsplit_once('/').map(|(p, _)| p.to_string()).unwrap_or_default();
+        let mut out = self.rename_branch(id, &prefixed(&prefix, &s), false)?;
+        if rename_ws && out.title.is_none() {
+            let t = s.replace('-', " ");
+            let t = t[..1].to_uppercase() + &t[1..];
+            out = self.update_workspace(id, |x| x.title = Some(t))?;
+        }
+        Ok(Some(out))
+    }
+
+    /// Depois do merge: status "done" e, com `archive`, arquiva (apagando a branch se pedido).
+    pub fn after_merge(&mut self, id: &str, archive: bool, delete_branch: bool) -> Result<Workspace> {
+        let w = self.update_workspace(id, |x| x.status = "done".into())?;
+        if archive && !w.archived {
+            return self.archive_workspace_opts(id, delete_branch);
+        }
+        Ok(w)
+    }
+
     pub fn rename_branch(&mut self, id: &str, new: &str, by_user: bool) -> Result<Workspace> {
         let w = self.workspace(id)?.clone();
         let new = new.trim();
@@ -554,7 +588,10 @@ pub fn copy_ignored(repo: &Path, dest: &Path, globs: &[String]) -> Result<u32> {
     let mut patterns: Vec<String> = std::fs::read_to_string(repo.join(".worktreeinclude")).map(|s| s.lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#')).map(String::from).collect()).unwrap_or_default();
     patterns.extend(globs.iter().cloned());
     patterns.push(".env*".into());
-    let pf = std::env::temp_dir().join(format!("kabul-include-{}-{}", std::process::id(), now()));
+    // Nome único por chamada (duas cópias no mesmo segundo não podem dividir o arquivo de padrões).
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let pf = std::env::temp_dir().join(format!("kabul-include-{}-{}-{n}", std::process::id(), now_nanos()));
     std::fs::write(&pf, patterns.join("\n"))?;
     let out = git(repo, &["ls-files", "--others", "--ignored", "--exclude-from", &pf.to_string_lossy()]);
     std::fs::remove_file(&pf).ok();
@@ -703,6 +740,24 @@ pub struct PrOptions {
     /// Só monta os comandos, sem push nem gh.
     #[serde(default)]
     pub dry_run: bool,
+    /// Liga o auto-merge logo depois de criar (Configurações › Git › Automerge).
+    #[serde(default)]
+    pub automerge: bool,
+    /// Método do auto-merge: squash (padrão), merge ou rebase.
+    #[serde(default)]
+    pub merge_method: Option<String>,
+    /// Acrescenta à descrição o link do workspace no Kabul.
+    #[serde(default)]
+    pub workspace_link: bool,
+    /// `git push -u` (padrão) ou sem gravar o upstream.
+    #[serde(default)]
+    pub no_upstream: bool,
+}
+
+/// Rodapé da descrição do PR com o link do workspace (`kabul://workspace?id=…`).
+pub fn pr_body(body: &str, ws: &Workspace) -> String {
+    let link = format!("Criado no Kabul: [workspace {}](kabul://workspace?id={})", ws.title.as_deref().unwrap_or(&ws.name), ws.id);
+    if body.trim().is_empty() { link } else { format!("{}\n\n---\n{link}", body.trim_end()) }
 }
 
 pub fn pr_args(base: &str, o: &PrOptions) -> Vec<String> {
@@ -731,17 +786,33 @@ pub fn create_pr(repo: &Repo, ws: &Workspace, o: &PrOptions) -> Result<PrResult>
         anyhow::ensure!(out.status.success(), "PR #{n} não encontrado: {}", String::from_utf8_lossy(&out.stderr).trim());
         base = String::from_utf8_lossy(&out.stdout).trim().to_string();
     }
-    let args = pr_args(&base, o);
-    let commands = vec!["git push -u origin HEAD".to_string(), format!("gh {}", args.iter().map(|a| crate::harness::shell_quote(a)).collect::<Vec<_>>().join(" "))];
+    let mut o = o.clone();
+    if o.workspace_link {
+        o.body = pr_body(&o.body, ws);
+    }
+    let args = pr_args(&base, &o);
+    let remote = crate::gitops::remote(repo);
+    let push: Vec<&str> = if o.no_upstream { vec!["push", &remote, "HEAD"] } else { vec!["push", "-u", &remote, "HEAD"] };
+    let method = crate::gitops::merge_flag(o.merge_method.as_deref().unwrap_or("squash"));
+    let mut commands = vec![format!("git {}", push.join(" ")), format!("gh {}", args.iter().map(|a| crate::harness::shell_quote(a)).collect::<Vec<_>>().join(" "))];
+    if o.automerge {
+        commands.push(format!("gh pr merge --auto {method}"));
+    }
     if o.dry_run {
         return Ok(PrResult { url: None, commands, dry_run: true });
     }
-    git(p, &["push", "-u", "origin", "HEAD"])?;
+    git(p, &push)?;
     let out = Command::new("gh").args(&args).current_dir(p).output().context("falha ao executar gh")?;
     if !out.status.success() {
         bail!("gh pr create: {}", String::from_utf8_lossy(&out.stderr).trim());
     }
     let text = String::from_utf8_lossy(&out.stdout);
+    if o.automerge {
+        let am = Command::new("gh").args(["pr", "merge", "--auto", method]).current_dir(p).output().context("gh pr merge --auto")?;
+        if !am.status.success() {
+            bail!("PR criado, mas o auto-merge falhou: {}", String::from_utf8_lossy(&am.stderr).trim());
+        }
+    }
     Ok(PrResult { url: Some(crate::harness::find_urls(&text).into_iter().next().unwrap_or_else(|| text.trim().to_string())), commands, dry_run: false })
 }
 
@@ -806,7 +877,8 @@ mod tests {
         assert!(!back.archived);
         assert_eq!(std::fs::read_to_string(Path::new(&w.path).join("a.txt")).unwrap(), "dois\n");
         assert!(Path::new(&w.path).join(".context/nota.md").exists());
-        assert!(w.env(&r).contains(&("CONDUCTOR_PORT".into(), w.port.to_string())));
+        assert!(w.env(&r).contains(&("KABUL_PORT".into(), w.port.to_string())));
+        assert!(w.env(&r).contains(&(format!("{}PORT", crate::compat::legacy_env_prefix()), w.port.to_string())));
         assert_ne!(w.port, w2.port);
         // Arquivar apagando a branch: desarquivar recria a branch no HEAD do checkpoint.
         let head2 = git(Path::new(&w2.path), &["rev-parse", "HEAD"]).unwrap();
@@ -818,6 +890,42 @@ mod tests {
         s.archive_workspace(&w2.id).unwrap();
         assert!(!Path::new(&w2.path).exists());
         assert!(s.workspace(&w2.id).unwrap().archived);
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn primeira_mensagem_merge_e_pr() {
+        let tmp = std::env::temp_dir().join(format!("kabul-store2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let repo = tmp.join("r");
+        std::fs::create_dir_all(&repo).unwrap();
+        let g = |a: &[&str]| assert!(Command::new("git").arg("-C").arg(&repo).args(["-c", "user.name=dev", "-c", "user.email=dev@example.com"]).args(a).output().unwrap().status.success());
+        g(&["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("a"), "a").unwrap();
+        g(&["add", "."]);
+        g(&["commit", "-qm", "i"]);
+        let mut s = Store::open(tmp.join("s.json"), tmp.join("ws"), "dev".into()).unwrap();
+        let r = s.add_repo(&repo).unwrap();
+        // Renomear branch e workspace pela primeira mensagem.
+        let w = s.create_workspace(&r.id).unwrap();
+        let w = s.auto_branch(&w.id, "Corrigir o login no Safari", true).unwrap().unwrap();
+        assert_eq!((w.branch.as_str(), w.title.as_deref()), ("dev/corrigir-o-login-no-safari", Some("Corrigir o login no safari")));
+        assert!(s.auto_branch(&w.id, "outra coisa", true).unwrap().is_none(), "só na primeira");
+        let w2 = s.create_workspace(&r.id).unwrap();
+        let w2 = s.auto_branch(&w2.id, "Exportar PDF", false).unwrap().unwrap();
+        assert_eq!((w2.branch.as_str(), w2.title.as_deref()), ("dev/exportar-pdf", None));
+        // PR em simulação: link do workspace, sem -u, remote e auto-merge.
+        let o = PrOptions { title: "T".into(), body: "corpo".into(), dry_run: true, automerge: true, merge_method: Some("rebase".into()), workspace_link: true, no_upstream: true, ..Default::default() };
+        let res = create_pr(&r, &w, &o).unwrap();
+        assert_eq!(res.commands[0], "git push origin HEAD");
+        assert!(res.commands[1].contains("kabul://workspace?id="), "{}", res.commands[1]);
+        assert_eq!(res.commands[2], "gh pr merge --auto --rebase");
+        assert!(pr_body("", &w).starts_with("Criado no Kabul"));
+        // Depois do merge: concluído; com arquivar, arquiva e apaga a branch.
+        assert_eq!(s.after_merge(&w2.id, false, false).unwrap().status, "done");
+        let a = s.after_merge(&w.id, true, true).unwrap();
+        assert!(a.archived && a.status == "done");
+        assert!(git(&repo, &["rev-parse", "--verify", "-q", "refs/heads/dev/corrigir-o-login-no-safari"]).is_err());
         std::fs::remove_dir_all(&tmp).ok();
     }
 

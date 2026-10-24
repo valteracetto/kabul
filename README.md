@@ -1,19 +1,20 @@
+English · [Português](README.pt-BR.md)
+
 # Kabul
 
-> Em desenvolvimento. README completo em breve.
+Parallel coding agents, each in its own git worktree. Run Claude Code, Codex, Gemini (Antigravity), OpenCode, Qwen Code and local models side by side; switch model or account in the middle of a conversation; review the diff, comment for the agent and ship the pull request; follow every session from your phone.
 
-Orquestrador de agentes de código para desktop (macOS, Windows em seguida):
+- **Workspaces**: one git worktree and branch per task, with reserved ports, setup/run/archive scripts, a terminal and any number of chats.
+- **Any agent**: tool approvals, plan mode, questions, queued messages, forks and resets; model lists come from your accounts.
+- **Review and ship**: split diff with line comments, checks with logs, commit and push, pull, merge, ready for review and archive.
+- **Everything at hand**: command palette (`⌘K`), quick open (`⌘P`), search in files (`⌘⇧F`), sections, statuses and pinned workspaces.
 
-- **O harness certo para cada LLM** — Claude Code, Codex, Gemini (Antigravity), OpenCode, Qwen Code e modelos locais (Ollama, LM Studio, llama.cpp, MLX, vLLM), cada um no harness que tira o melhor dele.
-- **Troque de LLM na mesma conversa e branch** — o contexto passa para o próximo agente.
-- **Trabalhe com um amigo ao mesmo tempo** — e acompanhe tudo pelo celular.
+Documentation: [docs/](docs/index.md) ([guide](docs/guide/quick-start.md)). macOS today; Windows coming soon.
 
-## Rodando do código
-
-```bash
+```sh
 cargo test
-cd apps/web && npm install && npm run e2e
-cd ../desktop && npm install && npx tauri dev
+cd apps/web && npm install && npm run build && npm run e2e
+cd apps/desktop && npx tauri build
 ```
 
-Licença MIT.
+See [Contributing](docs/guide/contributing.md).

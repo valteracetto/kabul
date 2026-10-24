@@ -20,14 +20,14 @@ pub async fn git_status(app: State<'_, App>, workspace_id: String) -> R<GitStatu
 
 #[tauri::command]
 pub async fn git_pull(app: State<'_, App>, workspace_id: String, dry_run: Option<bool>) -> R<Outcome> {
-    let (w, _) = ws_repo(&app, &workspace_id)?;
-    gitops::pull(&w, dry(&app, dry_run)).map_err(e)
+    let (w, r) = ws_repo(&app, &workspace_id)?;
+    gitops::pull(&w, &gitops::remote(&r), dry(&app, dry_run)).map_err(e)
 }
 
 #[tauri::command]
 pub async fn git_push(app: State<'_, App>, workspace_id: String, dry_run: Option<bool>) -> R<Outcome> {
-    let (w, _) = ws_repo(&app, &workspace_id)?;
-    gitops::push(&w, dry(&app, dry_run)).map_err(e)
+    let (w, r) = ws_repo(&app, &workspace_id)?;
+    gitops::push(&w, &gitops::remote(&r), app.app_settings().push_set_upstream, dry(&app, dry_run)).map_err(e)
 }
 
 #[tauri::command]
@@ -67,11 +67,15 @@ pub async fn pr_view(app: State<'_, App>, workspace_id: String) -> R<Option<PrIn
 
 #[tauri::command]
 pub async fn pr_merge(app: State<'_, App>, workspace_id: String, dry_run: Option<bool>) -> R<Outcome> {
-    let (w, _) = ws_repo(&app, &workspace_id)?;
+    let (w, r) = ws_repo(&app, &workspace_id)?;
     let set = app.app_settings();
     let out = gitops::pr_merge(&w, &set.merge_method, false, dry(&app, dry_run)).map_err(e)?;
     if !out.dry_run {
-        let _ = app.store.lock().unwrap().update_workspace(&workspace_id, |x| x.status = "done".into());
+        // "Archive on merge" e "Delete branch on archive": a opção do repo vence a do usuário.
+        let (rs, _) = settings::load(Path::new(&r.path), &r.default_branch);
+        let archive = rs.archive_on_merge.unwrap_or(set.archive_on_merge);
+        let delete = rs.delete_branch_on_archive.unwrap_or(set.delete_branch_on_archive);
+        app.store.lock().unwrap().after_merge(&workspace_id, archive, delete).map_err(e)?;
     }
     Ok(out)
 }
@@ -138,4 +142,69 @@ pub fn repo_update(app: State<App>, id: String, hidden: Option<bool>, icon: Opti
 pub fn repo_env_layers(app: State<App>, repo_id: String) -> R<Vec<(String, BTreeMap<String, String>)>> {
     let r = app.store.lock().unwrap().repo(&repo_id).map_err(e)?.clone();
     Ok(settings::load_layers(Path::new(&r.path), &r.default_branch).into_iter().map(|(n, s)| (n, s.env)).collect())
+}
+
+// ---------------- adicionar projeto: GitHub e início rápido ----------------
+
+fn gh_env(app: &App) -> Vec<(String, String)> {
+    let accs = kabul_core::accounts::Accounts::open(&app.home);
+    kabul_core::accounts::env_for(&accs.default_for("gh"))
+}
+
+#[tauri::command]
+pub async fn gh_repos(app: State<'_, App>) -> R<Vec<kabul_core::clone::GhRepo>> {
+    kabul_core::clone::list_repos(&gh_env(&app), 100).map_err(e)
+}
+
+/// Clona (`owner/repo` ou URL) em `dir`, emitindo `clone-progress` {phase, pct}; adiciona o repo e lembra a pasta.
+#[tauri::command]
+pub async fn repo_clone_to(handle: tauri::AppHandle, app: State<'_, App>, input: String, dir: String) -> R<Repo> {
+    use tauri::Emitter;
+    let env = gh_env(&app);
+    let base = kabul_core::clone::expand_home(&dir);
+    let dest = kabul_core::clone::clone(&input, &base, &env, |phase, pct| {
+        let _ = handle.emit("clone-progress", serde_json::json!({ "phase": phase, "pct": pct }));
+    })
+    .map_err(e)?;
+    let mut set = app.app_settings();
+    set.clone_dir = dir;
+    let _ = set.save(&app.file("app-settings.json"));
+    app.store.lock().unwrap().add_repo(&dest).map_err(e)
+}
+
+#[tauri::command]
+pub async fn repo_quick_start(app: State<'_, App>, name: String, dir: String) -> R<Repo> {
+    let dest = kabul_core::clone::quick_start(&kabul_core::clone::expand_home(&dir), &name).map_err(e)?;
+    let mut set = app.app_settings();
+    set.clone_dir = dir;
+    let _ = set.save(&app.file("app-settings.json"));
+    app.store.lock().unwrap().add_repo(&dest).map_err(e)
+}
+
+// ---------------- Configurações › Git ----------------
+
+#[tauri::command]
+pub fn git_identity(app: State<App>, repo_id: String) -> R<gitops::Identity> {
+    let r = app.store.lock().unwrap().repo(&repo_id).map_err(e)?.clone();
+    Ok(gitops::identity(Path::new(&r.path)))
+}
+
+#[tauri::command]
+pub fn git_identity_set(app: State<App>, repo_id: String, name: String, email: String) -> R<gitops::Identity> {
+    let r = app.store.lock().unwrap().repo(&repo_id).map_err(e)?.clone();
+    gitops::set_identity(Path::new(&r.path), &name, &email).map_err(e)?;
+    Ok(gitops::identity(Path::new(&r.path)))
+}
+
+#[tauri::command]
+pub fn repo_remotes(app: State<App>, repo_id: String) -> R<Vec<String>> {
+    let r = app.store.lock().unwrap().repo(&repo_id).map_err(e)?.clone();
+    Ok(gitops::remotes(Path::new(&r.path)))
+}
+
+/// URL para "Abrir PR" (⌘⇧G) conforme "Abrir PRs em" (GitHub, Linear ou Graphite).
+#[tauri::command]
+pub fn pr_open_url(app: State<App>, workspace_id: String, pr_url: String) -> R<String> {
+    let (w, _) = ws_repo(&app, &workspace_id)?;
+    Ok(gitops::pr_open_url(&app.app_settings().open_prs_in, &pr_url, w.linear.as_ref().map(|l| l.url.as_str())))
 }

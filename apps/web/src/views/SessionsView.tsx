@@ -15,7 +15,7 @@ export function SessionsView({ onError }: { onError: (e: string) => void }) {
   }, []);
 
   const wsName = (id: string | null) => {
-    const w = s?.conductor_workspaces.find((w) => w.id === id);
+    const w = s?.imported_workspaces.find((w) => w.id === id);
     return w ? `${w.repo_name ?? "?"} / ${w.directory_name ?? "?"}` : "—";
   };
 
@@ -56,12 +56,12 @@ export function SessionsView({ onError }: { onError: (e: string) => void }) {
         </tbody>
       </table>
 
-      <h3>Conductor <span className="count">{s?.conductor_sessions.length ?? 0}</span></h3>
-      {s?.conductor_error && <div className="dim">indisponível: {s.conductor_error}</div>}
+      <h3>Sessões importadas <span className="count">{s?.imported_sessions.length ?? 0}</span></h3>
+      {s?.imported_error && <div className="dim">indisponível: {s.imported_error}</div>}
       <table>
         <thead><tr><th>status</th><th>agente</th><th>modelo</th><th>título</th><th>workspace</th></tr></thead>
         <tbody>
-          {s?.conductor_sessions.slice(0, 200).map((c) => (
+          {s?.imported_sessions.slice(0, 200).map((c) => (
             <tr key={c.id}>
               <td><span className={"status " + (c.status ?? "")}><i />{c.status ?? "—"}</span></td>
               <td><span className={"agent ag-" + (c.agent_type ?? "claude")}>{c.agent_type ?? "claude"}</span></td>

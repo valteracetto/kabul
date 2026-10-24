@@ -1,81 +1,56 @@
 import { confirmDialog } from "../components/Confirm";
+import { RemotePanel } from "../components/RemotePanel";
 import { noSuggest } from "../noSuggest";
 import { useEffect, useState } from "react";
-import { api, HARNESS_LABEL, type AppSettings, type AuthStatus, type HarnessKind, type Layer, type Repo, type RepoSettingsT } from "../api";
+import { api, HARNESS_LABEL, type AuthStatus, type HarnessKind, type Layer, type Repo, type RepoSettingsT } from "../api";
 import type { Route } from "../App";
 import { AccountsPanel } from "../components/Accounts";
-import { getThemePref, setThemePref, type ThemePref } from "../theme";
-import { IMonitor, IMoon, ISun } from "../icons";
+import { GitSettings } from "./SettingsGit";
+import { CATEGORIES, lang, SHORTCUTS, t, type Key } from "../i18n";
+import { ActionsPage, AdvancedPage, AppearancePage, EnvironmentPage, GeneralPage, MiscPage, ModelsPage } from "./SettingsPages";
+import { activeMachine, machines, normalizeUrl, saveMachines, switchMachine, type Machine } from "../components/machines";
 
-const TABS: [string, string][] = [["geral", "Geral"], ["aparencia", "Aparência"], ["contas", "Contas"], ["integracoes", "Integrações"], ["repo", "Repositório"], ["atalhos", "Atalhos"]];
+/** Navegação das configurações, por grupo (pessoal, ambiente, repositório, mais). */
+const GROUPS: [string, [string, string][]][] = [
+  [t("settings.group.personal"), [["geral", "Geral"], ["contas", "Contas"], ["aparencia", "Aparência"], ["modelos", "Modelos"], ["git", "Git"], ["integracoes", "Integrações"]]],
+  [t("settings.group.env"), [["ambiente", "Ambiente"]]],
+  [t("settings.group.repo"), [["repo", "Scripts"], ["acoes", "Ações"], ["diversos", "Diversos"]]],
+  [t("settings.group.more"), [["remoto", "Máquinas"], ["celular", "Celular e remoto"], ["avancado", "Avançado"], ["atalhos", "Atalhos"]]],
+];
 
 export function SettingsView({ tab, repoId, repos, onError, onRoute }: { tab: string; repoId?: string; repos: Repo[]; onError: (e: string) => void; onRoute: (r: Route) => void }) {
+  const title = GROUPS.flatMap(([, t]) => t).find(([k]) => k === tab)?.[1] ?? "Configurações";
   return (
-    <section className="page" data-testid="settings-page">
-      <header className="page-head" data-tauri-drag-region><h2>Configurações</h2></header>
-      <div className="seg">
-        {TABS.map(([k, v]) => <button key={k} className={"rtab" + (tab === k ? " on" : "")} onClick={() => onRoute({ kind: "settings", tab: k, repoId })}>{v}</button>)}
+    <section className="page settings-page" data-testid="settings-page">
+      <header className="page-head" data-tauri-drag-region><h2>{t("settings.title")}</h2></header>
+      <div className="settings-layout">
+        <nav className="settings-nav" data-testid="settings-nav">
+          {GROUPS.map(([g, tabs]) => (
+            <div key={g} className="settings-nav-group">
+              <div className="settings-nav-title">{g}</div>
+              {tabs.map(([k, v]) => <button key={k} className={"settings-nav-item" + (tab === k ? " on" : "")} onClick={() => onRoute({ kind: "settings", tab: k, repoId })} data-testid={`set-tab-${k}`}>{v}</button>)}
+            </div>
+          ))}
+        </nav>
+        <div className="settings-body">
+          <h3 className="settings-title">{title}</h3>
+          {tab === "geral" && <GeneralPage onError={onError} />}
+          {tab === "aparencia" && <AppearancePage />}
+          {tab === "modelos" && <ModelsPage onError={onError} />}
+          {tab === "ambiente" && <EnvironmentPage repos={repos} onError={onError} />}
+          {tab === "acoes" && <ActionsPage repos={repos} repoId={repoId} onError={onError} onRoute={onRoute} />}
+          {tab === "diversos" && <MiscPage repos={repos} repoId={repoId} onError={onError} onRoute={onRoute} onChange={() => window.dispatchEvent(new Event("kabul:reload"))} />}
+          {tab === "avancado" && <AdvancedPage onError={onError} />}
+          {tab === "contas" && <><GitHub onError={onError} /><Accounts onError={onError} /><h3>Várias contas por provedor</h3><AccountsPanel onError={onError} /></>}
+          {tab === "git" && <GitSettings repos={repos} onError={onError} />}
+          {tab === "integracoes" && <Integrations onError={onError} />}
+          {tab === "repo" && <RepoSettings repos={repos} repoId={repoId ?? repos[0]?.id} onError={onError} onRoute={onRoute} />}
+          {tab === "remoto" && <Machines />}
+          {tab === "celular" && <RemotePanel onError={onError} />}
+          {tab === "atalhos" && <Shortcuts />}
+        </div>
       </div>
-      {tab === "geral" && <General onError={onError} />}
-      {tab === "aparencia" && <Appearance />}
-      {tab === "contas" && <><GitHub onError={onError} /><Accounts onError={onError} /><h3>Várias contas por provedor</h3><AccountsPanel onError={onError} /></>}
-      {tab === "integracoes" && <Integrations onError={onError} />}
-      {tab === "repo" && <RepoSettings repos={repos} repoId={repoId ?? repos[0]?.id} onError={onError} onRoute={onRoute} />}
-      {tab === "atalhos" && <Shortcuts />}
     </section>
-  );
-}
-
-function General({ onError }: { onError: (e: string) => void }) {
-  const [s, setS] = useState<AppSettings | null>(null);
-  const [saved, setSaved] = useState(false);
-  useEffect(() => void api.appSettings().then(setS, (e) => onError(String(e))), [onError]);
-  if (!s) return null;
-  const save = (n: AppSettings) => {
-    setS(n);
-    api.saveAppSettings(n).then(() => (setSaved(true), setTimeout(() => setSaved(false), 1200)), (e) => onError(String(e)));
-  };
-  const Toggle = ({ k, label, hint }: { k: keyof AppSettings; label: string; hint: string }) => (
-    <div className="set-row"><div><div>{label}</div><div className="dim small">{hint}</div></div><span className={"toggle" + (s[k] ? " on" : "")} onClick={() => save({ ...s, [k]: !s[k] })}><span /></span></div>
-  );
-  return (
-    <div className="set-group">
-      <div className="set-row">
-        <div><div>Prefixo da branch</div><div className="dim small">Workspaces nascem em &lt;prefixo&gt;/&lt;cidade&gt;</div></div>
-        <div className="row">
-          <select value={s.branch_prefix_type} onChange={(e) => save({ ...s, branch_prefix_type: e.target.value })}>
-            <option value="github">usuário do GitHub (padrão)</option><option value="user">usuário do Mac</option><option value="custom">personalizado</option>
-          </select>
-          {s.branch_prefix_type === "custom" && <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={s.branch_prefix_custom} onChange={(e) => setS({ ...s, branch_prefix_custom: e.target.value })} onBlur={() => save(s)} placeholder="ex.: feat" />}
-        </div>
-      </div>
-      <div className="set-row"><div><div>Enviar mensagem com</div><div className="dim small">⇧↵ sempre quebra a linha</div></div>
-        <select defaultValue={localStorage.getItem("kabul.sendKey") ?? "enter"} onChange={(e) => localStorage.setItem("kabul.sendKey", e.target.value)} data-testid="send-key"><option value="enter">↵</option><option value="cmdEnter">⌘↵</option></select></div>
-      <div className="set-row"><div><div>Mensagem enviada com o agente trabalhando</div><div className="dim small">Fila: espera o turno acabar. Redirecionar: entra no turno em andamento.</div></div>
-        <select defaultValue={localStorage.getItem("kabul.followUp") ?? "queue"} onChange={(e) => localStorage.setItem("kabul.followUp", e.target.value)} data-testid="follow-up"><option value="queue">Fila</option><option value="steer">Redirecionar</option></select></div>
-      <div className="set-row"><div><div>Não recolher os passos do agente (⌃O)</div><div className="dim small">Mostra todas as ferramentas e mensagens intermediárias</div></div>
-        <select defaultValue={localStorage.getItem("kabul.noCollapse") ?? "0"} onChange={(e) => localStorage.setItem("kabul.noCollapse", e.target.value)}><option value="0">recolher</option><option value="1">mostrar tudo</option></select></div>
-      <div className="set-row"><div><div>Abrir workspace em (⌘O)</div><div className="dim small">⌘⇧O abre a lista de apps</div></div>
-        <select defaultValue={localStorage.getItem("kabul.openIn.default") ?? ""} onChange={(e) => localStorage.setItem("kabul.openIn.default", e.target.value)} data-testid="open-default"><option value="">o último usado</option><option value="finder">Finder</option><option value="vscode">VS Code</option><option value="cursor">Cursor</option><option value="zed">Zed</option><option value="terminal">Terminal</option><option value="iterm">iTerm</option><option value="warp">Warp</option><option value="ghostty">Ghostty</option></select></div>
-      <Toggle k="auto_rename_branch" label="Renomear a branch pela primeira mensagem" hint="Só enquanto ela tiver o nome da cidade e você não tiver renomeado" />
-      <Toggle k="notifications" label="Notificações" hint="Quando um agente termina ou pede permissão com o app em segundo plano" />
-      <Toggle k="sound" label="Som nas notificações" hint="" />
-      <Toggle k="caffeinate" label="Manter o Mac acordado com agentes rodando" hint="Usa caffeinate enquanto houver uma sessão ativa" />
-      <h3>Variáveis de ambiente</h3>
-      <p className="dim small">Passadas aos agentes. Escopo “all” ou um agente (claude, codex, opencode, qwen, gemini, agy). Ex.: ANTHROPIC_BASE_URL, CLAUDE_CODE_USE_BEDROCK.</p>
-      {s.env.map((v, i) => (
-        <div key={i} className="row env-row">
-          <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={v.key} placeholder="CHAVE" onChange={(e) => setS({ ...s, env: s.env.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)) })} onBlur={() => save(s)} />
-          <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={v.value} placeholder="valor" type="password" onChange={(e) => setS({ ...s, env: s.env.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })} onBlur={() => save(s)} />
-          <select value={v.scope} onChange={(e) => save({ ...s, env: s.env.map((x, j) => (j === i ? { ...x, scope: e.target.value } : x)) })}>
-            {["all", "claude", "codex", "opencode", "qwen", "gemini", "agy"].map((o) => <option key={o}>{o}</option>)}
-          </select>
-          <button className="btn" onClick={() => save({ ...s, env: s.env.filter((_, j) => j !== i) })}>Remover</button>
-        </div>
-      ))}
-      <button className="btn" onClick={() => setS({ ...s, env: [...s.env, { key: "", value: "", scope: "all" }] })}>Adicionar variável</button>
-      {saved && <span className="ok small"> salvo</span>}
-    </div>
   );
 }
 
@@ -156,7 +131,7 @@ function RepoSettings({ repos, repoId, onError, onRoute }: { repos: Repo[]; repo
       {s && (
         <>
           <h3>Scripts (salvos em settings.local.toml)</h3>
-          <label className="field">Setup <span className="dim small">roda ao criar o workspace, com KABUL_*/CONDUCTOR_* e KABUL_PORT</span><input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={s.scripts.setup ?? ""} onChange={(e) => setS({ ...s, scripts: { ...s.scripts, setup: e.target.value || null } })} placeholder="ex.: npm install && cp ../.env ." /></label>
+          <label className="field">Setup <span className="dim small">roda ao criar o workspace, com as variáveis KABUL_* (KABUL_PORT, KABUL_WORKSPACE_PATH…)</span><input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={s.scripts.setup ?? ""} onChange={(e) => setS({ ...s, scripts: { ...s.scripts, setup: e.target.value || null } })} placeholder="ex.: npm install && cp ../.env ." /></label>
           <label className="field">Archive <span className="dim small">roda antes de arquivar</span><input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={s.scripts.archive ?? ""} onChange={(e) => setS({ ...s, scripts: { ...s.scripts, archive: e.target.value || null } })} placeholder="ex.: docker compose down" /></label>
           <label className="field">Modo dos run scripts<select value={s.scripts.run_mode ?? "concurrent"} onChange={(e) => setS({ ...s, scripts: { ...s.scripts, run_mode: e.target.value } })}><option value="concurrent">concorrente</option><option value="nonconcurrent">um por vez</option></select></label>
           <div className="field">Run scripts</div>
@@ -181,32 +156,24 @@ function RepoSettings({ repos, repoId, onError, onRoute }: { repos: Repo[]; repo
   );
 }
 
-const SHORTCUTS: [string, string][] = [
-  ["⌘K", "Buscar workspaces, páginas e conversas"], ["⌘N", "Novo workspace no repositório atual"], ["⌘1 … ⌘9", "Ir para o workspace"], ["⌘B", "Mostrar/ocultar barra lateral"],
-  ["⌘,", "Configurações"], ["⌘/", "Abrir o seletor de modelo"], ["⌘⌥/", "Atalhos de teclado"], ["⌃⇧D", "Ditado"], ["⌘⇧⌫", "Parar o agente"], ["⌃O", "Recolher/mostrar passos do agente"], ["⌘⌥↵", "Fork da conversa para nova aba"], ["⌘⌥C", "Copiar transcript"], ["⌘⇧↵", "Aprovar o plano"], ["⌫ (campo vazio)", "Negar pedido de permissão"], ["⌥⌘T", "Alternar tema (escuro, claro, sistema)"], ["⌘[ / ⌘]", "Voltar / avançar"], ["⌥⌘B", "Mostrar/ocultar painel direito"], ["⌘O", "Abrir o workspace no Finder"], ["⌘T", "Nova conversa no workspace"], ["⌘W", "Fechar aba"], ["⌘⇧[ / ⌘⇧]", "Aba anterior / próxima"],
-  ["⌘J", "Mostrar/ocultar terminal"], ["⌘⇧P", "Criar PR"], ["↵", "Enviar (com o agente ocupado, enfileira)"], ["⇧↵", "Nova linha"], ["⌘↵", "Aprovar pedido pendente (campo vazio)"],
-  ["Esc", "Interromper o agente"], ["⇧⇥", "Plan mode"], ["⌘L", "Focar o campo de mensagem"], ["⌘U", "Anexar arquivo"], 
-  ["⌃⌘1 … 9", "Modelo favorito"], ["⌘⇧E", "Modo rápido"], ["⌘⇧/", "Alternar esforço"], ["@", "Mencionar arquivo"], ["/", "Comandos"],
-];
-
+/** Atalhos: tabela gerada do registro único (`i18n/shortcuts.json`), com busca. */
 function Shortcuts() {
-  return <table className="shortcuts"><tbody>{SHORTCUTS.map(([k, d]) => <tr key={k}><td><kbd>{k}</kbd></td><td>{d}</td></tr>)}</tbody></table>;
-}
-
-function Appearance() {
-  const [p, setP] = useState<ThemePref>(getThemePref());
-  const opts: [ThemePref, string, React.ReactNode][] = [["light", "Claro", <ISun size={18} />], ["dark", "Escuro", <IMoon size={18} />], ["system", "Sistema", <IMonitor size={18} />]];
+  const [q, setQ] = useState("");
+  const n = q.toLowerCase();
+  const rows = SHORTCUTS.filter((x) => !n || `${x.keys} ${x[lang()]}`.toLowerCase().includes(n));
   return (
-    <div className="set-group">
-      <div className="dim small">Tema da interface. “Sistema” segue a aparência do macOS. Atalho: ⌥⌘T alterna; também em ⌘K.</div>
-      <div className="theme-cards" data-testid="theme-cards">
-        {opts.map(([k, label, icon]) => (
-          <button key={k} className={"theme-card t-" + k + (p === k ? " on" : "")} onClick={() => (setThemePref(k), setP(k))}>
-            <span className="theme-preview"><span /><span /><span /></span>
-            <span className="row">{icon} {label}</span>
-          </button>
-        ))}
-      </div>
+    <div data-testid="shortcuts">
+      <input {...noSuggest} autoComplete="off" autoFocus placeholder={t("shortcuts.search")} value={q} onChange={(e) => setQ(e.target.value)} data-testid="shortcuts-search" style={{ width: "100%", marginBottom: 10 }} />
+      {CATEGORIES.map((c) => {
+        const list = rows.filter((x) => x.cat === c);
+        return list.length ? (
+          <div key={c}>
+            <h3>{t(`cat.${c}` as Key)}</h3>
+            <table className="shortcuts"><tbody>{list.map((x) => <tr key={x.id}><td><kbd>{x.keys}</kbd></td><td>{x[lang()]}</td></tr>)}</tbody></table>
+          </div>
+        ) : null;
+      })}
+      {rows.length === 0 && <div className="dim">Nenhum atalho para “{q}”.</div>}
     </div>
   );
 }
@@ -305,6 +272,33 @@ function GitHub({ onError }: { onError: (e: string) => void }) {
       <div className="row" style={{ width: "100%" }}>
         <input type="password" placeholder={tokenSet ? "Token pessoal salvo no Keychain" : "Personal access token (opcional)"} value={token} onChange={(e) => setToken(e.target.value)} style={{ flex: 1 }} />
         {token ? <button className="btn primary" onClick={() => api.githubToken(token).then(() => (setToken(""), load()), (e) => onError(String(e)))} data-testid="gh-token-save">Salvar token</button> : tokenSet && <button className="btn" onClick={() => api.githubToken(null).then(load)}>Remover token</button>}
+      </div>
+    </div>
+  );
+}
+
+/** Outras máquinas com kabuld (via Tailscale). O servidor remoto vem no bloco do celular; aqui fica a lista. */
+function Machines() {
+  const [list, setList] = useState<Machine[]>(machines);
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const save = (l: Machine[]) => (saveMachines(l), setList(l));
+  return (
+    <div className="set-group" data-testid="machines">
+      <p className="dim small">Cada máquina roda o <code>kabuld</code> e aparece no seletor do topo da barra lateral (⌃1…⌃9). Use o endereço do Tailscale, por exemplo <code>mac-de-dev.tailnet.ts.net:7777</code>. Trocar de máquina troca a fonte de repositórios e workspaces.</p>
+      <div className="set-row"><div><div>Este Mac</div><div className="dim small">backend local</div></div>{activeMachine() === "local" ? <span className="badge ok">ativa</span> : <button className="btn" onClick={() => switchMachine("local")}>Usar</button>}</div>
+      {list.map((m) => (
+        <div key={m.id} className="set-row" data-testid="machine-item">
+          <div><div>{m.name}</div><div className="dim small"><code>{m.url}</code></div></div>
+          <div className="row">{activeMachine() === m.id ? <span className="badge ok">ativa</span> : <button className="btn" onClick={() => switchMachine(m.id)}>Usar</button>}<button className="btn" onClick={() => save(list.filter((x) => x.id !== m.id))}>Remover</button></div>
+        </div>
+      ))}
+      {list.length === 0 && <div className="dim small" data-testid="machines-empty">Nenhuma outra máquina ainda.</div>}
+      <h3>Adicionar máquina</h3>
+      <div className="row env-row">
+        <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} placeholder="Nome (ex.: Mac do escritório)" value={name} onChange={(e) => setName(e.target.value)} data-testid="machine-name" />
+        <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} placeholder="Endereço (host:porta ou ws://…)" value={url} onChange={(e) => setUrl(e.target.value)} data-testid="machine-url" />
+        <button className="btn primary" disabled={!name.trim() || !url.trim()} onClick={() => (save([...list, { id: `m${Date.now().toString(36)}`, name: name.trim(), url: normalizeUrl(url) }]), setName(""), setUrl(""))} data-testid="machine-save">Adicionar</button>
       </div>
     </div>
   );

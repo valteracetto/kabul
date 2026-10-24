@@ -7,12 +7,18 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:kabuld": "playwright test -c playwright.kabuld.config.ts",
+    "docs:shortcuts": "node scripts/gen-shortcuts-doc.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-search": "^0.15.0",
     "@xterm/xterm": "^5.5.0",
+    "geist": "^1.8.2",
+    "katex": "^0.16.47",
+    "mermaid": "^11.17.2",
     "react": "^19",
     "react-dom": "^19"
   },

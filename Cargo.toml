@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/kabul-core", "crates/kabul-cli", "apps/desktop/src-tauri"]
+members = ["crates/kabul-core", "crates/kabul-cli", "crates/kabuld", "apps/desktop/src-tauri"]
 
 [workspace.package]
 edition = "2021"

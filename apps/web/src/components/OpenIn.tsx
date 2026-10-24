@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useDismiss } from "./useDismiss";
 import { api, type OpenTarget } from "../api";
 import { IChevronDown, ICopy } from "../icons";
 
@@ -46,13 +47,12 @@ export function OpenIn({ path, onError }: { path: string; onError: (e: string) =
       } else if (open && /^[1-9]$/.test(e.key) && items[Number(e.key) - 1]) {
         e.preventDefault();
         run(items[Number(e.key) - 1]);
-      } else if (open && e.key === "Escape") setOpen(false);
+      }
     };
-    const close = (e: MouseEvent) => open && !root.current?.contains(e.target as Node) && setOpen(false);
     window.addEventListener("keydown", h);
-    document.addEventListener("mousedown", close);
-    return () => (window.removeEventListener("keydown", h), document.removeEventListener("mousedown", close));
+    return () => window.removeEventListener("keydown", h);
   }, [open, items.join(), path]);
+  useDismiss(root, open, useCallback(() => setOpen(false), []));
 
   const lastT = targets.find((t) => t.id === last) ?? targets[0];
   return (

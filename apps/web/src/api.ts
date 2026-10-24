@@ -3,17 +3,30 @@ import { transport } from "./transport";
 export type HarnessKind = "claude" | "codex" | "antigravity" | "opencode" | "qwen" | "gemini";
 export type Api = "openai" | "anthropic" | "gemini";
 
-export interface Repo { id: string; name: string; path: string; default_branch: string }
+export interface Repo { id: string; name: string; path: string; default_branch: string; hidden?: boolean; icon?: string | null }
 export interface Workspace {
   id: string; repo_id: string; name: string; branch: string; path: string; archived: boolean; created_at: number;
   title: string | null; status: string; state: string; pinned: boolean; notes: string; port: number;
   target_branch: string | null; pr_url: string | null; archive_checkpoint: string | null; user_set_branch: boolean; files_copied: number; linear?: LinearLink | null;
+  unread?: boolean; section?: string | null; pin_order?: number | null;
 }
+export interface Section { id: string; name: string; emoji: string; order: number }
+export interface GitStatus { branch: string; target: string; upstream: string | null; dirty: number; ahead: number; behind: number; behind_target: number; conflicts: string[] }
+export interface Outcome { ok: boolean; dry_run: boolean; commands: string[]; output: string }
+export interface PrComment { author: string; body: string; url: string | null; path: string | null; line: number | null; kind: "comment" | "review" | "inline"; state: string | null }
+export interface PrInfo { number: number; title: string; body: string; url: string; state: string; is_draft: boolean; mergeable: string; merge_state: string; review_decision: string; head: string; base: string; comments: PrComment[] }
+export interface MachineInfo { name: string; user: { login: string; email: string | null; avatar: string | null } | null }
+export interface GitIdentity { name: string; email: string; scope: "repo" | "global"; global_name: string; global_email: string }
+export interface Diagnostics { checks: { group: string; name: string; ok: boolean; detail: string }[]; report: string; redacted: string }
+export interface GhRepo { name_with_owner: string; owner: string; private: boolean; updated_at: string; url: string; description: string | null; avatar: string }
+export interface GrepHit { path: string; line: number; text: string }
+export type DiffScope = "all" | "branch" | "uncommitted";
+export interface Prompts { general: string | null; review: string | null; create_pr: string | null; fix_errors: string | null; resolve_conflicts: string | null; branch_rename: string | null }
 export interface Pane { session: string; window_index: number; pane_index: number; pane_id: string; pid: number; command: string; path: string; active: boolean; title: string }
 export interface TmuxSession extends Pane { agent: string }
-export interface ConductorSession { id: string; workspace_id: string | null; status: string | null; title: string | null; model: string | null; agent_type: string | null; updated_at: string | null }
-export interface ConductorWorkspace { id: string; repo_name: string | null; directory_name: string | null; branch: string | null; state: string | null; path: string | null }
-export interface Sessions { tmux: TmuxSession[]; conductor_workspaces: ConductorWorkspace[]; conductor_sessions: ConductorSession[]; conductor_error: string | null }
+export interface ImportedSession { id: string; workspace_id: string | null; status: string | null; title: string | null; model: string | null; agent_type: string | null; updated_at: string | null }
+export interface ImportedWorkspace { id: string; repo_name: string | null; directory_name: string | null; branch: string | null; state: string | null; path: string | null }
+export interface Sessions { tmux: TmuxSession[]; imported_workspaces: ImportedWorkspace[]; imported_sessions: ImportedSession[]; imported_error: string | null }
 export interface AuthStatus { kind: HarnessKind; logged_in: boolean; source: string; method: string | null; error: string | null; installed: boolean }
 export interface LocalRef { source: string; source_name: string; model: string; family: string; note: string; missing: HarnessKind[]; size_bytes: number | null; quant: string | null; fits: boolean | null }
 export interface Model { key: string; harness: HarnessKind; id: string; label: string; provider: string; efforts: string[]; effort_in_id: boolean; local: LocalRef | null; context: number | null }
@@ -22,7 +35,7 @@ export interface Diff { base: string; base_ref: string; stat: string; patch: str
 export interface DiffComment { id: string; workspace_id: string; path: string; line: number; end_line: number | null; body: string; resolved: boolean; created_at: number }
 export interface Checkpoint { id: string; commit: string; head: string; message: string; created_at: number }
 export interface RunScript { command: string; default: boolean; icon: string | null; available_in: string[] | null }
-export interface RepoSettingsT { scripts: { setup: string | null; archive: string | null; run_mode: string | null; run: Record<string, RunScript> }; file_include_globs: string[]; target_branch: string | null }
+export interface RepoSettingsT { scripts: { setup: string | null; archive: string | null; run_mode: string | null; run: Record<string, RunScript> }; file_include_globs: string[]; target_branch: string | null; base_branch?: string | null; remote?: string | null; delete_branch_on_archive?: boolean | null; archive_on_merge?: boolean | null; env?: Record<string, string>; prompts?: Prompts; preview_url?: string | null }
 export interface Layer { name: string; path: string; found: boolean }
 export interface PrOptions { title: string; body: string; draft: boolean; labels: string[]; stack_on: number | null; dry_run: boolean }
 export interface PrResult { url: string | null; commands: string[]; dry_run: boolean }
@@ -31,7 +44,13 @@ export interface SourceStatus { id: string; name: string; kind: string; base_url
 export interface LocalOverview { sources: SourceStatus[]; memory: number | null; harnesses: [HarnessKind, boolean, string][] }
 export interface CustomEndpoint { id: string; name: string; base_url: string; apis: Api[]; api_key: string | null }
 export interface EnvVar { key: string; value: string; scope: string }
-export interface AppSettings { branch_prefix_type: string; branch_prefix_custom: string; notifications: boolean; sound: boolean; caffeinate: boolean; auto_rename_branch: boolean; env: EnvVar[] }
+export interface AppSettings {
+  branch_prefix_type: string; branch_prefix_custom: string; notifications: boolean; sound: boolean; caffeinate: boolean; auto_rename_branch: boolean; env: EnvVar[]; env_file?: string | null;
+  completion_sound?: string; always_show_context?: boolean; auto_convert_long_text?: boolean; not_absolutely_right?: boolean;
+  open_prs_in?: string; delete_branch_on_archive?: boolean; archive_on_merge?: boolean; rename_ws_on_branch?: boolean; merge_method?: string; github_dry_run?: boolean; pr_include_workspace_link?: boolean; automerge?: boolean; optional_checks_blocking?: boolean; push_set_upstream?: boolean; stacked_prs?: boolean;
+  claude_output_style?: string; codex_personality?: string; review_model?: string | null; default_plan?: boolean;
+  clone_dir?: string; claude_path?: string | null; codex_path?: string | null; opencode_path?: string | null; scrollback_mb?: number;
+}
 export interface SessionSummary { id: string; title: string; model_key: string | null; updated_at: number }
 export interface SessionRecord { id: string; workspace_id: string; title: string; model_key: string | null; agent_session: string | null; updated_at: number; items: unknown }
 export interface ChatStarted { chat_id: string; harness: HarnessKind; approvals: boolean; note: string | null }
@@ -76,16 +95,47 @@ export const api = {
 
   workspaces: () => c<Workspace[]>("workspaces_list"),
   createWorkspace: (repoId: string) => c<Workspace>("workspace_create", { repoId }),
-  updateWorkspace: (id: string, patch: Partial<Pick<Workspace, "title" | "status" | "pinned" | "notes" | "target_branch">>) => c<Workspace>("workspace_update", { id, patch }),
+  updateWorkspace: (id: string, patch: Partial<Pick<Workspace, "title" | "status" | "pinned" | "notes" | "target_branch" | "unread" | "pin_order">> & { section?: string }) => c<Workspace>("workspace_update", { id, patch }),
   renameBranch: (id: string, name: string) => c<Workspace>("workspace_rename_branch", { id, name, byUser: true }),
   autoBranch: (workspaceId: string, text: string) => c<Workspace | null>("workspace_auto_branch", { workspaceId, text }),
-  archiveWorkspace: (id: string) => c<void>("workspace_archive", { id }),
+  archiveWorkspace: (id: string, closePr = false) => c<void>("workspace_archive", { id, closePr }),
   unarchiveWorkspace: (id: string) => c<Workspace>("workspace_unarchive", { id }),
   onWorkspaceState: (h: (p: { id: string; state: string }) => void) => transport.subscribe("workspace-state", h),
 
   diff: (workspaceId: string) => c<Diff>("workspace_diff", { workspaceId }),
-  changes: (workspaceId: string) => c<FileChange[]>("workspace_changes", { workspaceId }),
-  fileDiff: (workspaceId: string, path: string) => c<string>("workspace_file_diff", { workspaceId, path }),
+  changes: (workspaceId: string, scope: DiffScope = "all") => c<FileChange[]>("workspace_changes", { workspaceId, scope }),
+  fileDiff: (workspaceId: string, path: string, scope: DiffScope = "all", ignoreWs = false) => c<string>("workspace_file_diff", { workspaceId, path, scope, ignoreWs }),
+  gitStatus: (workspaceId: string) => c<GitStatus>("git_status", { workspaceId }),
+  gitPull: (workspaceId: string) => c<Outcome>("git_pull", { workspaceId }),
+  gitPush: (workspaceId: string) => c<Outcome>("git_push", { workspaceId }),
+  discard: (workspaceId: string, path: string) => c<void>("workspace_discard", { workspaceId, path }),
+  grep: (workspaceId: string, query: string) => c<GrepHit[]>("workspace_grep", { workspaceId, query }),
+  prView: (workspaceId: string) => c<PrInfo | null>("pr_view", { workspaceId }),
+  prMerge: (workspaceId: string) => c<Outcome>("pr_merge", { workspaceId }),
+  prReady: (workspaceId: string) => c<Outcome>("pr_ready", { workspaceId }),
+  prEdit: (workspaceId: string, title: string, body: string) => c<Outcome>("pr_edit", { workspaceId, title, body }),
+  checksRerun: (workspaceId: string, links: string[]) => c<Outcome>("checks_rerun", { workspaceId, links }),
+  checkLog: (workspaceId: string, link: string) => c<string>("check_log", { workspaceId, link }),
+  sections: () => c<Section[]>("sections_list"),
+  sectionSave: (section: Partial<Section> & { name: string }) => c<Section>("section_save", { section: { id: "", emoji: "", order: 0, ...section } }),
+  sectionDelete: (id: string) => c<void>("section_delete", { id }),
+  repoUpdate: (id: string, patch: { hidden?: boolean; icon?: string }) => c<Repo>("repo_update", { id, ...patch }),
+  repoEnvLayers: (repoId: string) => c<[string, Record<string, string>][]>("repo_env_layers", { repoId }),
+  soundPlay: (name: string) => c<void>("sound_play", { name }),
+  gitIdentity: (repoId: string) => c<GitIdentity>("git_identity", { repoId }),
+  gitIdentitySet: (repoId: string, name: string, email: string) => c<GitIdentity>("git_identity_set", { repoId, name, email }),
+  repoRemotes: (repoId: string) => c<string[]>("repo_remotes", { repoId }),
+  prOpenUrl: (workspaceId: string, prUrl: string) => c<string>("pr_open_url", { workspaceId, prUrl }),
+  diagnostics: () => c<Diagnostics>("diagnostics"),
+  openDevtools: () => c<void>("open_devtools"),
+  appQuit: () => c<void>("app_quit"),
+  onMenu: (h: (id: string) => void) => transport.subscribe("menu", h),
+  onQuitRequested: (h: () => void) => transport.subscribe("quit-requested", h),
+  machineInfo: () => c<MachineInfo>("machine_info"),
+  ghRepos: () => c<GhRepo[]>("gh_repos"),
+  cloneTo: (input: string, dir: string) => c<Repo>("repo_clone_to", { input, dir }),
+  quickStart: (name: string, dir: string) => c<Repo>("repo_quick_start", { name, dir }),
+  onCloneProgress: (h: (p: { phase: string; pct: number }) => void) => transport.subscribe("clone-progress", h),
   files: (workspaceId: string) => c<string[]>("workspace_files", { workspaceId }),
   readFile: (workspaceId: string, path: string) => c<string>("workspace_read_file", { workspaceId, path }),
   busy: (workspaceId: string) => c<string>("workspace_busy", { workspaceId }),
@@ -188,7 +238,9 @@ export const api = {
 };
 
 export const HARNESS_LABEL: Record<HarnessKind, string> = { claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", opencode: "OpenCode", qwen: "Qwen Code", gemini: "Gemini CLI" };
-export const EFFORT_LABEL: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "XHigh", max: "Max" };
-export const STATUS_LABEL: Record<string, string> = { "in-progress": "Em andamento", "in-review": "Em revisão", done: "Concluído", canceled: "Cancelado" };
+export const EFFORT_LABEL: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "XHigh", max: "Max", ultra: "Ultra" };
+export const STATUS_LABEL: Record<string, string> = { backlog: "Backlog", "in-progress": "Em andamento", "in-review": "Em revisão", done: "Concluído", canceled: "Cancelado" };
+/** Ordem dos grupos por status na barra lateral. */
+export const STATUS_ORDER = ["done", "in-review", "in-progress", "backlog", "canceled"];
 export const wsTitle = (w: Workspace) => w.title || w.name[0].toUpperCase() + w.name.slice(1);
 export const fmtBytes = (n: number | null) => (n == null ? "—" : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);

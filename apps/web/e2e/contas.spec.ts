@@ -1,11 +1,11 @@
+import { addRepo } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 const chat = (page: Page) => page.locator(".ws-host:not([hidden]) .center-body:not([hidden])");
 async function setup(page: Page) {
   await page.goto("/?mock");
   await page.getByTestId("create-ws").click();
-  await page.getByTestId("repo-path").fill("/mock/repos/demo");
-  await page.getByTestId("repo-path").press("Enter");
+  await addRepo(page, "/mock/repos/demo");
   await page.getByTestId("create-go").click();
   await expect(page.getByTestId("ws-row")).toHaveCount(1);
 }
@@ -13,7 +13,7 @@ async function setup(page: Page) {
 test("várias contas: adicionar, entrar, renomear, padrão, remover; trocar no meio da conversa com handoff", async ({ page }) => {
   await setup(page);
   await page.getByTestId("settings").click();
-  await page.locator(".seg .rtab", { hasText: "Contas" }).click();
+  await page.getByTestId("set-tab-contas").click();
   const claude = page.getByTestId("accounts-claude");
   await expect(claude.getByTestId("account-row")).toHaveCount(1);
   await page.getByTestId("account-add-claude").fill("Trabalho");
@@ -46,7 +46,7 @@ test("várias contas: adicionar, entrar, renomear, padrão, remover; trocar no m
   await expect(chat(page).locator(".turn-meta")).toHaveCount(2);
   // Remover a conta
   await page.getByTestId("settings").click();
-  await page.locator(".seg .rtab", { hasText: "Contas" }).click();
+  await page.getByTestId("set-tab-contas").click();
   await page.getByTestId("accounts-claude").getByTestId("account-remove").click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("accounts-claude").getByTestId("account-row")).toHaveCount(1);

@@ -1,3 +1,4 @@
+import { addRepo } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 async function setup(page: Page) {
@@ -5,9 +6,7 @@ async function setup(page: Page) {
   await page.getByTestId("create-ws").click();
   await expect(page.getByTestId("create-modal")).toBeVisible();
   if (!(await page.getByTestId("repo-pop").isVisible())) await page.getByTestId("create-repo").click();
-  if (!(await page.getByTestId("repo-path").isVisible())) { await page.getByTestId("add-project").click(); }
-  await page.getByTestId("repo-path").fill("/mock/repos/demo");
-  await page.getByTestId("repo-path").press("Enter");
+  await addRepo(page, "/mock/repos/demo");
   await expect(page.getByTestId("repo-pop")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.getByTestId("new-ws-demo").click();

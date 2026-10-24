@@ -1,3 +1,4 @@
+import { addRepo } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 const shot = (page: Page, name: string) => page.screenshot({ path: `../../.context/e2e/r3-${name}.png` });
@@ -6,9 +7,7 @@ async function setup(page: Page) {
   await page.getByTestId("create-ws").click();
   await expect(page.getByTestId("create-modal")).toBeVisible();
   if (!(await page.getByTestId("repo-pop").isVisible())) await page.getByTestId("create-repo").click();
-  if (!(await page.getByTestId("repo-path").isVisible())) { await page.getByTestId("add-project").click(); }
-  await page.getByTestId("repo-path").fill("/mock/repos/demo");
-  await page.getByTestId("repo-path").press("Enter");
+  await addRepo(page, "/mock/repos/demo");
   await expect(page.getByTestId("repo-pop")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.getByTestId("new-ws-demo").click();
@@ -50,7 +49,7 @@ test("MCP da sessão, contexto, minimapa", async ({ page }) => {
 test("Linear: conectar, criar workspace da issue, @mencionar, PR com Closes", async ({ page }) => {
   await setup(page);
   await page.getByTestId("settings").click();
-  await page.locator(".seg .rtab", { hasText: "Integrações" }).click();
+  await page.getByTestId("set-tab-integracoes").click();
   await page.getByTestId("integrations").locator("input").fill("lin_api_teste");
   await page.getByTestId("integrations").getByRole("button", { name: "Conectar" }).click();
   await expect(page.getByTestId("integrations")).toContainText("conectado");
@@ -89,6 +88,7 @@ test("tema, repos recolhíveis, Abrir em, árvore, Checks, semáforos", async ({
   await page.getByTestId("tree-row").filter({ hasText: "src" }).click();
   await expect(page.getByTestId("tree-row").filter({ hasText: "app.tsx" })).toBeVisible();
   await shot(page, "arvore");
+  await page.evaluate(() => ((window as any).__mock.pr(null, {}), window.dispatchEvent(new Event("kabul:git-refresh"))));
   await page.getByTestId("tab-checks").click();
   await expect(page.getByTestId("checks")).toContainText("1 ok · 1 falhando · 1 rodando");
   await shot(page, "checks");
@@ -104,7 +104,7 @@ test("tema, repos recolhíveis, Abrir em, árvore, Checks, semáforos", async ({
   await page.keyboard.press("Meta+b");
   // Tema claro e sistema.
   await page.getByTestId("settings").click();
-  await page.locator(".seg .rtab", { hasText: "Aparência" }).click();
+  await page.getByTestId("set-tab-aparencia").click();
   await page.locator(".theme-card", { hasText: "Claro" }).click();
   expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe("light");
   await shot(page, "tema-claro-config");

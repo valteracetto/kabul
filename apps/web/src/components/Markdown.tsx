@@ -1,13 +1,13 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
  * Markdown sem HTML cru: títulos, parágrafos, listas (inclusive tarefas), citações, regras, tabelas,
- * imagens, links (URLs e caminhos de arquivo), código com realce simples. Mermaid e KaTeX aparecem
- * como código com "Copiar fonte".
+ * imagens, links (URLs e caminhos de arquivo), código com realce simples. Mermaid e KaTeX (`math`,
+ * `latex` ou `$$…$$`) são desenhados sob demanda (import dinâmico), com "Copiar fonte".
  */
 const KW = /\b(fn|let|const|var|function|return|if|else|for|while|match|impl|struct|enum|pub|use|import|from|export|class|async|await|def|self|true|false|null|None|interface|type|mut|new|try|catch)\b/g;
 
-function highlight(code: string): ReactNode[] {
+export function highlight(code: string): ReactNode[] {
   const out: ReactNode[] = [];
   const re = /(\/\/[^\n]*|#[^\n]*|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`|\b\d+(?:\.\d+)?\b)/g;
   let last = 0, k = 0;
@@ -49,13 +49,42 @@ export function inline(t: string, onFile?: (p: string) => void): ReactNode[] {
   return out;
 }
 
+let mermaidSeq = 0;
+
+/** Desenha Mermaid (SVG) ou KaTeX (HTML) sob demanda; se falhar, mostra a fonte com o erro. */
+function Rendered({ lang, body }: { lang: string; body: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        if (lang === "mermaid") {
+          const m = (await import("mermaid")).default;
+          m.initialize({ startOnLoad: false, securityLevel: "strict", theme: document.documentElement.dataset.theme === "light" ? "default" : "dark" });
+          const { svg } = await m.render(`kabul-mermaid-${++mermaidSeq}`, body);
+          if (alive && ref.current) ref.current.innerHTML = svg;
+        } else {
+          const k = (await import("katex")).default;
+          await import("katex/dist/katex.min.css");
+          if (alive && ref.current) ref.current.innerHTML = k.renderToString(body, { displayMode: true, throwOnError: true, trust: false });
+        }
+      } catch (e) {
+        if (alive) setErr(String((e as Error)?.message ?? e).split("\n")[0]);
+      }
+    })();
+    return () => void (alive = false);
+  }, [lang, body]);
+  return err ? <><pre className="md-code">{body}</pre><div className="dim small md-render-err">Não deu para desenhar: {err}</div></> : <div ref={ref} className={"md-rendered md-" + (lang === "mermaid" ? "mermaid" : "math")} data-testid={lang === "mermaid" ? "mermaid" : "katex"} />;
+}
+
 function CodeBlock({ lang, body }: { lang: string; body: string }) {
   const [copied, setCopied] = useState(false);
   const special = lang === "mermaid" || lang === "math" || lang === "latex";
   return (
     <div className="md-codewrap">
-      <div className="md-codebar"><span>{special ? `${lang} (fonte)` : lang || "código"}</span><span className="grow" /><button className="text-btn small" onClick={() => (navigator.clipboard.writeText(body), setCopied(true), setTimeout(() => setCopied(false), 1000))}>{copied ? "copiado" : special ? "Copiar fonte" : "Copiar"}</button></div>
-      <pre className="md-code">{special ? body : highlight(body)}</pre>
+      <div className="md-codebar"><span>{special ? (lang === "mermaid" ? "Mermaid" : "Fórmula") : lang || "código"}</span><span className="grow" /><button className="text-btn small" onClick={() => (navigator.clipboard.writeText(body), setCopied(true), setTimeout(() => setCopied(false), 1000))}>{copied ? "copiado" : special ? (lang === "mermaid" ? "Copiar fonte do Mermaid" : "Copiar fonte") : "Copiar"}</button></div>
+      {special ? <Rendered lang={lang} body={body} /> : <pre className="md-code">{highlight(body)}</pre>}
     </div>
   );
 }
@@ -69,6 +98,14 @@ export function Markdown({ text, onFile }: { text: string; onFile?: (p: string) 
   const inl = (t: string) => inline(t, onFile);
   for (let i = 0; i < lines.length; ) {
     const l = lines[i];
+    if (l.trim() === "$$") {
+      // Bloco $$ … $$ vira fórmula (KaTeX).
+      const body: string[] = [];
+      for (i++; i < lines.length && lines[i].trim() !== "$$"; i++) body.push(lines[i]);
+      i++;
+      blocks.push(<CodeBlock key={i} lang="math" body={body.join("\n")} />);
+      continue;
+    }
     if (l.startsWith("```")) {
       const lang = l.slice(3).trim();
       const body: string[] = [];

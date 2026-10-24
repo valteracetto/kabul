@@ -6,3 +6,4 @@ apps/desktop/src-tauri/gen/
 *.tsbuildinfo
 test-results/
 playwright-report/
+docs/internal/

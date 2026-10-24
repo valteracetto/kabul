@@ -5,7 +5,7 @@ import type { Model } from "../api";
 export interface ModelPrefs { favorites: string[]; selected: string | null; effort: string; fast: boolean }
 
 const KEY = "kabul.modelPrefs";
-const DEFAULT: ModelPrefs = { favorites: ["claude:opus", "codex:gpt-6.1-sol"], selected: "claude:opus", effort: "low", fast: false };
+const DEFAULT: ModelPrefs = { favorites: ["claude:opus", "codex:gpt-6-luna"], selected: "claude:opus", effort: "low", fast: false };
 
 export function useModelPrefs(models: Model[]) {
   const [prefs, setPrefs] = useState<ModelPrefs>(() => {

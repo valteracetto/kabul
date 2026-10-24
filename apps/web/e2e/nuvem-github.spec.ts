@@ -1,3 +1,4 @@
+import { addRepo } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 const shot = (page: Page, n: string) => page.screenshot({ path: `../../.context/e2e/ng-${n}.png` });
@@ -6,9 +7,7 @@ async function setup(page: Page) {
   await page.getByTestId("create-ws").click();
   await expect(page.getByTestId("create-modal")).toBeVisible();
   if (!(await page.getByTestId("repo-pop").isVisible())) await page.getByTestId("create-repo").click();
-  if (!(await page.getByTestId("repo-path").isVisible())) { await page.getByTestId("add-project").click(); }
-  await page.getByTestId("repo-path").fill("/mock/repos/demo");
-  await page.getByTestId("repo-path").press("Enter");
+  await addRepo(page, "/mock/repos/demo");
   await expect(page.getByTestId("repo-pop")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.getByTestId("new-ws-demo").click();
@@ -56,8 +55,9 @@ test("GitHub: status, entrar com código, trocar conta, token, aviso de acesso e
   await setup(page);
   await expect(page.getByTestId("gh-warn")).toContainText("Missing GitHub access");
   await page.getByTestId("settings").click();
-  await expect(page.locator("select").first()).toHaveValue("github");
-  await page.locator(".seg .rtab", { hasText: "Contas" }).click();
+  await page.getByTestId("set-tab-git").click();
+  await expect(page.getByTestId("git-prefix")).toHaveValue("github");
+  await page.getByTestId("set-tab-contas").click();
   await expect(page.getByTestId("github")).toContainText("@dev");
   await expect(page.getByTestId("github")).toContainText("repo, workflow");
   await page.getByTestId("gh-login").click();

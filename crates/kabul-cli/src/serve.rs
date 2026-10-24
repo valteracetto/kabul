@@ -16,6 +16,59 @@ fn dry(a: &Value) -> bool {
     a.get("dryRun").and_then(Value::as_bool).unwrap_or(false)
 }
 
+/// Conversas rodando no servidor e os eventos ainda não lidos (o HTTP não tem push: o cliente faz polling).
+#[derive(Default)]
+pub struct Chats {
+    seq: u64,
+    running: std::collections::HashMap<String, std::sync::Arc<std::sync::Mutex<kabul_core::harness::Running>>>,
+    stopped: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    queue: std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
+}
+
+fn chat_call(chats: &mut Chats, st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Option<Value>> {
+    let get = |chats: &Chats, a: &Value| -> Result<std::sync::Arc<std::sync::Mutex<kabul_core::harness::Running>>> { chats.running.get(&s(a, "chatId")?).cloned().ok_or_else(|| anyhow::anyhow!("chat não encontrado (encerrado?)")) };
+    Ok(Some(match cmd {
+        "chat_start" => {
+            let w = st.workspace(&s(a, "workspaceId")?)?.clone();
+            let r = st.repo(&w.repo_id)?.clone();
+            let req: kabul_core::chat::ChatRequest = serde_json::from_value(a.clone())?;
+            let model = req.model.clone().ok_or_else(|| anyhow::anyhow!("argumento model ausente"))?;
+            let endpoints = kabul_core::local::load_endpoints(&home.join("endpoints.json"));
+            let registry = kabul_core::registry::Registry::load(&home.join("harness-registry.json"));
+            // Mesmo caminho do app (core): harness, ambiente, conta e opções.
+            let (p, mut running) = kabul_core::chat::start(home, &w, &r, &model, &req, &endpoints, &registry)?;
+            chats.seq += 1;
+            let id = format!("chat-{}", chats.seq);
+            let (_tx, dummy) = std::sync::mpsc::channel();
+            let rx = std::mem::replace(&mut running.events, dummy);
+            let running = std::sync::Arc::new(std::sync::Mutex::new(running));
+            chats.running.insert(id.clone(), running.clone());
+            let (queue, stopped, cid, header) = (chats.queue.clone(), chats.stopped.clone(), id.clone(), kabul_core::chat::log_header(&p));
+            let log = home.join("logs/agents.log");
+            std::thread::spawn(move || {
+                let q = queue.clone();
+                let c2 = cid.clone();
+                kabul_core::chat::pump(rx, move |ev| q.lock().unwrap().push(json!({"channel": "chat-event", "payload": {"chat_id": c2, "event": ev}})), || stopped.lock().unwrap().contains(&cid), move || running.lock().unwrap().wait(), Some((log, header)));
+            });
+            json!({"chat_id": id, "harness": p.kind, "approvals": p.opts.approvals_via_app, "note": p.note})
+        }
+        "chat_send" => { get(chats, a)?.lock().unwrap().send(&s(a, "text")?)?; Value::Null }
+        "chat_approve" => {
+            get(chats, a)?.lock().unwrap().approve_ext(&s(a, "requestId")?, a["allow"].as_bool().unwrap_or(false), a.get("tool").and_then(Value::as_str).unwrap_or(""), a.get("updatedInput").cloned(), a.get("always").and_then(Value::as_bool).unwrap_or(false))?;
+            Value::Null
+        }
+        "chat_stop" => {
+            let id = s(a, "chatId")?;
+            chats.stopped.lock().unwrap().insert(id.clone());
+            if let Some(c) = chats.running.remove(&id) { let _ = c.lock().unwrap().kill(); }
+            Value::Null
+        }
+        // Eventos pendentes: [{channel, payload}].
+        "events_poll" => { let _ = st; json!(std::mem::take(&mut *chats.queue.lock().unwrap())) }
+        _ => return Ok(None),
+    }))
+}
+
 fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
     let ws_repo = |st: &Store, id: &str| -> Result<(store::Workspace, store::Repo)> {
         let w = st.workspace(id)?.clone();
@@ -43,8 +96,12 @@ fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
         "workspace_file_diff" => { let (w, r) = ws_repo(st, &s(a, "workspaceId")?)?; json!(gitops::file_diff(&r, &w, &s(a, "path")?, gitops::Scope::parse(a.get("scope").and_then(Value::as_str)), a.get("ignoreWs").and_then(Value::as_bool).unwrap_or(false))?) }
         "workspace_read_file" => { let (w, _) = ws_repo(st, &s(a, "workspaceId")?)?; json!(store::read_file(&w, &s(a, "path")?)?) }
         "git_status" => { let (w, r) = ws_repo(st, &s(a, "workspaceId")?)?; json!(gitops::status(&r, &w)?) }
-        "git_pull" => { let (w, _) = ws_repo(st, &s(a, "workspaceId")?)?; json!(gitops::pull(&w, dry(a))?) }
-        "git_push" => { let (w, _) = ws_repo(st, &s(a, "workspaceId")?)?; json!(gitops::push(&w, dry(a))?) }
+        "git_pull" => { let (w, r) = ws_repo(st, &s(a, "workspaceId")?)?; json!(gitops::pull(&w, &gitops::remote(&r), dry(a))?) }
+        "git_push" => { let (w, r) = ws_repo(st, &s(a, "workspaceId")?)?; json!(gitops::push(&w, &gitops::remote(&r), settings::AppSettings::load(&home.join("app-settings.json")).push_set_upstream, dry(a))?) }
+        "git_identity" => { let r = st.repo(&s(a, "repoId")?)?.clone(); json!(gitops::identity(Path::new(&r.path))) }
+        "git_identity_set" => { let r = st.repo(&s(a, "repoId")?)?.clone(); gitops::set_identity(Path::new(&r.path), &s(a, "name")?, &s(a, "email")?)?; json!(gitops::identity(Path::new(&r.path))) }
+        "repo_remotes" => { let r = st.repo(&s(a, "repoId")?)?.clone(); json!(gitops::remotes(Path::new(&r.path))) }
+        "repo_settings_save" => { let r = st.repo(&s(a, "repoId")?)?.clone(); json!(settings::save_local(Path::new(&r.path), &serde_json::from_value(a["settings"].clone())?)?.display().to_string()) }
         "workspace_discard" => { let (w, _) = ws_repo(st, &s(a, "workspaceId")?)?; gitops::discard(&w, &s(a, "path")?)?; Value::Null }
         "workspace_grep" => { let (w, _) = ws_repo(st, &s(a, "workspaceId")?)?; json!(gitops::grep(&w, &s(a, "query")?, 500)?) }
         "pr_view" => { let (w, _) = ws_repo(st, &s(a, "workspaceId")?)?; json!(gitops::pr_view(&w).unwrap_or(None)) }
@@ -63,6 +120,22 @@ fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
                 if let Some(v) = p.get("target_branch").and_then(Value::as_str) { w.target_branch = Some(v.to_string()).filter(|s| !s.is_empty()); }
             })?)
         }
+        "gh_repos" => json!(kabul_core::clone::list_repos(&[], 100)?),
+        "repo_clone_to" => {
+            let dir = s(a, "dir")?;
+            let dest = kabul_core::clone::clone(&s(a, "input")?, &kabul_core::clone::expand_home(&dir), &[], |_, _| {})?;
+            json!(st.add_repo(&dest)?)
+        }
+        "repo_quick_start" => { let dest = kabul_core::clone::quick_start(&kabul_core::clone::expand_home(&s(a, "dir")?), &s(a, "name")?)?; json!(st.add_repo(&dest)?) }
+        // Seletor de pasta "nativo" do E2E: a pasta vem do ambiente do servidor.
+        "pick_folder" => json!(std::env::var("KABUL_PICK_FOLDER").ok()),
+        "diagnostics" => {
+            let checks = kabul_core::diagnostics::run();
+            let report = kabul_core::diagnostics::report(&checks);
+            let redacted = kabul_core::diagnostics::redact(&report, &std::env::var("HOME").unwrap_or_default(), &std::env::var("USER").unwrap_or_default(), &kabul_core::machine::computer_name());
+            json!({"checks": checks, "report": report, "redacted": redacted})
+        }
+        "machine_info" => json!(kabul_core::machine::info()),
         "sections_list" => json!(st.state.sections),
         "section_save" => json!(st.save_section(serde_json::from_value(a["section"].clone())?)?),
         "section_delete" => { st.delete_section(&s(a, "id")?)?; Value::Null }
@@ -75,7 +148,7 @@ fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
         "history_load" => json!(history::load(home, &s(a, "workspaceId")?, &s(a, "id")?)?),
         "history_save" => { history::save(home, &serde_json::from_value(a["record"].clone())?)?; Value::Null }
         "slash_commands" => { let (w, _) = ws_repo(st, &s(a, "workspaceId")?)?; json!(history::slash_commands(Path::new(&w.path))) }
-        "models_list" => json!(models::claude_models()),
+        "models_list" => json!(models::catalog_for(home)),
         "repo_settings" => { let r = st.repo(&s(a, "repoId")?)?.clone(); let (set, layers) = settings::load(Path::new(&r.path), &r.default_branch); json!({"settings": set, "layers": layers}) }
         "app_settings_get" => json!(settings::AppSettings::load(&home.join("app-settings.json"))),
         "open_targets" => json!([]),
@@ -91,6 +164,7 @@ fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
 pub fn serve(port: u16, home: PathBuf) -> Result<()> {
     let mut st = Store::open(home.join("state.json"), home.join("workspaces"), std::env::var("USER").unwrap_or_else(|_| "kabul".into()))?;
     let l = TcpListener::bind(("127.0.0.1", port))?;
+    let mut chats = Chats::default();
     eprintln!("kabul serve em http://127.0.0.1:{port} (estado em {})", home.display());
     for conn in l.incoming() {
         let mut c = match conn { Ok(c) => c, Err(_) => continue };
@@ -114,7 +188,12 @@ pub fn serve(port: u16, home: PathBuf) -> Result<()> {
             let args = req.get("args").cloned().unwrap_or(json!({}));
             // Recarrega o estado a cada chamada (o app pode ter mudado o arquivo).
             if let Ok(fresh) = Store::open(st.file.clone(), st.root.clone(), st.branch_prefix.clone()) { st = fresh; }
-            match call(&mut st, &home, cmd, &args) {
+            let res = match chat_call(&mut chats, &mut st, &home, cmd, &args) {
+                Ok(Some(v)) => Ok(v),
+                Ok(None) => call(&mut st, &home, cmd, &args),
+                Err(e) => Err(e),
+            };
+            match res {
                 Ok(v) => ("200 OK", json!({"ok": true, "value": v}).to_string()),
                 Err(e) => ("200 OK", json!({"ok": false, "error": format!("{e:#}")}).to_string()),
             }

@@ -1,5 +1,6 @@
 import { noSuggest } from "../noSuggest";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDismiss } from "./useDismiss";
 import { EFFORT_LABEL, HARNESS_LABEL, type HarnessKind, type Model } from "../api";
 import { IArrowOut, IChevron, IChevronDown, IClose, IDrag, IGear, IPlus, ISearch, ProviderMark } from "../icons";
 import type { ModelPrefs } from "./prefs";
@@ -37,15 +38,8 @@ export function ModelPicker({ models, prefs, setPrefs, selected, effort, activeH
   useEffect(() => {
     if (!open) return;
     search.current?.focus();
-    const close = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", esc);
-    };
   }, [open]);
+  useDismiss(root, open, useCallback(() => setOpen(false), []));
   useEffect(() => {
     if (!open) (setQ(""), setAdding(false), setEditing(false), setEffortOpen(false));
   }, [open]);

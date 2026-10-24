@@ -10,3 +10,5 @@ export const chatPrefs = {
 export interface PendingFork { items: unknown[]; resume: string | null; forkSession: boolean; replay: boolean; modelKey: string | null }
 export const pendingFork: Record<string, PendingFork> = {};
 export const pendingForkWs: Record<string, { chatId: string }> = {};
+/** Modelo pedido para uma aba nova (ex.: "Modelo da revisão"). */
+export const pendingModel: Record<string, string> = {};

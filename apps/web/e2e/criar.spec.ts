@@ -1,3 +1,4 @@
+import { addRepo as pickRepo } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 async function addRepo(page: Page) {
@@ -5,9 +6,7 @@ async function addRepo(page: Page) {
   await page.getByTestId("create-ws").click();
   await expect(page.getByTestId("create-modal")).toBeVisible();
   if (!(await page.getByTestId("repo-pop").isVisible())) await page.getByTestId("create-repo").click();
-  if (!(await page.getByTestId("repo-path").isVisible())) { await page.getByTestId("add-project").click(); }
-  await page.getByTestId("repo-path").fill("/mock/repos/demo");
-  await page.getByTestId("repo-path").press("Enter");
+  await pickRepo(page, "/mock/repos/demo");
   await expect(page.getByTestId("repo-pop")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.locator(".repo-name", { hasText: "demo" })).toBeVisible();
@@ -50,9 +49,7 @@ test("+ do repo e Criar abrem o modal com o repo selecionado (não criam direto)
   await page.getByTestId("create-ws").click();
   await expect(page.getByTestId("create-modal")).toBeVisible();
   if (!(await page.getByTestId("repo-pop").isVisible())) await page.getByTestId("create-repo").click();
-  if (!(await page.getByTestId("repo-path").isVisible())) { await page.getByTestId("add-project").click(); }
-  await page.getByTestId("repo-path").fill("/mock/repos/outro");
-  await page.getByTestId("repo-path").press("Enter");
+  await pickRepo(page, "/mock/repos/outro");
   await expect(page.getByTestId("repo-pop")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.getByTestId("new-ws-outro").click();
@@ -70,22 +67,35 @@ test("Criar abre o modal; Adicionar projeto só no seletor de repo (rodapé); �
   await page.goto("/?mock");
   await expect(page.locator(".side-nav button", { hasText: "Adicionar projeto" })).toHaveCount(0);
   await page.getByTestId("empty-add-project").click();
-  await expect(page.getByTestId("repo-path")).toBeFocused();
-  await page.getByTestId("repo-path").fill("/mock/repos/demo");
-  await page.getByTestId("repo-path").press("Enter");
+  // Submenu com 3 itens; o primeiro destacado; setas mudam o destaque.
+  await expect(page.getByTestId("add-menu")).toBeFocused();
+  await expect(page.getByTestId("add-menu").locator(".pop-row")).toHaveText(["Abrir projeto", "Abrir projeto do GitHub", "Início rápido"]);
+  await expect(page.getByTestId("add-open")).toHaveClass(/on/);
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByTestId("add-github")).toHaveClass(/on/);
+  await page.keyboard.press("ArrowUp");
+  await pickRepo(page, "/mock/repos/demo");
   await expect(page.getByTestId("create-repo")).toContainText("demo");
   await page.getByTestId("create-repo").click();
   await expect(page.locator(".repo-search input")).toBeFocused();
   await expect(page.getByTestId("add-project")).toContainText("Adicionar projeto");
   await page.getByTestId("add-project").click();
-  await page.getByTestId("repo-path").fill("/mock/repos/outro");
-  await page.getByTestId("repo-path").press("Enter");
+  // Esc volta para a lista de repos.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".repo-search input")).toBeVisible();
+  await page.getByTestId("add-project").click();
+  await page.evaluate(() => ((window as any).__mock.pickFolder = "/mock/repos/outro"));
+  await page.keyboard.press("Enter");
   await expect(page.getByTestId("create-repo")).toContainText("outro");
   await page.screenshot({ path: "../../.context/e2e/criar-seletor-repo.png" });
   await page.keyboard.press("Escape");
   await page.keyboard.press("Meta+Alt+a");
-  await expect(page.getByTestId("repo-path")).toBeVisible();
+  await expect(page.getByTestId("add-menu")).toBeVisible();
+  // Esc: submenu → lista de repos → fecha o seletor → fecha o modal.
   await page.keyboard.press("Escape");
+  await expect(page.locator(".repo-search input")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("repo-pop")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.getByTestId("create-ws").click();
   await expect(page.getByTestId("create-modal")).toBeVisible();
@@ -113,4 +123,29 @@ test("Onde roda: Este Mac, nuvem do provedor (só com Claude), em breve; lembra 
   await page.locator(".pop-search input").fill("qwen");
   await page.locator(".pop-row.model", { hasText: "Qwen3 8B" }).click();
   await expect(page.getByTestId("create-where")).toContainText("Este Mac");
+});
+
+test("modal de criação liso por padrão; listras só em plan mode (⇧⇥, chip); plano vai para a conversa; padrão das configurações", async ({ page }) => {
+  await page.goto("/?mock");
+  await page.getByTestId("create-ws").click();
+  await pickRepo(page, "/mock/repos/demo");
+  const text = page.getByTestId("create-text");
+  await expect(text).not.toHaveClass(/plan/);
+  expect(await text.evaluate((el) => getComputedStyle(el).backgroundImage)).toBe("none");
+  await page.screenshot({ path: "../../.context/e2e/criar-liso.png" });
+  await text.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(text).toHaveClass(/plan/);
+  await expect(page.getByTestId("create-plan-chip")).toBeVisible();
+  expect(await text.evaluate((el) => getComputedStyle(el).backgroundImage)).toContain("repeating-linear-gradient");
+  await page.screenshot({ path: "../../.context/e2e/criar-plano.png" });
+  await text.fill("planeje o login");
+  await page.getByTestId("create-go").click();
+  await expect(page.locator(".ws-host:not([hidden]) .composer.plan")).toBeVisible();
+  // "Conversas novas em plan mode" liga o plano já no modal.
+  await page.evaluate(() => ((window as any).__mock.db.settings.default_plan = true, window.dispatchEvent(new Event("kabul:settings"))));
+  await page.keyboard.press("Meta+n");
+  await expect(page.getByTestId("create-text")).toHaveClass(/plan/);
+  await page.getByTestId("create-plan-chip").click();
+  await expect(page.getByTestId("create-text")).not.toHaveClass(/plan/);
 });

@@ -169,7 +169,7 @@ impl Protocol for CodexAppServer {
             // Resposta a uma requisição nossa.
             (Some(id), None) => {
                 if let Some(e) = v.get("error") {
-                    out.push(Event::Error { message: s(e, "message").unwrap_or_else(|| e.to_string()) });
+                    out.push(Event::Error { message: friendly_error(&s(e, "message").unwrap_or_else(|| e.to_string())) });
                 } else if id.as_u64() == Some(ID_THREAD) {
                     if let Some(t) = v.pointer("/result/thread/id").and_then(Value::as_str) {
                         self.thread_id = Some(t.into());
@@ -202,6 +202,8 @@ impl Protocol for CodexAppServer {
                 match it.get("type").and_then(Value::as_str) {
                     Some("agentMessage") => out.push(Event::Text { text: s(it, "text").unwrap_or_default() }),
                     Some("reasoning") => {}
+                    // A própria mensagem do usuário volta como item: não é ferramenta.
+                    Some("userMessage") => {}
                     Some("commandExecution") => out.push(Event::ToolResult { id, output: s(it, "aggregatedOutput").unwrap_or_default(), is_error: it.get("exitCode").and_then(Value::as_i64).is_some_and(|c| c != 0) }),
                     Some(t) => out.push(Event::ToolResult { id, output: t.into(), is_error: it.get("status").and_then(Value::as_str) == Some("failed") }),
                     None => {}
@@ -210,11 +212,11 @@ impl Protocol for CodexAppServer {
             (_, Some("turn/completed")) => {
                 let t = &v["params"]["turn"];
                 if t.get("status").and_then(Value::as_str) == Some("failed") {
-                    out.push(Event::Error { message: t.pointer("/error/message").and_then(Value::as_str).unwrap_or("turno falhou").into() });
+                    out.push(Event::Error { message: friendly_error(t.pointer("/error/message").and_then(Value::as_str).unwrap_or("turno falhou")) });
                 }
                 out.push(Event::TurnCompleted { result: None, input_tokens: None, output_tokens: None, cost_usd: None });
             }
-            (_, Some("error")) => out.push(Event::Error { message: v.pointer("/params/error/message").and_then(Value::as_str).unwrap_or("erro").into() }),
+            (_, Some("error")) => out.push(Event::Error { message: friendly_error(v.pointer("/params/error/message").and_then(Value::as_str).unwrap_or("erro")) }),
             (_, Some("thread/started")) | (_, Some("turn/started")) => {}
             _ => out.push(Event::Raw { value: v }),
         }
@@ -260,9 +262,35 @@ pub fn parse_exec_line(line: &str) -> Vec<Event> {
     }
 }
 
+/// Erros comuns do Codex em português, com o que fazer (o original vai no fim, entre parênteses).
+pub fn friendly_error(raw: &str) -> String {
+    // Às vezes a mensagem é o JSON da API: usa o `error.message` de dentro.
+    let inner = serde_json::from_str::<Value>(raw).ok().and_then(|v| v.pointer("/error/message").and_then(Value::as_str).map(String::from));
+    let msg = inner.as_deref().unwrap_or(raw);
+    let l = msg.to_lowercase();
+    if l.contains("model") && (l.contains("not supported") || l.contains("does not exist") || l.contains("not found") || l.contains("unknown model")) {
+        // "The 'x' model ..." ou "model 'x' ...": o trecho entre aspas.
+        let model = msg.split(['\'', '"', '`']).nth(1).filter(|m| !m.contains(' ')).unwrap_or("escolhido");
+        return format!("O modelo {model} não está disponível na sua conta do Codex. Escolha outro no seletor de modelos (a lista vem da sua conta). ({msg})");
+    }
+    if l.contains("not logged in") || l.contains("unauthorized") || l.contains("401") {
+        return format!("O Codex não está logado nesta conta. Entre em Configurações › Contas. ({msg})");
+    }
+    msg.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn erro_de_modelo_amigavel() {
+        let m = friendly_error("The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.");
+        assert!(m.starts_with("O modelo gpt-6.1-sol não está disponível na sua conta do Codex"), "{m}");
+        assert_eq!(friendly_error("outra coisa"), "outra coisa");
+        let j = r#"{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."}}"#;
+        assert!(friendly_error(j).starts_with("O modelo gpt-6.1-sol não está disponível"));
+    }
 
     #[test]
     fn app_server_fluxo() {

@@ -1,3 +1,4 @@
+import { addRepo } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 /**
@@ -9,9 +10,7 @@ async function setup(page: Page) {
   await page.getByTestId("create-ws").click();
   await expect(page.getByTestId("create-modal")).toBeVisible();
   if (!(await page.getByTestId("repo-pop").isVisible())) await page.getByTestId("create-repo").click();
-  if (!(await page.getByTestId("repo-path").isVisible())) { await page.getByTestId("add-project").click(); }
-  await page.getByTestId("repo-path").fill("/mock/repos/demo");
-  await page.getByTestId("repo-path").press("Enter");
+  await addRepo(page, "/mock/repos/demo");
   await expect(page.getByTestId("repo-pop")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.getByTestId("new-ws-demo").click();
@@ -49,8 +48,8 @@ test("nenhum botão sem efeito nas telas principais", async ({ page }) => {
     ...(await audit(page, "workspace", ".ws-host:not([hidden])", skip)),
   ];
   await page.getByTestId("settings").click();
-  for (const tab of ["Geral", "Aparência", "Contas", "Integrações", "Repositório", "Atalhos"]) {
-    await page.locator(".seg .rtab", { hasText: tab }).click();
+  for (const tab of ["geral", "aparencia", "contas", "git", "integracoes", "repo", "remoto", "atalhos"]) {
+    await page.getByTestId(`set-tab-${tab}`).click();
     dead.push(...(await audit(page, `config/${tab}`, ".page", /Remover|Desconectar|Instalar|Entrar/i)));
   }
   await page.locator(".side-nav button", { hasText: "Modelos locais" }).click();

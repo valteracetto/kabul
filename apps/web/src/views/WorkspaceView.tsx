@@ -1,25 +1,29 @@
 import { confirmDialog } from "../components/Confirm";
 import { noSuggest } from "../noSuggest";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useDismiss } from "../components/useDismiss";
+import { useDismiss, usePopover } from "../components/useDismiss";
 import { api, STATUS_LABEL, wsTitle, type Checkpoint, type FileChange, type PrOptions, type PrResult, type Repo, type Workspace } from "../api";
 import { ChatTab } from "./ChatTab";
 import { TerminalTab } from "./TerminalTab";
-import { FileDiff, FileView } from "./FileDiff";
+import { FileDiff, FileView, viewedMap } from "./FileDiff";
+import type { DiffScope } from "../api";
 import { ScriptsPane } from "./ScriptsPane";
-import { IChevronDown, IClose, IEye, IFile, IHistory, IMore, IPR, IPanel, IPin, IPlus, IRestore, RepoMark } from "../icons";
+import { IChevronDown, IClose, IEye, IFile, IFolder, IHistory, IMore, IPanel, IPin, IPlus, IRestore, RepoMark } from "../icons";
 import { OpenIn } from "../components/OpenIn";
 import { FileTree } from "../components/FileTree";
-import { Checks } from "../components/Checks";
+import { QuickOpen, SearchFiles } from "../components/FileSearch";
+import { ChecksPanel, GitButton, PrPill, availability, commentText } from "../components/GitPanel";
+import { buildPrompt, failing, useGit, type GitActionId } from "../components/useGit";
 import { Resizer, usePanelSize } from "../components/Resizer";
 import type { AgentState } from "../App";
 import { CloudDialog, CloudTab } from "../components/Cloud";
 import { pendingFirst } from "../components/CreateModal";
-import { pendingFork, pendingForkWs } from "../components/chatPrefs";
+import { pendingFork, pendingForkWs, pendingModel } from "../components/chatPrefs";
+import { useSettings } from "../components/useSettings";
 import { RunsOnBadge, cloudAdd, cloudList, cloudRemove, cloudRunsOn } from "../components/RunsOn";
 import type { CloudInfo, RepoAccess } from "../api";
 
-type CenterTab = { kind: "chat"; id: string; title: string; busy?: boolean; unread?: boolean; waiting?: boolean } | { kind: "cloud"; tmux: string; info: CloudInfo } | { kind: "term"; session: string; title: string } | { kind: "diff"; path: string } | { kind: "file"; path: string };
+type CenterTab = { kind: "chat"; id: string; title: string; busy?: boolean; unread?: boolean; waiting?: boolean } | { kind: "cloud"; tmux: string; info: CloudInfo } | { kind: "term"; session: string; title: string } | { kind: "diff"; path: string } | { kind: "file"; path: string; line?: number };
 type Bottom = "setup" | "run" | "terminal" | `t${number}`;
 type RightTab = "all" | "changes" | "checks" | "checkpoints";
 
@@ -34,6 +38,7 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
   const [cloudDialog, setCloudDialog] = useState(false);
   const [mirror, setMirror] = useState<{ running: boolean; link: string | null } | null>(null);
   const [access, setAccess] = useState<RepoAccess | null>(null);
+  const git = useGit(ws, repo, active);
   const rightSize = usePanelSize("right", Math.round(Math.min(480, Math.max(320, window.innerWidth * 0.3))), 260, 900);
   const bottomSize = usePanelSize("bottom", Math.round(window.innerHeight * 0.42), 120, 900);
   const toggleRight = () => setRightOpen((o) => (localStorage.setItem("kabul.rightPanel", o ? "0" : "1"), !o));
@@ -96,11 +101,26 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
     }, () => setTabs([{ kind: "chat", id: newChatId(), title: "Nova conversa" }]));
   }, [ws.id]);
 
+  const [scope, setScope] = useState<DiffScope>(() => (localStorage.getItem("kabul.diff.scope") as DiffScope) || "all");
+  const [changesView, setChangesView] = useState(() => localStorage.getItem("kabul.changes.view") ?? "list");
+  const [filter, setFilter] = useState("");
+  const [, bumpViewed] = useState(0);
+  useEffect(() => {
+    const h = () => bumpViewed((x) => x + 1);
+    window.addEventListener("kabul:viewed", h);
+    return () => window.removeEventListener("kabul:viewed", h);
+  }, []);
+  const [finder, setFinder] = useState<"open" | "grep" | null>(null);
+  const [fileCtx, setFileCtx] = useState<{ path: string; x: number; y: number; changed: boolean } | null>(null);
+  const fileCtxRef = useRef<HTMLDivElement>(null);
+  useDismiss(fileCtxRef, !!fileCtx, useCallback(() => setFileCtx(null), []));
+  const targetPop = usePopover<HTMLSpanElement>();
+  const [branches, setBranches] = useState<string[]>([]);
   const loadRight = useCallback(() => {
-    api.changes(ws.id).then(setChanges, () => {});
+    api.changes(ws.id, scope).then(setChanges, () => {});
     if (right === "all") api.files(ws.id).then(setAllFiles, () => {});
     if (right === "checkpoints") api.checkpoints(ws.id).then(setCheckpoints, () => {});
-  }, [ws.id, right]);
+  }, [ws.id, right, scope]);
   useEffect(() => {
     loadRight();
     const t = setInterval(loadRight, 4000);
@@ -110,11 +130,22 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
   const open = (t: CenterTab) => {
     const key = (x: CenterTab) => (x.kind === "chat" ? x.id : x.kind === "cloud" ? x.tmux : x.kind === "term" ? x.session : x.path);
     const i = tabs.findIndex((x) => x.kind === t.kind && key(x) === key(t));
-    if (i >= 0) return setActiveTab(i);
+    if (i >= 0) return (setActiveTab(i), t.kind === "file" && setTabs((ts) => ts.map((x, k) => (k === i ? t : x))));
+    // Um diff por vez: abrir outro arquivo troca o caminho da aba de diff existente.
+    const di = t.kind === "diff" ? tabs.findIndex((x) => x.kind === "diff") : -1;
+    if (di >= 0) return (setTabs((ts) => ts.map((x, k) => (k === di ? t : x))), setActiveTab(di));
     setTabs([...tabs, t]);
     setActiveTab(tabs.length);
   };
-  const closeTab = (i: number) => {
+  const closedRef = useRef<CenterTab[]>([]);
+  const closeTab = async (i: number) => {
+    const t = tabs[i];
+    // Fechar uma conversa com o agente trabalhando pede confirmação e para o agente.
+    if (t?.kind === "chat" && (t.busy || t.waiting)) {
+      if (!(await confirmDialog(`Fechar “${t.title}”? O agente está trabalhando nesta conversa.`, { ok: "Fechar mesmo assim", danger: true }))) return;
+      window.dispatchEvent(new CustomEvent("kabul:stop-chat", { detail: t.id }));
+    }
+    if (t) closedRef.current = [...closedRef.current.slice(-9), t];
     const next = tabs.filter((_, k) => k !== i);
     setTabs(next.length ? next : [{ kind: "chat", id: newChatId(), title: "Nova conversa" }]);
     setActiveTab(Math.max(0, activeTab >= i ? activeTab - 1 : activeTab));
@@ -125,13 +156,23 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
   useEffect(() => {
     if (!active) return;
     const h = (e: KeyboardEvent) => {
+      // ⌃Tab / ⌃⇧Tab: próxima / anterior aba.
+      if (e.ctrlKey && !e.metaKey && e.key === "Tab") return (e.preventDefault(), setActiveTab((a) => (a + (e.shiftKey ? tabs.length - 1 : 1)) % tabs.length));
       if (!e.metaKey) return;
       const k = e.key.toLowerCase();
       if (k === "t" && !e.shiftKey) (e.preventDefault(), open({ kind: "chat", id: newChatId(), title: "Nova conversa" }));
-      else if (k === "t" && e.shiftKey) (e.preventDefault(), newTerminalTab());
+      else if (k === "t" && e.shiftKey) {
+        // ⌘⇧T reabre a última aba fechada (sem nenhuma, abre um terminal).
+        e.preventDefault();
+        const last = closedRef.current.pop();
+        if (last) open(last);
+        else newTerminalTab();
+      }
       else if (k === "w" && !e.shiftKey) (e.preventDefault(), closeTab(activeTab));
       else if (k === "j" && !e.shiftKey) (e.preventDefault(), setBottomOpen((b) => !b));
       else if (k === "p" && e.shiftKey) (e.preventDefault(), openPr());
+      else if (k === "p" && !e.shiftKey && !e.altKey) (e.preventDefault(), setFinder("open"));
+      else if (k === "f" && e.shiftKey && !e.altKey) (e.preventDefault(), setFinder("grep"));
       else if (e.shiftKey && (e.key === "]" || e.key === "}")) (e.preventDefault(), setActiveTab((a) => (a + 1) % tabs.length));
       else if (e.shiftKey && (e.key === "[" || e.key === "{")) (e.preventDefault(), setActiveTab((a) => (a - 1 + tabs.length) % tabs.length));
     };
@@ -184,7 +225,8 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
       const d = (e as CustomEvent).detail;
       if (d.ws !== ws.id) return;
       const id = newChatId();
-      open({ kind: "chat", id, title: "Plano" });
+      if (d.model) pendingModel[id] = d.model;
+      open({ kind: "chat", id, title: d.title ?? "Plano" });
       setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:send-chat", { detail: { chat: id, text: d.text } })), 600);
     };
     const openFile = (e: Event) => {
@@ -229,7 +271,7 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
       api.cloudStart(ws.id, p.text, null).then((r) => (cloudAdd(ws.id, { tmux: r.tmux, info: r.info, created: Date.now() }), open({ kind: "cloud", tmux: r.tmux, info: r.info })), (e) => onError(String(e)));
     } else {
       const chat = tabs.find((t) => t.kind === "chat") as { id: string } | undefined;
-      if (chat) setTimeout(() => window.dispatchEvent(new CustomEvent(p.send ? "kabul:send-chat" : "kabul:compose-chat", { detail: { chat: chat.id, text: p.text } })), 400);
+      if (chat) setTimeout(() => window.dispatchEvent(new CustomEvent(p.send ? "kabul:send-chat" : "kabul:compose-chat", { detail: { chat: chat.id, text: p.text, plan: p.plan } })), 400);
     }
   }, [tabs.length, ws.id]);
 
@@ -249,8 +291,18 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
       setActiveTab(i);
       setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:compose-chat", { detail: { chat: target.id, text: d.text } })), 0);
     };
+    const send = (e: Event) => {
+      const d = (e as CustomEvent).detail as { ws: string; text: string };
+      if (d.ws !== ws.id) return;
+      const i = Math.max(0, tabs.findIndex((t) => t.kind === "chat" && t.id === lastChat));
+      const target = tabs[i];
+      if (target?.kind !== "chat") return;
+      setActiveTab(i);
+      setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:send-chat", { detail: { chat: target.id, text: d.text } })), 0);
+    };
     window.addEventListener("kabul:compose", h);
-    return () => window.removeEventListener("kabul:compose", h);
+    window.addEventListener("kabul:agent", send);
+    return () => (window.removeEventListener("kabul:compose", h), window.removeEventListener("kabul:agent", send));
   }, [tabs, lastChat, ws.id]);
 
   useEffect(() => {
@@ -258,6 +310,25 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
     onAgent(ws.id, chats.some((t) => t.waiting) ? "waiting" : chats.some((t) => t.busy) ? "working" : undefined);
   }, [tabs, ws.id, onAgent]);
   useEffect(() => () => onAgent(ws.id, undefined), [ws.id, onAgent]);
+  // Ações vindas da paleta (⌘K) e o modo zen.
+  const actRef = useRef<(a: string) => void>(() => {});
+  actRef.current = (a: string) => {
+    if (a === "quick-open") setFinder("open");
+    else if (a === "search-files") setFinder("grep");
+    else if (a === "show-changes") (setRight("changes"), setRightOpen(true));
+    else if (a === "show-checks") (setRight("checks"), setRightOpen(true));
+    else if (a === "toggle-right") toggleRight();
+    else if (a === "new-chat") open({ kind: "chat", id: newChatId(), title: "Nova conversa" });
+    else if (a === "new-terminal") newTerminalTab();
+    else runGit(a as GitActionId);
+  };
+  useEffect(() => {
+    const h = (e: Event) => (e as CustomEvent).detail.ws === ws.id && actRef.current((e as CustomEvent).detail.action);
+    const zen = (e: Event) => setRightOpen((e as CustomEvent).detail ? false : localStorage.getItem("kabul.rightPanel") !== "0");
+    window.addEventListener("kabul:ws-action", h);
+    window.addEventListener("kabul:zen-state", zen);
+    return () => (window.removeEventListener("kabul:ws-action", h), window.removeEventListener("kabul:zen-state", zen));
+  }, [ws.id]);
   // ⌥⌘B alterna o painel direito.
   useEffect(() => {
     if (!active) return;
@@ -265,7 +336,72 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [active]);
-  const review = () => window.dispatchEvent(new CustomEvent("kabul:compose", { detail: { ws: ws.id, text: `Revise as mudanças deste workspace contra ${ws.target_branch || repo.default_branch} (git diff origin/${ws.target_branch || repo.default_branch}...). Aponte bugs, riscos e o que falta testar, por arquivo.` } }));
+  const target = git.status?.target || ws.target_branch || repo.default_branch;
+  /** Manda um prompt ao agente (na última conversa); `compose` só preenche o campo. */
+  const toAgent = (text: string, send = true) => window.dispatchEvent(new CustomEvent(send ? "kabul:agent" : "kabul:compose", { detail: { ws: ws.id, text } }));
+  const appSet = useSettings();
+  // Revisar (⌘⇧R): com "Modelo da revisão" escolhido, abre uma conversa nova com ele.
+  // Prompts do repo lidos na hora (acabaram de ser editados em Configurações › Ações?).
+  const prompts = () => api.repoSettings(repo.id).then((r) => r.settings.prompts ?? null, () => git.prompts);
+  const review = async () => {
+    const text = buildPrompt("review", await prompts(), { target });
+    if (appSet?.review_model) window.dispatchEvent(new CustomEvent("kabul:new-chat-with", { detail: { ws: ws.id, text, model: appSet.review_model, title: "Revisão" } }));
+    else toAgent(text);
+  };
+  const direct = async (label: string, f: () => Promise<import("../api").Outcome>, id: GitActionId) => {
+    git.setBusy(id);
+    try {
+      git.setResult({ ...(await f()), label });
+      git.refresh();
+      onChange();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      git.setBusy(null);
+    }
+  };
+  const runGit = async (a: GitActionId) => {
+    const why = availability(git)[a];
+    if (why && a !== "create-pr" && a !== "review" && a !== "archive") return onError(`${a}: ${why}`);
+    switch (a) {
+      case "commit": return toAgent(buildPrompt("commit", await prompts(), { target }));
+      case "pull": return direct("Pull", () => api.gitPull(ws.id), a);
+      case "push": return direct("Push", () => api.gitPush(ws.id), a);
+      case "create-pr": return openPr();
+      case "create-pr-agent": return toAgent(buildPrompt("create_pr", await prompts(), { target }));
+      case "ready": return direct("Pronto para revisão", () => api.prReady(ws.id), a);
+      case "merge":
+        if (!(await confirmDialog(`Fazer merge do PR #${git.pr?.number} em ${git.pr?.base}?`, { ok: "Merge" }))) return;
+        return direct("Merge", () => api.prMerge(ws.id), a);
+      case "fix": {
+        git.setBusy(a);
+        const bad = failing(git.checks).slice(0, 3);
+        const logs = await Promise.all(bad.map((c) => api.checkLog(ws.id, c.link).then((l) => `### ${c.workflow ? c.workflow + " / " : ""}${c.name}
+\`\`\`
+${l.slice(-2500)}
+\`\`\``, () => `### ${c.name}\n(${c.link})`)));
+        git.setBusy(null);
+        return toAgent(buildPrompt("fix_errors", await prompts(), { target, checks: logs.join("\n\n") }));
+      }
+      case "conflicts": return toAgent(buildPrompt("resolve_conflicts", await prompts(), { target, files: (git.status?.conflicts ?? []).map((f) => `- ${f}`).join("\n") || "(veja git status)" }));
+      case "open-pr": return git.pr && api.prOpenUrl(ws.id, git.pr.url).then((u) => api.openExternal(u), (e) => onError(String(e)));
+      case "review": return review();
+      case "comments": return toAgent("Responda a estes comentários do PR (corrija o que fizer sentido):\n" + (git.pr?.comments ?? []).map(commentText).join("\n"), false);
+      case "archive": return window.dispatchEvent(new CustomEvent("kabul:archive", { detail: ws.id }));
+    }
+  };
+  // Atalhos do git: ⌘⇧Y commit e push, ⌘⇧L pull, ⌘⇧M merge, ⌘⇧X corrigir, ⌘⇧G abrir PR, ⌘⇧R revisar.
+  useEffect(() => {
+    if (!active) return;
+    const map: Record<string, GitActionId> = { KeyY: "commit", KeyL: "pull", KeyM: "merge", KeyX: "fix", KeyG: "open-pr", KeyR: "review" };
+    const h = (e: KeyboardEvent) => {
+      if (!e.metaKey || !e.shiftKey || e.altKey || e.ctrlKey || !map[e.code]) return;
+      e.preventDefault();
+      runGit(map[e.code]);
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  });
 
   const tab = tabs[activeTab] ?? tabs[0];
   return (
@@ -280,6 +416,17 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
           ) : (
             <span className="crumb-branch" title="Clique duplo para renomear a branch" onDoubleClick={() => (setEditing("branch"), setDraft(ws.branch))}>{ws.branch}</span>
           )}
+          <span className="picker" ref={targetPop.ref}>
+            <button className="crumb-target" title="Branch alvo (PR e diff)" onClick={() => (targetPop.toggle(), api.repoBranches(repo.id).then(setBranches, () => {}))} data-testid="target-branch">→ {ws.target_branch || repo.default_branch} <IChevronDown size={10} /></button>
+            {targetPop.open && (
+              <div className="popover status-pop target-pop" data-testid="target-pop">
+                <div className="pop-title">Branch alvo (PR e diff)</div>
+                {[repo.default_branch, ...branches.map((b) => b.replace(/^origin\//, "")).filter((b, i, a) => b !== repo.default_branch && a.indexOf(b) === i && b !== ws.branch)].map((b) => (
+                  <div key={b} className={"pop-row" + ((ws.target_branch || repo.default_branch) === b ? " on" : "")} onClick={() => (targetPop.close(), api.updateWorkspace(ws.id, { target_branch: b === repo.default_branch ? "" : b }).then(() => (onChange(), git.refresh(), loadRight()), (e) => onError(String(e))))} data-testid="target-row">{b}{b === repo.default_branch && <span className="dim small">padrão</span>}</div>
+                ))}
+              </div>
+            )}
+          </span>
           <span className="crumb-sep">·</span>
           {mirror?.running && <button className="issue-chip mirror-chip" title={`Rodando neste Mac, espelhada. A sessão aparece como "kabul-${ws.name}" no claude.ai/code e no app Claude do celular`} onClick={() => api.openExternal(mirror.link ?? "https://claude.ai/code")} data-testid="mirror-chip"><RunsOnBadge r={{ kind: "local", mirrored: true }} /> espelhado ↗</button>}
           {editing === "title" ? (
@@ -289,7 +436,7 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
           )}
           {ws.linear && <button className="issue-chip" title={ws.linear.title} onClick={() => api.openExternal(ws.linear!.url)}>{ws.linear.identifier} ↗</button>}
           <div className="picker" ref={statusRef}>
-            <button className={"status-pill st-" + ws.status} onClick={() => setStatusOpen(!statusOpen)}>{STATUS_LABEL[ws.status] ?? ws.status} <IChevronDown size={10} /></button>
+            <button className={"status-pill st-" + ws.status} onClick={() => setStatusOpen(!statusOpen)} data-testid="status-pill">{STATUS_LABEL[ws.status] ?? ws.status} <IChevronDown size={10} /></button>
             {statusOpen && (
               <div className="popover status-pop">
                 {Object.entries(STATUS_LABEL).map(([k, v]) => (
@@ -307,16 +454,21 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
                 <div className="pop-row" onClick={() => (setMenu(false), setEditing("branch"), setDraft(ws.branch))}>Renomear branch</div>
                 <div className="pop-row" onClick={() => (setMenu(false), navigator.clipboard.writeText(ws.branch))}>Copiar nome da branch</div>
                 <div className="pop-row" onClick={() => (setMenu(false), navigator.clipboard.writeText(ws.path))}>Copiar caminho</div>
+                <div className="pop-row" onClick={() => (setMenu(false), navigator.clipboard.writeText(`kabul://workspace?id=${ws.id}`))} data-testid="ws-copy-link">Copiar link <span className="grow" /><span className="kbd-hint">⌘⇧C</span></div>
+                <div className="pop-row" onClick={() => (setMenu(false), navigator.clipboard.writeText(`${wsTitle(ws)}\nbranch: ${ws.branch}\nalvo: ${ws.target_branch || repo.default_branch}\npasta: ${ws.path}\nporta: ${ws.port}${ws.pr_url ? `\nPR: ${ws.pr_url}` : ""}`))}>Copiar informações do workspace</div>
+                <div className="pop-row" onClick={() => (setMenu(false), api.updateWorkspace(ws.id, { unread: true }).then(onChange, (e) => onError(String(e))))}>Marcar como não lido</div>
                 <div className="pop-row" onClick={() => (setMenu(false), onOpenSettings(repo.id))}>Scripts e configurações do repo</div>
                 <div className="pop-row" onClick={() => (setMenu(false), toggleMirror())} data-testid="mirror-toggle">{mirror?.running ? "Parar espelhamento no celular/claude.ai" : "Espelhar no celular/claude.ai"}</div>
                 <div className="pop-row" onClick={() => (setMenu(false), setCloudDialog(true))}>Nova sessão na nuvem (Claude)…</div>
                 {access?.slug && <div className="pop-row" onClick={() => (setMenu(false), api.openExternal(`https://github.com/${access.slug}`))}>Abrir no GitHub ↗</div>}
                 <div className="pop-sep" />
-                <div className="pop-row danger" onClick={async () => { setMenu(false); if (await confirmDialog(`Arquivar ${wsTitle(ws)}? As mudanças ficam num checkpoint e dá para desarquivar.`, { ok: "Arquivar", danger: true })) api.archiveWorkspace(ws.id).then(onChange, (e) => onError(String(e))); }}>Arquivar workspace</div>
+                <div className="pop-row danger" onClick={() => (setMenu(false), window.dispatchEvent(new CustomEvent("kabul:archive", { detail: ws.id })))}>Arquivar workspace <span className="grow" /><span className="kbd-hint">⌘⇧A</span></div>
               </div>
             )}
           </div>
+          <PrPill git={git} onOpen={() => runGit("open-pr")} />
           <span className="grow" data-tauri-drag-region />
+          {!rightOpen && <GitButton git={git} onAction={runGit} compact />}
           <OpenIn path={ws.path} onError={onError} />
           <button className={"icon-btn" + (rightOpen ? " on" : "")} title="Mostrar/ocultar painel (⌥⌘B)" onClick={toggleRight} data-testid="toggle-right"><IPanel /></button>
         </header>
@@ -371,8 +523,8 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
         ) : t.kind === "term" ? (
           <div key={t.session} className="center-body" hidden={i !== activeTab}><TerminalTab ws={ws} session={t.session} visible={i === activeTab} onError={onError} /></div>
         ) : null)}
-        {tab?.kind === "diff" && <div className="center-body"><FileDiff ws={ws} path={tab.path} onError={onError} /></div>}
-        {tab?.kind === "file" && <div className="center-body"><FileView ws={ws} path={tab.path} onError={onError} /></div>}
+        {tab?.kind === "diff" && <div className="center-body"><FileDiff ws={ws} path={tab.path} scope={scope} files={changes.map((c) => c.path)} active={active} onNavigate={(p) => open({ kind: "diff", path: p })} onError={onError} /></div>}
+        {tab?.kind === "file" && <div className="center-body"><FileView key={tab.path + (tab.line ?? "")} ws={ws} path={tab.path} line={tab.line} onError={onError} /></div>}
       </section>
       {tabMenu && tabs[tabMenu.i]?.kind === "chat" && (() => {
         const t = tabs[tabMenu.i] as Extract<CenterTab, { kind: "chat" }>;
@@ -382,12 +534,28 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
             <div className="pop-row" onClick={() => (setTabMenu(null), window.dispatchEvent(new CustomEvent("kabul:fork-last", { detail: { chat: t.id } })))} data-testid="tab-fork">Fork para nova aba <span className="grow" /><span className="kbd-hint">⌘⌥↵</span></div>
             <div className="pop-row" onClick={() => (setTabMenu(null), copyTranscript(t.id))} data-testid="tab-copy">Copiar transcript <span className="grow" /><span className="kbd-hint">⌘⌥C</span></div>
             <div className="pop-row" onClick={() => (setTabMenu(null), patchTab(t.id, { unread: !t.unread }))}>{t.unread ? "Marcar como lida" : "Marcar como não lida"}</div>
+            <div className="pop-row" onClick={() => (setTabMenu(null), navigator.clipboard.writeText(`kabul://workspace?id=${ws.id}&session=${t.id}`))} data-testid="tab-copy-link">Copiar link</div>
+            <div className="pop-row" onClick={() => (setTabMenu(null), api.historyLoad(ws.id, t.id).then((r) => navigator.clipboard.writeText(`${r.title}\nconversa: ${t.id}\nmodelo: ${r.model_key ?? "-"}\nsessão do agente: ${r.agent_session ?? "-"}`), () => {}))}>Copiar informações da conversa</div>
             <div className="pop-sep" />
             <div className="pop-row" onClick={() => (setTabMenu(null), closeTab(tabMenu.i))}>Fechar <span className="grow" /><span className="kbd-hint">⌘W</span></div>
             <div className="pop-row" onClick={() => (setTabMenu(null), setTabs([t]), setActiveTab(0))} data-testid="tab-close-others">Fechar as outras</div>
           </div>
         );
       })()}
+      {finder === "open" && <QuickOpen ws={ws} onClose={() => setFinder(null)} onOpen={(p) => open(changes.some((c) => c.path === p) ? { kind: "diff", path: p } : { kind: "file", path: p })} />}
+      {finder === "grep" && <SearchFiles ws={ws} onClose={() => setFinder(null)} onOpen={(p, line) => open({ kind: "file", path: p, line })} />}
+      {fileCtx && (
+        <div ref={fileCtxRef} className="popover status-pop file-ctx" style={{ left: fileCtx.x, top: fileCtx.y }} data-testid="file-menu">
+          <div className="pop-row" onClick={() => (setFileCtx(null), open(fileCtx.changed ? { kind: "diff", path: fileCtx.path } : { kind: "file", path: fileCtx.path }))}>Ver</div>
+          <div className="pop-row" onClick={() => (setFileCtx(null), api.openIn(localStorage.getItem("kabul.openIn.default") || "finder", `${ws.path}/${fileCtx.path}`).catch((e) => onError(String(e))))} data-testid="file-open-in">Abrir no app padrão</div>
+          <div className="pop-row" onClick={() => (setFileCtx(null), api.openIn("finder", `${ws.path}/${fileCtx.path.includes("/") ? fileCtx.path.slice(0, fileCtx.path.lastIndexOf("/")) : ""}`).catch((e) => onError(String(e))))}>Mostrar no Finder</div>
+          <div className="pop-row" onClick={() => (setFileCtx(null), toAgent(`@${fileCtx.path} `, false))} data-testid="file-attach">Anexar no chat</div>
+          <div className="pop-sep" />
+          <div className="pop-row" onClick={() => (setFileCtx(null), navigator.clipboard.writeText(`${ws.path}/${fileCtx.path}`))} data-testid="file-copy-path">Copiar caminho</div>
+          <div className="pop-row" onClick={() => (setFileCtx(null), navigator.clipboard.writeText(fileCtx.path))} data-testid="file-copy-rel">Copiar caminho relativo</div>
+          {fileCtx.changed && <><div className="pop-sep" /><div className="pop-row danger" onClick={async () => { const p = fileCtx.path; setFileCtx(null); if (await confirmDialog(`Descartar as mudanças de ${p}? Não dá para desfazer (a não ser por um checkpoint).`, { ok: "Descartar", danger: true })) api.discard(ws.id, p).then(loadRight, (e) => onError(String(e))); }} data-testid="file-discard">Descartar mudanças…</div></>}
+        </div>
+      )}
       {cloudDialog && <CloudDialog ws={ws} onError={onError} onClose={() => setCloudDialog(false)} onCreated={(tmux, info) => (setCloudDialog(false), cloudAdd(ws.id, { tmux, info, created: Date.now() }), open({ kind: "cloud", tmux, info }))} />}
 
       {rightOpen && <Resizer axis="x" dir={-1} {...rightSize} onSize={rightSize.setSize} onCollapse={toggleRight} testid="resize-right" />}
@@ -395,10 +563,7 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
         <header className="topbar right-top" data-tauri-drag-region>
           {ws.pr_url && <button className="text-btn small" onClick={() => api.openExternal(ws.pr_url!)}>PR aberto ↗</button>}
           <div className="grow" />
-          <div className="split-btn" ref={prRef}>
-            <button className="btn" onClick={openPr} data-testid="create-pr"><IPR size={14} /> Criar PR</button>
-            <button className="btn caret-btn" title="Opções" onClick={openPr}><IChevronDown size={12} /></button>
-          </div>
+          <div ref={prRef}>{rightOpen && <GitButton git={git} onAction={runGit} />}</div>
           {pr && (
             <div className="popover pr-pop" data-testid="pr-form" onKeyDown={(e) => e.key === "Escape" && setPr(null)}>
               <div className="pop-title">Pull request para <code>{pr.stack_on ? `PR #${pr.stack_on}` : ws.target_branch || repo.default_branch}</code></div>
@@ -415,7 +580,7 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
         <div className="rtabs">
           <button className={"rtab" + (right === "all" ? " on" : "")} onClick={() => setRight("all")}>Arquivos</button>
           <button className={"rtab" + (right === "changes" ? " on" : "")} onClick={() => setRight("changes")}>Alterações <span className="count">{changes.length}</span></button>
-          <button className={"rtab" + (right === "checks" ? " on" : "")} onClick={() => setRight("checks")} data-testid="tab-checks">Checks</button>
+          <button className={"rtab" + (right === "checks" ? " on" : "")} onClick={() => setRight("checks")} data-testid="tab-checks">Checks{failing(git.checks).length ? <span className="count error">{failing(git.checks).length}</span> : null}</button>
           <span className="grow" />
           <button className="text-btn small review-btn" title="Pedir ao agente uma revisão das mudanças" onClick={review} data-testid="review"><IEye size={13} /> <span className="txt">Revisar</span></button>
           <button className={"icon-btn" + (right === "checkpoints" ? " on" : "")} title="Checkpoints" onClick={() => setRight("checkpoints")} data-testid="tab-checkpoints"><IHistory size={14} /></button>
@@ -428,10 +593,20 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
           </div>
         )}
         <div className="files">
-          {right === "changes" && (changes.length === 0 ? <div className="files-empty">Nenhuma alteração em relação a <code>{ws.target_branch || repo.default_branch}</code>.</div> : changes.map((c) => {
+          {right === "changes" && (
+            <div className="changes-head">
+              <select value={scope} onChange={(e) => (setScope(e.target.value as DiffScope), localStorage.setItem("kabul.diff.scope", e.target.value))} title="Escopo do diff" data-testid="diff-scope">
+                <option value="all">Todas as mudanças</option><option value="branch">Commits da branch</option><option value="uncommitted">Não commitadas</option>
+              </select>
+              <input {...noSuggest} autoComplete="off" placeholder="Filtrar arquivos" value={filter} onChange={(e) => setFilter(e.target.value)} data-testid="changes-filter" />
+              <button className="icon-btn" title={changesView === "list" ? "Ver em árvore" : "Ver em lista"} onClick={() => setChangesView((v) => { const n = v === "list" ? "tree" : "list"; localStorage.setItem("kabul.changes.view", n); return n; })} data-testid="changes-view">{changesView === "list" ? <IFolder size={14} /> : <IFile size={13} />}</button>
+            </div>
+          )}
+          {right === "changes" && changesView === "tree" && <FileTree files={changes.map((c) => c.path).filter((p) => p.toLowerCase().includes(filter.toLowerCase()))} expanded onOpen={(f) => open({ kind: "diff", path: f })} onContext={(f, e) => setFileCtx({ path: f, x: e.clientX, y: e.clientY, changed: true })} />}
+          {right === "changes" && changesView === "list" && (changes.length === 0 ? <div className="files-empty">Nenhuma alteração ({scope === "uncommitted" ? "não commitada" : scope === "branch" ? "commitada na branch" : <>em relação a <code>{ws.target_branch || repo.default_branch}</code></>}).</div> : changes.filter((c) => c.path.toLowerCase().includes(filter.toLowerCase())).map((c) => {
             const dir = c.path.includes("/") ? c.path.slice(0, c.path.lastIndexOf("/") + 1) : "";
             return (
-              <div key={c.path} className="file-row" onClick={() => open({ kind: "diff", path: c.path })}>
+              <div key={c.path} className={"file-row" + (viewedMap(ws.id)[c.path] ? " viewed" : "")} onClick={() => open({ kind: "diff", path: c.path })} onContextMenu={(e) => (e.preventDefault(), setFileCtx({ path: c.path, x: e.clientX, y: e.clientY, changed: true }))} data-testid="change-row">
                 <span className="fpath"><span className="dim">{dir}</span>{c.path.slice(dir.length)}</span>
                 <span className="grow" />
                 {c.added ? <span className="add">+{c.added}</span> : null}
@@ -440,8 +615,8 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
               </div>
             );
           }))}
-          {right === "all" && <FileTree files={allFiles} onOpen={(f) => open({ kind: "file", path: f })} />}
-          {right === "checks" && <Checks workspaceId={ws.id} onError={onError} />}
+          {right === "all" && <FileTree files={allFiles} onOpen={(f) => open({ kind: "file", path: f })} onContext={(f, e) => setFileCtx({ path: f, x: e.clientX, y: e.clientY, changed: changes.some((c) => c.path === f) })} />}
+          {right === "checks" && <ChecksPanel ws={ws} git={git} onAction={runGit} onToChat={(t) => toAgent(t, false)} onError={onError} />}
           {right === "checkpoints" && (checkpoints.length === 0 ? <div className="files-empty">Um checkpoint é gravado antes de cada mensagem enviada.</div> : checkpoints.map((c) => (
             <div key={c.id} className="file-row">
               <span className="fpath">{c.message}</span><span className="grow" />

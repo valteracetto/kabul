@@ -23,14 +23,14 @@ function build(paths: string[]): Node[] {
 }
 
 /** Árvore de arquivos do workspace: pastas recolhíveis, ícone por tipo de arquivo. */
-export function FileTree({ files, onOpen }: { files: string[]; onOpen: (p: string) => void }) {
+export function FileTree({ files, onOpen, onContext, expanded }: { files: string[]; onOpen: (p: string) => void; onContext?: (p: string, e: React.MouseEvent) => void; expanded?: boolean }) {
   const tree = useMemo(() => build(files), [files]);
-  const [openDirs, setOpenDirs] = useState<Set<string>>(new Set());
+  const [openDirs, setOpenDirs] = useState<Set<string>>(() => new Set(expanded ? files.flatMap((f) => f.split("/").slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join("/"))) : []));
   const toggle = (p: string) => setOpenDirs((s) => { const n = new Set(s); n.has(p) ? n.delete(p) : n.add(p); return n; });
   const render = (ns: Node[], depth: number): React.ReactNode =>
     ns.map((n) => (
       <div key={n.path}>
-        <div className="tree-row" style={{ paddingLeft: 10 + depth * 14 }} onClick={() => (n.dir ? toggle(n.path) : onOpen(n.path))} title={n.path} data-testid="tree-row">
+        <div className="tree-row" style={{ paddingLeft: 10 + depth * 14 }} onClick={() => (n.dir ? toggle(n.path) : onOpen(n.path))} onContextMenu={(e) => !n.dir && onContext && (e.preventDefault(), onContext(n.path, e))} title={n.path} data-testid="tree-row">
           {n.dir ? <IFolder size={15} open={openDirs.has(n.path)} /> : <FileIcon name={n.name} />}
           <span className="tree-name">{n.name}</span>
         </div>

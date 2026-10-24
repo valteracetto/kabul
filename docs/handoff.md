@@ -19,7 +19,7 @@ mesmo que o modelo novo rode em outro harness (Claude Code → OpenCode com Qwen
   - aviso e erro.
 - **`Author`**: `User { name, device }`, `Agent { harness, model }` ou `System`.
 
-A autoria já vem gravada desde já. Na colaboração em tempo real (pelo kabuld), um amigo conectado aparece como outro `User`, com `device` próprio.
+A autoria é gravada desde o começo. Na colaboração em tempo real pelo kabuld (ver [colaboracao.md](colaboracao.md)), cada pessoa conectada é um `User` com nome e `device` próprios. A fila única do servidor grava cada mensagem com o autor na ordem em que chegou ao agente.
 
 Os eventos normalizados de qualquer harness (`harness::Event`) entram por `Transcript::apply`. O
 transcript é a fonte para o histórico, o fork, o "Reset chat", a busca e o handoff.

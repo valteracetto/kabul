@@ -11,7 +11,9 @@ import { ContextPanel } from "../components/ContextPanel";
 import { useDismiss } from "../components/useDismiss";
 import type { LinearIssue } from "../api";
 import { ToolCard, ThinkingCard, ApprovalCard, PlanCard, QuestionCard } from "../components/ToolCards";
-import { chatPrefs, pendingFork, type PendingFork } from "../components/chatPrefs";
+import { chatPrefs, pendingFork, pendingModel, type PendingFork } from "../components/chatPrefs";
+import { ChatFind } from "../components/ChatFind";
+import { stripAbsolutelyRight, useSettings } from "../components/useSettings";
 import { IApps, IArrowUp, ICopy, IMic, IPlan, IPlus, IRestore, IStop } from "../icons";
 
 export type Item =
@@ -51,7 +53,8 @@ function apply(items: Item[], ev: AgentEvent, started: number): Item[] {
       return [...items, { k: "turn", meta: `${secs}s · ${time()}${extra ? " · " + extra : ""}`, copy: lastText?.text ?? ev.result ?? "" }];
     }
     case "error":
-      return [...items, { k: "error", text: ev.message }];
+      // O mesmo erro pode chegar duas vezes (notificação e fim do turno): mostra uma.
+      return last?.k === "error" && last.text === ev.message ? items : [...items, { k: "error", text: ev.message }];
     case "exited":
       return ev.code ? [...items, { k: "error", text: `o agente encerrou (código ${ev.code})` }] : items;
     default:
@@ -74,11 +77,12 @@ const PROVIDER_OF: Partial<Record<HarnessKind, string>> = { claude: "claude", co
 interface Props { ws: Workspace; sessionId: string; active: boolean; onTitle: (t: string) => void; onUnread: () => void; onBusy: (b: boolean) => void; onWaiting: (w: boolean) => void; onError: (e: string) => void; onWorkspaceChange: () => void }
 
 /** Anel de uso de contexto (tokens de entrada do último turno ÷ janela do modelo). */
-function ContextRing({ used, total, onClick, on }: { used: number; total: number | null; onClick: () => void; on: boolean }) {
+function ContextRing({ used, total, onClick, on, quiet }: { used: number; total: number | null; onClick: () => void; on: boolean; quiet?: boolean }) {
   const pct = total ? Math.min(1, used / total) : 0;
   const r = 7, c = 2 * Math.PI * r;
+  // Abaixo de 70% o anel fica discreto (aparece ao passar o mouse no composer), a menos que "sempre mostrar" esteja ligado.
   return (
-    <button className={"ctx-ring icon-btn" + (on ? " on" : "")} onClick={onClick} title={total ? `Contexto: ${used.toLocaleString("pt-BR")} de ${total.toLocaleString("pt-BR")} tokens (${Math.round(pct * 100)}%)` : "Contexto: janela desconhecida"} data-testid="context-ring">
+    <button className={"ctx-ring icon-btn" + (on ? " on" : "") + (quiet && pct < 0.7 && !on ? " ctx-quiet" : "")} data-pct={Math.round(pct * 100)} onClick={onClick} title={total ? `Contexto: ${used.toLocaleString("pt-BR")} de ${total.toLocaleString("pt-BR")} tokens (${Math.round(pct * 100)}%)` : "Contexto: janela desconhecida"} data-testid="context-ring">
       <svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r={r} stroke="var(--track)" strokeWidth="2" fill="none" /><circle cx="9" cy="9" r={r} stroke={pct > 0.85 ? "var(--del)" : "var(--muted)"} strokeWidth="2" fill="none" strokeDasharray={`${c * pct} ${c}`} transform="rotate(-90 9 9)" strokeLinecap="round" /></svg>
     </button>
   );
@@ -94,7 +98,15 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
   const [text, setText] = useState("");
   const [queue, setQueue] = useState<string[]>([]);
   const [queuePaused, setQueuePaused] = useState(false);
+  const appSet = useSettings();
+  useEffect(() => {
+    const k = pendingModel[sessionId];
+    if (k) (delete pendingModel[sessionId], setPrefs((p) => ({ ...p, selected: k })));
+  }, [sessionId]);
   const [plan, setPlan] = useState(false);
+  // "Conversas novas em plan mode" (Configurações › Modelos).
+  const planInit = useRef(false);
+  useEffect(() => void (appSet && !planInit.current && ((planInit.current = true), appSet.default_plan && setPlan(true))), [appSet]);
   const [ctxUsed, setCtxUsed] = useState(0);
   const [appsOpen, setAppsOpen] = useState(false);
   const [ctxOpen, setCtxOpen] = useState(false);
@@ -123,6 +135,8 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [note, setNote] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const [finding, setFinding] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const liveRef = useRef<Live | null>(null);
   const started = useRef(Date.now());
@@ -225,8 +239,11 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
       if (d.chat === sessionId) (setText((t) => (t ? t + "\n\n" : "") + d.text), setTimeout(() => input.current?.focus(), 50));
     };
     const send = (e: Event) => {
-      const d = (e as CustomEvent).detail as { chat: string; text: string };
-      if (d.chat === sessionId) sendRef.current(d.text);
+      const d = (e as CustomEvent).detail as { chat: string; text: string; plan?: boolean };
+      if (d.chat !== sessionId) return;
+      // Primeira mensagem do modal em plan mode: liga o plano antes de enviar.
+      if (d.plan) (setPlan(true), setTimeout(() => sendRef.current(d.text), 0));
+      else sendRef.current(d.text);
     };
     const forkLast = (e: Event) => {
       if ((e as CustomEvent).detail.chat !== sessionId) return;
@@ -306,6 +323,18 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
       return qi >= 0 ? [...it.slice(0, qi), ...it.slice(qi + 1), u] : [...it, u];
     });
     if (firstMessage) api.autoBranch(ws.id, t).then((w) => w && onWorkspaceChange(), () => {});
+    // A lista de modelos ainda não chegou (aba recém-aberta): envia assim que chegar, sem perder a mensagem.
+    if (!selected) return void (pendingSendRef.current = t);
+    await sendNow(t);
+  };
+  const pendingSendRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selected || !pendingSendRef.current) return;
+    const t = pendingSendRef.current;
+    pendingSendRef.current = null;
+    void sendNow(t);
+  }, [selected]);
+  const sendNow = async (t: string) => {
     const l = await ensure();
     if (!l) return setBusy(false);
     let payload = t;
@@ -367,6 +396,17 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
     setBusy(false);
     setItems((it) => [...it, { k: "notice", text: "Interrompido" }]);
   };
+
+  // Arquivar/sair com agentes rodando: "parar e arquivar" para todas as conversas do workspace.
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
+  useEffect(() => {
+    const h = (e: Event) => ((e as CustomEvent).detail === ws.id || (e as CustomEvent).detail === "*") && busy && stopRef.current();
+    const one = (e: Event) => (e as CustomEvent).detail === sessionId && stopRef.current();
+    window.addEventListener("kabul:stop-all", h);
+    window.addEventListener("kabul:stop-chat", one);
+    return () => (window.removeEventListener("kabul:stop-all", h), window.removeEventListener("kabul:stop-chat", one));
+  }, [ws.id, busy]);
 
   const decide = (rid: string, allow: boolean, always = false, updatedInput?: unknown) => {
     if (!live) return;
@@ -438,6 +478,14 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
 
   const onPaste = async (e: React.ClipboardEvent) => {
     const f = [...e.clipboardData.files][0];
+    const pasted = e.clipboardData.getData("text/plain");
+    // Texto colado com mais de 5.000 caracteres vira anexo (Configurações › Geral).
+    if (!f && pasted.length > 5000 && appSet?.auto_convert_long_text !== false) {
+      e.preventDefault();
+      const rel = await api.attachBytes(ws.id, `colado-${Date.now()}.txt`, Array.from(new TextEncoder().encode(pasted)));
+      setText((t) => `${t}${t && !t.endsWith(" ") ? " " : ""}@${rel} `);
+      return;
+    }
     if (!f) return;
     e.preventDefault();
     const rel = await api.attachBytes(ws.id, f.name || `colado-${Date.now()}.png`, Array.from(new Uint8Array(await f.arrayBuffer())));
@@ -494,6 +542,12 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
         return;
       }
       if (!e.metaKey) return;
+      // ⌘F busca no chat (no terminal, o ⌘F é do terminal).
+      if (e.code === "KeyF" && !e.shiftKey && !e.altKey && !(document.activeElement as HTMLElement | null)?.closest(".terminal")) {
+        e.preventDefault();
+        setFinding(true);
+        return;
+      }
       if (e.ctrlKey && /^[1-9]$/.test(e.key)) {
         const k = prefs.favorites[Number(e.key) - 1];
         if (k) (e.preventDefault(), setPrefs((p) => ({ ...p, selected: k })));
@@ -529,8 +583,9 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
   return (
     <div className="chat">
       <Minimap items={items} scroller={scroller} />
+      {finding && <ChatFind root={threadRef} scroller={scroller} version={items.length} onClose={() => setFinding(false)} />}
       <div className="messages" ref={scroller}>
-        <div className="thread">
+        <div className="thread" ref={threadRef}>
           {items.length === 0 && (
             <div className="chat-empty">
               <div className="ce-title">{ws.title || ws.name}</div>
@@ -576,7 +631,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
                     {i.checkpoint && !busy && <button className="icon-btn restore" title="Restaurar checkpoint (arquivos como antes desta mensagem)" onClick={() => restore(i.checkpoint!)}><IRestore size={13} /></button>}
                   </div>
                 );
-                case "assistant": return <div key={n} data-msg={n} className="msg-assistant"><Markdown text={i.text} onFile={openFile} />{i.streaming && <span className="caret" />}</div>;
+                case "assistant": return <div key={n} data-msg={n} className="msg-assistant"><Markdown text={appSet?.not_absolutely_right ? stripAbsolutelyRight(i.text) : i.text} onFile={openFile} />{i.streaming && <span className="caret" />}</div>;
                 case "reasoning": return <ThinkingCard key={n} text={i.text} />;
                 case "tool": return <ToolCard key={n} name={i.name} input={i.input} output={i.output} error={i.error} onOpenFile={openFile} />;
                 case "approval":
@@ -587,7 +642,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
                   if (i.tool === "AskUserQuestion") return <QuestionCard key={n} input={i.input} decided={i.decided}
                     onSubmit={(answers) => decide(i.id, true, false, { ...(i.input as object), answers })} onSkip={() => decide(i.id, false)} />;
                   return <ApprovalCard key={n} tool={i.tool} input={i.input} decided={i.decided} allow={i.allow} always={i.always} onDecide={(a, al) => decide(i.id, a, al)} />;
-                case "turn": return <TurnMeta key={n} item={i} checkpoint={([...items.slice(0, n)].reverse().find((x) => x.k === "user") as { checkpoint?: string } | undefined)?.checkpoint}
+                case "turn": return <TurnMeta key={n} item={i} files={turnFiles(items, n, ws.path)} onOpenFile={openFile} checkpoint={([...items.slice(0, n)].reverse().find((x) => x.k === "user") as { checkpoint?: string } | undefined)?.checkpoint}
                   isLast={turnBounds(n).isLast} onRestore={restore} onQuote={(t) => setText((x) => `${x}${x ? "\n" : ""}> ${t.split("\n").join("\n> ")}\n\n`)}
                   onForkTab={() => forkTab(n)} onForkWorkspace={() => forkWorkspace(n)} onReset={() => resetChat(n)} />;
                 case "handoff": return <div key={n} className="handoff-divider" data-testid="handoff"><span>{i.text}</span></div>;
@@ -674,7 +729,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
               {appsOpen && harnessNow && <McpPanel workspaceId={ws.id} repoId={ws.repo_id} harness={harnessNow} live={mcpLive} sessionOff={sessionOff} setSessionOff={setSessionOff} onError={onError} />}
             </div>
             <div className="picker" ref={ctxRef}>
-              <ContextRing used={ctxUsed} total={selected?.context ?? null} on={ctxOpen} onClick={() => (setCtxOpen(!ctxOpen), setAppsOpen(false))} />
+              <ContextRing used={ctxUsed} total={selected?.context ?? null} on={ctxOpen} quiet={!appSet?.always_show_context} onClick={() => (setCtxOpen(!ctxOpen), setAppsOpen(false))} />
               {ctxOpen && (() => {
                 const tools = mcpLive?.total ?? 0;
                 const mcpTools = Object.values(mcpLive?.tools ?? {}).reduce((a, b) => a + b, 0);
@@ -722,8 +777,27 @@ function Minimap({ items, scroller }: { items: Item[]; scroller: React.RefObject
 }
 
 /** Rodapé do turno: tempo (popover com início→fim e tokens), copiar e "···" (fork, reset, citar, restaurar). */
-function TurnMeta({ item, checkpoint, isLast, onRestore, onQuote, onForkTab, onForkWorkspace, onReset }: {
-  item: Extract<Item, { k: "turn" }>; checkpoint?: string; isLast: boolean; onRestore: (c: string) => void; onQuote: (t: string) => void;
+/** Arquivos mudados no turno (Edit/MultiEdit/Write), com +/− aproximados pelas strings da ferramenta. */
+export function turnFiles(items: Item[], n: number, root: string): { path: string; add: number; del: number }[] {
+  let u = n - 1;
+  while (u >= 0 && !(items[u].k === "user" && !(items[u] as { queued?: boolean }).queued)) u--;
+  const lines = (t: unknown) => (typeof t === "string" && t ? t.split("\n").length : 0);
+  const out = new Map<string, { add: number; del: number }>();
+  for (const it of items.slice(u + 1, n)) {
+    if (it.k !== "tool" || it.error || !/^(Edit|MultiEdit|Write|NotebookEdit)$/.test(it.name)) continue;
+    const inp = (it.input ?? {}) as { file_path?: string; old_string?: string; new_string?: string; content?: string; edits?: { old_string?: string; new_string?: string }[] };
+    if (!inp.file_path) continue;
+    const p = inp.file_path.startsWith(root + "/") ? inp.file_path.slice(root.length + 1) : inp.file_path;
+    const cur = out.get(p) ?? { add: 0, del: 0 };
+    const edits = inp.edits ?? [inp];
+    for (const e of edits) (cur.add += lines((e as { new_string?: string }).new_string ?? inp.content), (cur.del += lines((e as { old_string?: string }).old_string)));
+    out.set(p, cur);
+  }
+  return [...out].map(([path, v]) => ({ path, ...v }));
+}
+
+function TurnMeta({ item, files, onOpenFile, checkpoint, isLast, onRestore, onQuote, onForkTab, onForkWorkspace, onReset }: {
+  item: Extract<Item, { k: "turn" }>; files: { path: string; add: number; del: number }[]; onOpenFile: (p: string) => void; checkpoint?: string; isLast: boolean; onRestore: (c: string) => void; onQuote: (t: string) => void;
   onForkTab: () => void; onForkWorkspace: () => void; onReset: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -748,6 +822,12 @@ function TurnMeta({ item, checkpoint, isLast, onRestore, onQuote, onForkTab, onF
         )}
       </span>
       <button className="icon-btn" title="Copiar resposta final" onClick={() => navigator.clipboard.writeText(item.copy)}><ICopy size={13} /></button>
+      {files.length > 0 && (
+        <span className="turn-files" data-testid="turn-files">
+          {files.slice(0, 6).map((f) => <button key={f.path} className="file-chip" title={`Abrir o diff de ${f.path}`} onClick={() => onOpenFile(f.path)} data-testid="file-chip">{f.path.split("/").pop()} <span className="add">+{f.add}</span> <span className="del">−{f.del}</span></button>)}
+          {files.length > 6 && <span className="dim small">+{files.length - 6}</span>}
+        </span>
+      )}
       <span className="picker" ref={ref}>
         <button className={"icon-btn" + (open ? " on" : "")} title="Ações da mensagem" onClick={() => setOpen(!open)} data-testid="turn-more"><IMoreDots /></button>
         {open && (

@@ -1,3 +1,4 @@
+import { addRepo } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 
 const shot = (page: Page, name: string) => page.screenshot({ path: `../../.context/e2e/${name}.png` });
@@ -14,9 +15,7 @@ test("roteiro completo de um usuário (backend mock)", async ({ page }) => {
     await page.getByTestId("create-ws").click();
   await expect(page.getByTestId("create-modal")).toBeVisible();
   if (!(await page.getByTestId("repo-pop").isVisible())) await page.getByTestId("create-repo").click();
-  if (!(await page.getByTestId("repo-path").isVisible())) { await page.getByTestId("add-project").click(); }
-  await page.getByTestId("repo-path").fill("/mock/repos/demo");
-  await page.getByTestId("repo-path").press("Enter");
+  await addRepo(page, "/mock/repos/demo");
   await expect(page.getByTestId("repo-pop")).toHaveCount(0);
   await page.keyboard.press("Escape");
     await expect(page.locator(".repo-name", { hasText: "demo" })).toBeVisible();
@@ -145,7 +144,7 @@ test("roteiro completo de um usuário (backend mock)", async ({ page }) => {
     await shot(page, "13-busca");
     await page.keyboard.press("Escape");
     await page.keyboard.press("Meta+Alt+Slash");
-    await expect(page.locator(".shortcuts")).toContainText("Plan mode");
+    await expect(page.getByTestId("shortcuts")).toContainText("Plan mode");
     await page.keyboard.press("Meta+1");
     await expect(page.locator(".crumb-repo")).toBeVisible();
   });
@@ -173,12 +172,13 @@ test("roteiro completo de um usuário (backend mock)", async ({ page }) => {
 
   await test.step("16 configurações e contas", async () => {
     await page.getByTestId("settings").click();
+    await page.getByTestId("set-tab-git").click();
     await expect(page.getByTestId("settings-page")).toContainText("Prefixo da branch");
     await shot(page, "16a-geral");
-    await page.locator(".seg .rtab", { hasText: "Contas" }).click();
+    await page.getByTestId("set-tab-contas").click();
     await expect(page.getByTestId("account")).toHaveCount(6);
     await shot(page, "16b-contas");
-    await page.locator(".seg .rtab", { hasText: "Repositório" }).click();
+    await page.getByTestId("set-tab-repo").click();
     await expect(page.getByTestId("repo-settings")).toContainText("Camadas de configuração");
     await shot(page, "16c-repo");
   });

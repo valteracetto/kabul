@@ -1,0 +1,17 @@
+import { defineConfig, devices } from "@playwright/test";
+
+// E2E contra o kabuld REAL (binário em target/debug, PWA em dist, tmux de verdade com sessões
+// `kabul-test-*`). Celular: iPhone (WebKit). Desktop: painel Celular e remoto (Chromium).
+// Antes: `cargo build -p kabuld` e `npx vite build` (o globalSetup faz se faltar).
+export default defineConfig({
+  testDir: "e2e-kabuld",
+  timeout: 90_000,
+  workers: 1,
+  globalSetup: "./e2e-kabuld/global-setup.ts",
+  reporter: [["list"]],
+  use: { screenshot: "only-on-failure", trace: "retain-on-failure" },
+  projects: [
+    { name: "iphone", testMatch: /celular|colaboracao/, use: { ...devices["iPhone 15"] } },
+    { name: "desktop", testMatch: /painel/, use: { browserName: "chromium", viewport: { width: 1440, height: 900 }, colorScheme: "dark" } },
+  ],
+});

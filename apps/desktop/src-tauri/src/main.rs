@@ -2,8 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use kabul_core::auth::{self, AuthEvent, LoginSession};
-use kabul_core::conductor_db::{ConductorDb, ConductorSession, ConductorWorkspace};
-use kabul_core::harness::{self, HarnessKind, Running, SessionOptions};
+use kabul_core::import::sessions::{ImportedSession, ImportedWorkspace, SessionImporter};
+use kabul_core::harness::{self, HarnessKind, Running};
 use kabul_core::history::{self, SessionRecord, SessionSummary};
 use kabul_core::local::{self, CustomEndpoint, SourceStatus};
 use kabul_core::models::{self, Model};
@@ -19,6 +19,8 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 mod gitcmds;
+mod menu;
+mod remote;
 
 type R<T> = Result<T, String>;
 
@@ -287,8 +289,18 @@ async fn workspaces_stats(app: State<'_, App>) -> R<HashMap<String, (u32, u32)>>
 }
 
 #[tauri::command]
-async fn workspace_pr(app: State<'_, App>, workspace_id: String, options: PrOptions) -> R<PrResult> {
+async fn workspace_pr(app: State<'_, App>, workspace_id: String, mut options: PrOptions) -> R<PrResult> {
     let (w, r) = ws_repo(&app, &workspace_id)?;
+    // Configurações › Git: link do workspace, auto-merge, upstream e simulação.
+    let set = app.app_settings();
+    options.workspace_link |= set.pr_include_workspace_link;
+    options.automerge |= set.automerge;
+    options.merge_method.get_or_insert(set.merge_method.clone());
+    options.no_upstream |= !set.push_set_upstream;
+    options.dry_run |= set.github_dry_run;
+    if !set.stacked_prs {
+        options.stack_on = None;
+    }
     let res = store::create_pr(&r, &w, &options).map_err(e)?;
     if let Some(u) = &res.url {
         let _ = app.store.lock().unwrap().update_workspace(&workspace_id, |x| {
@@ -404,7 +416,16 @@ fn term_open(handle: AppHandle, app: State<App>, workspace_id: String, name: Opt
         let exports: String = w.full_env(&r).iter().map(|(k, v)| format!("export {k}={}; ", harness::shell_quote(v))).collect();
         tmux::new_session(&session, Some(&w.path), Some(&format!("zsh -c {}", harness::shell_quote(&format!("{exports}exec zsh -l"))))).map_err(e)?;
     }
-    let pane = tmux::list_panes().map_err(e)?.into_iter().find(|p| p.session == session).map(|p| p.pane_id).ok_or_else(|| format!("pane de {session} não encontrado"))?;
+    // A sessão acabou de nascer: espera o pane aparecer (até ~1 s) antes de desistir.
+    let mut pane = None;
+    for _ in 0..20 {
+        pane = tmux::list_panes().map_err(e)?.into_iter().find(|p| p.session == session).map(|p| p.pane_id);
+        if pane.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let pane = pane.ok_or_else(|| format!("o terminal {session} não abriu (a sessão do tmux terminou logo ao iniciar)"))?;
     let snapshot = tmux::screen(&pane).unwrap_or_default();
     let mut terms = app.terms.lock().unwrap();
     if !terms.contains_key(&session) {
@@ -460,7 +481,7 @@ fn endpoints(app: &App) -> Vec<CustomEndpoint> {
 
 #[tauri::command]
 async fn models_list(app: State<'_, App>) -> R<Vec<Model>> {
-    let mut v = models::catalog();
+    let mut v = models::catalog_for(&app.home);
     v.extend(models::local_models(&local::discover(&endpoints(&app)), &registry(&app)));
     Ok(v)
 }
@@ -554,78 +575,38 @@ struct ChatStarted {
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 async fn chat_start(handle: AppHandle, app: State<'_, App>, workspace_id: String, model: Model, effort: Option<String>, fast: Option<bool>, resume: Option<String>, plan: Option<bool>, disabled_mcp: Option<Vec<String>>, fork: Option<bool>, account: Option<String>) -> R<ChatStarted> {
-    let _ = fast; // sem flag confirmada nos CLIs; fica registrado na UI.
     let (w, r) = ws_repo(&app, &workspace_id)?;
-    let mut k = model.harness;
-    let mut note = None;
-    let mut endpoint = None;
-    if let Some(l) = &model.local {
-        let src = local::discover(&endpoints(&app)).into_iter().find(|s| s.id == l.source).ok_or("fonte do modelo local não encontrada")?;
-        let lm = src.models.iter().find(|m| m.id == l.model).cloned().ok_or("modelo não está mais disponível")?;
-        let res = registry(&app).resolve(&lm.id, &src.apis, &|h| h.installed());
-        k = res.harness.ok_or_else(|| res.note.clone())?;
-        note = Some(res.note);
-        let key = endpoints(&app).into_iter().find(|x| x.id == src.id).and_then(|x| x.api_key);
-        endpoint = Some(local::prepare(&src, &lm, key).map_err(e)?);
-    }
-    let h = k.harness();
-    let mut env = w.full_env(&r);
-    env.extend(app.app_settings().env_for(k.binary()));
-    // Conta escolhida para esta conversa (perfil com config isolada); sem escolha, o padrão do provedor.
-    {
-        let accs = kabul_core::accounts::Accounts::open(&app.home);
-        let prof = account.and_then(|id| accs.get(&id)).unwrap_or_else(|| accs.default_for(kabul_core::accounts::provider_of(k)));
-        env.extend(kabul_core::accounts::env_for(&prof));
-    }
-    let cli_model = if endpoint.is_some() { None } else { Some(models::cli_model(&model, effort.as_deref())) };
-    let effort = if model.effort_in_id || model.efforts.is_empty() { None } else { effort };
-    let disabled_mcp = disabled_mcp.unwrap_or_default();
-    // Claude: com MCP desligado na sessão, passa só os habilitados (--mcp-config + --strict-mcp-config).
-    let mcp_config = if k == HarnessKind::Claude && !disabled_mcp.is_empty() {
-        let (_, r) = ws_repo(&app, &workspace_id)?;
-        let entries = kabul_core::mcp::list(k, Path::new(&w.path), Path::new(&r.path));
-        Some(kabul_core::mcp::claude_config_file(&entries, &disabled_mcp, &app.file("mcp")).map_err(e)?.display().to_string())
-    } else {
-        None
-    };
-    let opts = SessionOptions {
-        fork: fork.unwrap_or(false),
-        mcp_config,
-        disabled_mcp,
-        cwd: Some(w.path.clone()),
-        model: cli_model,
-        effort,
-        resume,
-        approvals_via_app: h.app_approvals(),
-        // sessão em `default` (aprovações vêm para o app) ou `plan`.
-        permission_mode: if plan.unwrap_or(false) { Some("plan".into()) } else if k == HarnessKind::Claude { Some("default".into()) } else { None },
-        endpoint,
-        env,
-        ..Default::default()
-    };
-    let mut running = harness::spawn(h.as_ref(), &opts).map_err(e)?;
+    let req = kabul_core::chat::ChatRequest { model: None, effort, fast, resume, plan, disabled_mcp, fork, account };
+    // Mesmo caminho do `kabul serve` (core): harness, ambiente, conta e opções.
+    let (p, mut running) = kabul_core::chat::start(&app.home, &w, &r, &model, &req, &endpoints(&app), &registry(&app)).map_err(e)?;
+    let header = kabul_core::chat::log_header(&p);
     let (_tx, dummy) = std::sync::mpsc::channel();
     let rx = std::mem::replace(&mut running.events, dummy);
     let id = app.next("chat");
     let running = Arc::new(Mutex::new(running));
     app.chats.lock().unwrap().insert(id.clone(), running.clone());
+    remote::mirror_chat(&handle, &id, &w, p.kind, &model.label, p.opts.approvals_via_app, running.clone());
     let cid = id.clone();
     let caffeinate = app.app_settings().caffeinate;
+    let log = app.file("logs/agents.log");
     std::thread::spawn(move || {
         let coffee = caffeinate.then(|| std::process::Command::new("caffeinate").args(["-i", "-w", &std::process::id().to_string()]).spawn().ok()).flatten();
+        let h2 = handle.clone();
         let emit = |ev: serde_json::Value| {
             let _ = handle.emit("chat-event", ChatPayload { chat_id: cid.clone(), event: ev });
         };
-        for ev in rx {
-            emit(serde_json::to_value(&ev).unwrap_or_default());
-        }
-        let code = running.lock().unwrap().wait();
-        emit(serde_json::json!({ "type": "exited", "code": code }));
+        // "Parado pelo usuário" = o chat_stop já tirou a conversa da lista.
+        let stopped = || !h2.state::<App>().chats.lock().unwrap().contains_key(&cid);
+        let r2 = running.clone();
+        // Espelho no kabuld embutido (celular): vê cada evento e fecha quando o agente sai.
+        let tap = |ev: &kabul_core::harness::Event| remote::feed(&h2, &cid, ev);
+        kabul_core::chat::pump_with(rx, tap, emit, stopped, move || r2.lock().unwrap().wait(), Some((log, format!("{header} · {cid}"))));
+        remote::close_chat(&h2, &cid);
         if let Some(mut c) = coffee {
             let _ = c.kill();
         }
     });
-    Ok(ChatStarted { chat_id: id, harness: k, approvals: h.app_approvals(), note })
+    Ok(ChatStarted { chat_id: id, harness: p.kind, approvals: p.opts.approvals_via_app, note: p.note })
 }
 
 fn chat(app: &App, id: &str) -> R<Arc<Mutex<Running>>> {
@@ -633,13 +614,17 @@ fn chat(app: &App, id: &str) -> R<Arc<Mutex<Running>>> {
 }
 
 #[tauri::command]
-fn chat_send(app: State<App>, chat_id: String, text: String) -> R<()> {
-    chat(&app, &chat_id)?.lock().unwrap().send(&text).map_err(e)
+fn chat_send(handle: AppHandle, app: State<App>, chat_id: String, text: String) -> R<()> {
+    chat(&app, &chat_id)?.lock().unwrap().send(&text).map_err(e)?;
+    remote::local_send(&handle, &chat_id, &text);
+    Ok(())
 }
 
 #[tauri::command]
-fn chat_approve(app: State<App>, chat_id: String, request_id: String, allow: bool, tool: Option<String>, updated_input: Option<serde_json::Value>, always: Option<bool>) -> R<()> {
-    chat(&app, &chat_id)?.lock().unwrap().approve_ext(&request_id, allow, tool.as_deref().unwrap_or(""), updated_input, always.unwrap_or(false)).map_err(e)
+fn chat_approve(handle: AppHandle, app: State<App>, chat_id: String, request_id: String, allow: bool, tool: Option<String>, updated_input: Option<serde_json::Value>, always: Option<bool>) -> R<()> {
+    chat(&app, &chat_id)?.lock().unwrap().approve_ext(&request_id, allow, tool.as_deref().unwrap_or(""), updated_input, always.unwrap_or(false)).map_err(e)?;
+    remote::local_approval(&handle, &chat_id, &request_id, allow);
+    Ok(())
 }
 
 #[tauri::command]
@@ -653,27 +638,11 @@ fn chat_stop(app: State<App>, chat_id: String) -> R<()> {
 /// Ao primeiro envio: renomeia a branch a partir da mensagem, se o usuário não fixou um nome.
 #[tauri::command]
 fn workspace_auto_branch(app: State<App>, workspace_id: String, text: String) -> R<Option<Workspace>> {
-    if !app.app_settings().auto_rename_branch {
+    let set = app.app_settings();
+    if !set.auto_rename_branch {
         return Ok(None);
     }
-    let (w, _) = ws_repo(&app, &workspace_id)?;
-    if w.user_set_branch || !(w.branch == w.name || w.branch.ends_with(&format!("/{}", w.name))) {
-        return Ok(None);
-    }
-    let slug = store::slug(&text);
-    if slug.len() < 3 {
-        return Ok(None);
-    }
-    let prefix = w.branch.rsplit_once('/').map(|(p, _)| p.to_string()).unwrap_or_default();
-    let mut st = app.store.lock().unwrap();
-    let mut out = st.rename_branch(&workspace_id, &store::prefixed(&prefix, &slug), false).map_err(e)?;
-    // "Rename workspace when branch is named": o título acompanha a branch (se não houver título).
-    if app.app_settings().rename_ws_on_branch && out.title.is_none() {
-        let t = slug.replace('-', " ");
-        let t = t[..1].to_uppercase() + &t[1..];
-        out = st.update_workspace(&workspace_id, |x| x.title = Some(t)).map_err(e)?;
-    }
-    Ok(Some(out))
+    app.store.lock().unwrap().auto_branch(&workspace_id, &text, set.rename_ws_on_branch).map_err(e)
 }
 
 // ---------------- histórico ----------------
@@ -724,20 +693,20 @@ struct TmuxSession {
 #[derive(Serialize)]
 struct Sessions {
     tmux: Vec<TmuxSession>,
-    conductor_workspaces: Vec<ConductorWorkspace>,
-    conductor_sessions: Vec<ConductorSession>,
-    conductor_error: Option<String>,
+    imported_workspaces: Vec<ImportedWorkspace>,
+    imported_sessions: Vec<ImportedSession>,
+    imported_error: Option<String>,
 }
 
 #[tauri::command]
 async fn sessions_list() -> R<Sessions> {
     let tmux = tmux::list_panes().map_err(e)?.into_iter().map(|p| TmuxSession { agent: agent::detect_pane(&p.command, p.pid).label(), pane: p }).collect();
     let (mut cw, mut cs, mut err) = (vec![], vec![], None);
-    match ConductorDb::open_default().and_then(|db| Ok((db.workspaces()?, db.sessions()?))) {
+    match SessionImporter::open_detected(None).and_then(|db| Ok((db.workspaces()?, db.sessions()?))) {
         Ok((w, s)) => (cw, cs) = (w, s),
         Err(x) => err = Some(e(x)),
     }
-    Ok(Sessions { tmux, conductor_workspaces: cw, conductor_sessions: cs, conductor_error: err })
+    Ok(Sessions { tmux, imported_workspaces: cw, imported_sessions: cs, imported_error: err })
 }
 
 // ---------------- contas ----------------
@@ -1245,16 +1214,8 @@ struct PrChecks {
 #[tauri::command]
 async fn pr_checks(app: State<'_, App>, workspace_id: String) -> R<PrChecks> {
     let (w, _) = ws_repo(&app, &workspace_id)?;
-    let o = std::process::Command::new("gh").args(["pr", "checks", "--json", "name,state,bucket,link,workflow,startedAt,completedAt,description"]).current_dir(&w.path).output().map_err(e)?;
-    let out = String::from_utf8_lossy(&o.stdout);
-    match serde_json::from_str::<Vec<serde_json::Value>>(&out) {
-        Ok(checks) => Ok(PrChecks { message: checks.is_empty().then(|| "O PR não tem checks configurados.".into()), checks }),
-        Err(_) => {
-            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
-            let msg = if err.contains("no pull requests found") || err.contains("no default remote") || err.contains("not a git repository") || err.contains("none of the git remotes") { "Sem PR aberto para esta branch.".to_string() } else if err.is_empty() { "Sem checks.".into() } else { err };
-            Ok(PrChecks { checks: vec![], message: Some(msg) })
-        }
-    }
+    let (checks, message) = kabul_core::gitops::pr_checks(&w).map_err(e)?;
+    Ok(PrChecks { checks, message })
 }
 
 // ---------------- app ----------------
@@ -1266,6 +1227,7 @@ fn app_settings_get(app: State<App>) -> AppSettings {
 
 #[tauri::command]
 fn app_settings_save(app: State<App>, settings: AppSettings) -> R<()> {
+    settings.apply_bin_overrides();
     settings.save(&app.file("app-settings.json")).map_err(e)
 }
 
@@ -1279,6 +1241,44 @@ fn notify(app: State<App>, title: String, body: String) -> R<()> {
     let sound = if s.sound && s.completion_sound != "none" { format!(" sound name \"{}\"", esc(&s.completion_sound)) } else { String::new() };
     std::process::Command::new("osascript").args(["-e", &format!("display notification \"{}\" with title \"{}\"{sound}", esc(&body), esc(&title))]).spawn().map_err(e)?;
     Ok(())
+}
+
+#[derive(Serialize)]
+struct Diagnostics {
+    checks: Vec<kabul_core::diagnostics::Check>,
+    report: String,
+    redacted: String,
+}
+
+#[tauri::command]
+async fn diagnostics() -> Diagnostics {
+    let checks = kabul_core::diagnostics::run();
+    let report = kabul_core::diagnostics::report(&checks);
+    let redacted = kabul_core::diagnostics::redact(&report, &std::env::var("HOME").unwrap_or_default(), &std::env::var("USER").unwrap_or_default(), &kabul_core::machine::computer_name());
+    Diagnostics { checks, report, redacted }
+}
+
+/// Abre as ferramentas de depuração da janela (Ajuda › ⌘⌥I).
+#[tauri::command]
+fn open_devtools(window: tauri::WebviewWindow) {
+    #[cfg(debug_assertions)]
+    window.open_devtools();
+    #[cfg(not(debug_assertions))]
+    let _ = window;
+}
+
+/// Sai do app (depois de o frontend confirmar, se havia agentes rodando). Para os agentes antes.
+#[tauri::command]
+fn app_quit(handle: AppHandle, app: State<App>) {
+    for (_, c) in app.chats.lock().unwrap().drain() {
+        let _ = c.lock().unwrap().kill();
+    }
+    handle.exit(0);
+}
+
+#[tauri::command]
+async fn machine_info() -> kabul_core::machine::MachineInfo {
+    kabul_core::machine::info()
 }
 
 /// Toca um som do sistema ("Test" do som de conclusão). Só macOS por enquanto (ver docs/windows.md).
@@ -1325,22 +1325,11 @@ fn shellexpand(p: &str) -> String {
     }
 }
 
-/// Apps GUI no macOS herdam um PATH mínimo; os CLIs moram em outros lugares.
-fn fix_path() {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let cur = std::env::var("PATH").unwrap_or_default();
-    let extra = [format!("{home}/.local/bin"), format!("{home}/.cargo/bin"), format!("{home}/.opencode/bin"), format!("{home}/.lmstudio/bin"), "/opt/homebrew/bin".into(), "/usr/local/bin".into()];
-    let mut parts: Vec<String> = cur.split(':').filter(|s| !s.is_empty()).map(String::from).collect();
-    for x in extra {
-        if !parts.contains(&x) {
-            parts.push(x);
-        }
-    }
-    std::env::set_var("PATH", parts.join(":"));
-}
 
 fn main() {
-    fix_path();
+    // Aberto pelo Dock o app herda um ambiente mínimo: carrega o do shell de login (PATH, LANG...).
+    let home = std::env::var("HOME").unwrap_or_default();
+    kabul_core::shell_env::apply(&[format!("{home}/.local/bin"), format!("{home}/.cargo/bin"), format!("{home}/.opencode/bin"), format!("{home}/.lmstudio/bin"), "/opt/homebrew/bin".into(), "/usr/local/bin".into()]);
     if let Some(t) = kabul_core::github::get_token() {
         std::env::set_var("GH_TOKEN", t);
     }
@@ -1350,10 +1339,16 @@ fn main() {
         None => Store::default_paths(),
     };
     let home = file.parent().unwrap().to_path_buf();
+    AppSettings::load(&home.join("app-settings.json")).apply_bin_overrides();
     let prefix = AppSettings::load(&home.join("app-settings.json")).branch_prefix();
     let store = Store::open(file, root, prefix).expect("abrindo o estado do Kabul");
     tauri::Builder::default()
         .manage(App { home, store: Mutex::new(store), chats: Default::default(), logins: Default::default(), terms: Default::default(), gh_login: Default::default(), account_logins: Default::default(), seq: Default::default() })
+        .manage(remote::Remote::default())
+        .setup(|app| {
+            remote::autostart(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             repos_list, repo_add, repo_clone, repo_remove, repo_settings, repo_settings_save,
             workspaces_list, workspace_create, workspace_update, workspace_rename_branch, workspace_archive, workspace_unarchive,
@@ -1364,10 +1359,13 @@ fn main() {
             chat_start, chat_send, chat_approve, chat_stop, history_list, history_load, history_save, history_delete, history_search, slash_commands,
             sessions_list, open_targets, open_in, pr_checks, mcp_list, mcp_add, repo_branches, repo_prs, workspace_create_ex, cloud_start, cloud_poll, term_run, teleport, mirror_status, mirror_start, mirror_stop, workspace_fork,
             accounts_list, account_add, account_update, account_login, account_code, account_cancel,
-            github_status, github_login, github_cancel, github_switch, github_token, github_token_set, github_repo_access, linear_status, linear_connect, linear_disconnect, linear_issues, workspace_from_issue, auth_status, auth_login, auth_code, auth_cancel, app_settings_get, app_settings_save, notify, open_external, transcribe, pick_folder, pick_file, sound_play,
+            github_status, github_login, github_cancel, github_switch, github_token, github_token_set, github_repo_access, linear_status, linear_connect, linear_disconnect, linear_issues, workspace_from_issue, auth_status, auth_login, auth_code, auth_cancel, app_settings_get, app_settings_save, notify, open_external, transcribe, pick_folder, pick_file, sound_play, machine_info, diagnostics, open_devtools, app_quit,
             gitcmds::git_status, gitcmds::git_pull, gitcmds::git_push, gitcmds::workspace_discard, gitcmds::workspace_grep, gitcmds::pr_view, gitcmds::pr_merge, gitcmds::pr_ready, gitcmds::pr_edit,
-            gitcmds::checks_rerun, gitcmds::check_log, gitcmds::sections_list, gitcmds::section_save, gitcmds::section_delete, gitcmds::repo_update, gitcmds::repo_env_layers
+            gitcmds::checks_rerun, gitcmds::check_log, gitcmds::sections_list, gitcmds::section_save, gitcmds::section_delete, gitcmds::repo_update, gitcmds::repo_env_layers, gitcmds::gh_repos, gitcmds::repo_clone_to, gitcmds::repo_quick_start, gitcmds::git_identity, gitcmds::git_identity_set, gitcmds::repo_remotes, gitcmds::pr_open_url,
+            remote::kabuld_status, remote::kabuld_start, remote::kabuld_stop, remote::kabuld_call
         ])
+        .menu(|app| menu::build(app))
+        .on_menu_event(|app, ev| menu::on_event(app, ev.id().as_ref()))
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o Kabul");
 }

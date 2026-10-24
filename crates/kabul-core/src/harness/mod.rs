@@ -101,6 +101,9 @@ impl HarnessKind {
 
 /// Procura um executável no PATH e em pastas de instalação conhecidas.
 pub fn which(bin: &str) -> Option<std::path::PathBuf> {
+    if let Some(p) = std::env::var_os(bin_override_var(bin)).map(std::path::PathBuf::from).filter(|p| p.is_file()) {
+        return Some(p);
+    }
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
     let extra = [home.join(".opencode/bin"), home.join(".lmstudio/bin"), home.join(".local/bin"), "/opt/homebrew/bin".into(), "/usr/local/bin".into()];
     std::env::var_os("PATH")
@@ -201,6 +204,15 @@ pub struct SessionOptions {
     pub mcp_config: Option<String>,
     /// MCPs desligados nesta sessão (OpenCode/Codex aplicam por config).
     pub disabled_mcp: Vec<String>,
+    /// Claude: JSON de `--settings` (ex.: `{"outputStyle":"Explanatory"}`).
+    pub settings_json: Option<String>,
+    /// Claude: `--append-system-prompt` (preferências gerais do repo).
+    pub system_prompt: Option<String>,
+}
+
+/// Variável que aponta o executável de um agente (Configurações › Avançado): `KABUL_BIN_CLAUDE` etc.
+pub fn bin_override_var(bin: &str) -> String {
+    format!("KABUL_BIN_{}", bin.to_uppercase().replace('-', "_"))
 }
 
 /// Programa + argumentos, sem executar (testável).

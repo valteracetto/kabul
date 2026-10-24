@@ -27,3 +27,17 @@ export function cycleTheme(): ThemePref {
 export const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 mq?.addEventListener("change", () => getThemePref() === "system" && applyTheme());
+
+/** Preferências de aparência do aparelho (Configurações › Aparência) aplicadas no <html>. */
+export function applyAppearance() {
+  const r = document.documentElement;
+  const get = (k: string, d: string) => localStorage.getItem(k) ?? d;
+  r.dataset.contrast = get("kabul.contrast", "normal");
+  const cb = get("kabul.cb", "default");
+  if (cb === "default") delete r.dataset.cb;
+  else r.dataset.cb = cb;
+  r.dataset.ligatures = get("kabul.ligatures", "on");
+  r.dataset.sidebarDiffs = get("kabul.sidebarDiffs", "colored");
+  r.style.setProperty("--mono-font", `"${get("kabul.monoFont", "Geist Mono")}"`);
+  r.classList.toggle("md-tufte", get("kabul.mdStyle", "default") === "tufte");
+}

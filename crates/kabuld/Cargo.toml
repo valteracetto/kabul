@@ -1,0 +1,34 @@
+[package]
+name = "kabuld"
+version.workspace = true
+edition.workspace = true
+description = "Servidor do Kabul: mesma API do app por WebSocket, espelho das sessões, celular e colaboração"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "kabuld"
+path = "src/main.rs"
+
+[dependencies]
+kabul-core = { path = "../kabul-core" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+tower-http = { version = "0.6", features = ["fs"] }
+futures-util = "0.3"
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+web-push-native = "0.5"
+ureq = "2"
+http = "1"
+
+[dev-dependencies]
+tokio-tungstenite = "0.29"

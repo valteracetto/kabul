@@ -1,10 +1,37 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api, type LinearIssue, type Model, type Repo, type Workspace } from "../api";
 import { ModelPicker } from "./ModelPicker";
 import { useModelPrefs } from "./prefs";
-import { useDismiss } from "./useDismiss";
+import { popoverOpen, useDismiss } from "./useDismiss";
+import { useSettings } from "./useSettings";
 import { RunsOnBadge, type RunsOn } from "./RunsOn";
 import { IChevronDown, IMore, IPlus, ISearch, RepoMark } from "../icons";
+import { CloneDialog, QuickStartDialog } from "./CloneDialog";
+
+const IFolder = () => <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"><path d="M1.8 4.2c0-.5.4-.9.9-.9h3.2l1.3 1.4h6.1c.5 0 .9.4.9.9v6.3c0 .5-.4.9-.9.9H2.7a.9.9 0 0 1-.9-.9Z" /></svg>;
+const IGlobe = () => <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><circle cx="8" cy="8" r="5.8" /><path d="M2.2 8h11.6M8 2.2c1.6 1.7 2.4 3.6 2.4 5.8S9.6 12.1 8 13.8C6.4 12.1 5.6 10.2 5.6 8S6.4 3.9 8 2.2Z" /></svg>;
+
+/** Submenu de "Adicionar projeto": 3 itens, o primeiro destacado; ↑↓ e ↵ escolhem, Esc volta à lista de repos. */
+function AddMenu({ busy, canBack, onBack, onOpen, onGitHub, onQuick }: { busy: boolean; canBack: boolean; onBack: () => void; onOpen: () => void; onGitHub: () => void; onQuick: () => void }) {
+  const [sel, setSel] = useState(0);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => ref.current?.focus(), []);
+  const items: [string, React.ReactNode, () => void, string][] = [["Abrir projeto", <IFolder />, onOpen, "add-open"], ["Abrir projeto do GitHub", <IGlobe />, onGitHub, "add-github"], ["Início rápido", <IFolderPlus />, onQuick, "add-quick"]];
+  return (
+    <div className="add-menu" ref={ref} tabIndex={-1} data-testid="add-menu"
+      onKeyDown={(e) => {
+        if (e.key === "ArrowDown") (e.preventDefault(), setSel((x) => (x + 1) % 3));
+        else if (e.key === "ArrowUp") (e.preventDefault(), setSel((x) => (x + 2) % 3));
+        else if (e.key === "Enter") (e.preventDefault(), items[sel][2]());
+        else if (e.key === "Escape" && canBack) (e.preventDefault(), e.stopPropagation(), onBack());
+      }}>
+      {items.map(([label, icon, run, id], k) => (
+        <div key={id} className={"pop-row" + (k === sel ? " on" : "")} onMouseEnter={() => setSel(k)} onClick={() => !busy && run()} data-testid={id}>{icon} {label}{busy && k === 0 && <span className="spinner tiny" />}</div>
+      ))}
+    </div>
+  );
+}
 
 const IFolderPlus = () => <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"><path d="M1.8 4.2c0-.5.4-.9.9-.9h3.2l1.3 1.4h6.1c.5 0 .9.4.9.9v6.3c0 .5-.4.9-.9.9H2.7a.9.9 0 0 1-.9-.9Z" /><path d="M8 7v4M6 9h4" /></svg>;
 
@@ -13,17 +40,27 @@ type Where = "local" | "provider_cloud" | "remote" | "kabul_cloud";
 const whereKey = (repo: string) => `kabul.create.where.${repo}`;
 
 /** Pendente para o workspace recém-criado: primeira mensagem e onde rodar. */
-export const pendingFirst: Record<string, { text: string; where: Where; send: boolean }> = {};
+export const pendingFirst: Record<string, { text: string; where: Where; send: boolean; plan?: boolean }> = {};
 
 export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onCreated, onReposChanged, onError }: {
   repos: Repo[]; defaultRepo?: string; fromTab?: "prs" | "branches" | "issues"; addMode?: boolean; onClose: () => void;
   onCreated: (w: Workspace) => void; onReposChanged: () => void; onError: (e: string) => void;
 }) {
   const [repoId, setRepoId] = useState(defaultRepo ?? repos[0]?.id ?? "");
+  // Os repos podem chegar depois de o modal abrir (app recém-aberto): escolhe o padrão quando chegarem.
+  useEffect(() => void (!repoId && repos.length && setRepoId(defaultRepo ?? repos[0].id)), [repos, repoId, defaultRepo]);
   const [repoOpen, setRepoOpen] = useState(!!addMode);
   const [adding, setAdding] = useState(!!addMode);
-  const [path, setPath] = useState("");
   const [addBusy, setAddBusy] = useState(false);
+  const [dialog, setDialog] = useState<"clone" | "quick" | null>(null);
+  const added = (r: Repo) => {
+    onReposChanged();
+    setRepoId(r.id);
+    setDialog(null);
+    setAdding(false);
+    setRepoOpen(false);
+    setTimeout(() => input.current?.focus(), 0);
+  };
   const addProject = async (p: string | null) => {
     if (!p) return;
     setAddBusy(true);
@@ -33,7 +70,6 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onC
       setRepoId(r.id);
       setAdding(false);
       setRepoOpen(false);
-      setPath("");
       setTimeout(() => input.current?.focus(), 0);
     } catch (e) {
       onError(String(e));
@@ -42,6 +78,11 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onC
     }
   };
   const [repoQ, setRepoQ] = useState("");
+  // Plan mode na primeira mensagem: ⇧⇥ no campo; o estado inicial vem de "Conversas novas em plan mode".
+  const appSet = useSettings();
+  const [plan, setPlan] = useState(false);
+  const planInit = useRef(false);
+  useEffect(() => void (appSet && !planInit.current && ((planInit.current = true), appSet.default_plan && setPlan(true))), [appSet]);
   const [more, setMore] = useState(false);
   const [from, setFrom] = useState<"prs" | "branches" | "issues" | null>(fromTab ?? null);
   const [text, setText] = useState("");
@@ -59,7 +100,8 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onC
   const repo = repos.find((r) => r.id === repoId);
   const input = useRef<HTMLTextAreaElement>(null);
   const repoRef = useRef<HTMLDivElement>(null), moreRef = useRef<HTMLDivElement>(null), whereRef = useRef<HTMLDivElement>(null);
-  useDismiss(repoRef, repoOpen, () => (setRepoOpen(false), setAdding(false)));
+  // Esc no submenu "Adicionar projeto" volta à lista; clique fora fecha tudo.
+  useDismiss(repoRef, repoOpen, (why) => (why === "esc" && adding && repos.length > 0 ? setAdding(false) : (setRepoOpen(false), setAdding(false))));
   useDismiss(moreRef, more, () => setMore(false));
   useDismiss(whereRef, whereOpen, () => setWhereOpen(false));
 
@@ -100,7 +142,7 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onC
       else w = await api.createWorkspaceEx(repo.id, { base });
       const issueCtx = source?.kind === "issue" ? `Issue ${source.issue.identifier}: ${source.issue.title} (${source.issue.url}). Detalhes em .context/[LINEAR]-${source.issue.identifier}.md\n\n` : "";
       const first = (issueCtx + text).trim();
-      if (first) pendingFirst[w.id] = { text: first, where, send };
+      if (first) pendingFirst[w.id] = { text: first, where, send, plan };
       onCreated(w);
     } catch (e) {
       onError(String(e));
@@ -124,12 +166,19 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onC
     ["kabul_cloud", "Nuvem Kabul", { kind: "kabul_cloud", host: "—" }, false, "em breve"],
   ];
   const whereLabel = whereOpts.find((o) => o[0] === where)!;
+  // Esc fecha o modal (ou o painel "Criar a partir de") mesmo sem foco dentro dele; popovers abertos fecham antes.
+  const escRef = useRef(() => {});
+  escRef.current = () => (from ? setFrom(null) : onClose());
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && !popoverOpen() && !dialog && (e.preventDefault(), escRef.current());
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [dialog]);
 
   return (
     <div className="overlay create-overlay" onMouseDown={onClose}>
       <div className="popover create-modal" onMouseDown={(e) => e.stopPropagation()} data-testid="create-modal"
         onKeyDown={(e) => {
-          if (e.key === "Escape" && !(more || repoOpen || whereOpen)) (e.preventDefault(), from ? setFrom(null) : onClose());
           if (e.key === "N" && e.metaKey && e.shiftKey) (e.preventDefault(), setFrom(from ? null : "prs"));
           if (e.key === "Tab" && from) (e.preventDefault(), setFrom(tabs[(tabs.indexOf(from) + (e.shiftKey ? 2 : 1)) % 3]));
         }}>
@@ -139,16 +188,8 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onC
             {repoOpen && (
               <div className="popover status-pop repo-pop" data-testid="repo-pop">
                 {adding ? (
-                  <div className="add-project">
-                    <div className="pop-title">Adicionar projeto: pasta git local ou URL para clonar</div>
-                    <input autoFocus placeholder="~/projetos/app ou https://github.com/org/repo" value={path} onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") (e.preventDefault(), addProject(path.trim())); if (e.key === "Escape") (e.stopPropagation(), setAdding(false)); }} data-testid="repo-path" />
-                    <div className="row">
-                      <button className="btn" disabled={addBusy} onClick={async () => addProject(await api.pickFolder())}>Escolher pasta…</button>
-                      <span className="grow" />
-                      {repos.length > 0 && <button className="btn" onClick={() => setAdding(false)}>Voltar</button>}
-                      <button className="btn primary" disabled={addBusy || !path.trim()} onClick={() => addProject(path.trim())}>{addBusy ? "Adicionando…" : /^(https?:\/\/|git@)/.test(path) ? "Clonar" : "Adicionar"}</button>
-                    </div>
-                  </div>
+                  <AddMenu busy={addBusy} canBack={repos.length > 0} onBack={() => setAdding(false)}
+                    onOpen={async () => addProject(await api.pickFolder())} onGitHub={() => setDialog("clone")} onQuick={() => setDialog("quick")} />
                 ) : (
                   <>
                     <div className="repo-search"><input autoFocus placeholder="Buscar…" value={repoQ} onChange={(e) => setRepoQ(e.target.value)} /></div>
@@ -195,8 +236,9 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onC
             </div>
           </div>
         ) : (
-          <textarea ref={input} className="create-body" placeholder="No que você quer trabalhar?" value={text} onChange={(e) => setText(e.target.value)} data-testid="create-text"
+          <textarea ref={input} className={"create-body" + (plan ? " plan" : "")} placeholder={plan ? "Descreva o que planejar…" : "No que você quer trabalhar?"} value={text} onChange={(e) => setText(e.target.value)} data-testid="create-text"
             onKeyDown={(e) => {
+              if (e.key === "Tab" && e.shiftKey) return (e.preventDefault(), setPlan((p) => !p));
               if (e.key === "Enter" && e.altKey) (e.preventDefault(), create(false));
               else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) (e.preventDefault(), create(true));
             }} />
@@ -215,11 +257,15 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onC
               </div>
             )}
           </div>
+          {plan && <button className="plan-chip" onClick={() => setPlan(false)} title="Sair do plan mode (⇧⇥)" data-testid="create-plan-chip">Plan mode ×</button>}
           <span className="grow" />
           <span className="dim small">⌥↵ backlog</span>
           <button className="icon-btn" title="Criar a partir de… (⌘⇧N)" onClick={() => setFrom("prs")}><IPlus /></button>
           <button className="btn primary create-go" disabled={busy || !repo} onClick={() => create(true)} data-testid="create-go">{busy ? "Criando…" : "Criar ↵"}</button>
         </div>
+        {/* No portal: no DOM ficam no body; na árvore do React, dentro do modal (o clique não fecha o modal). */}
+        {dialog === "clone" && createPortal(<CloneDialog onClose={() => setDialog(null)} onDone={added} />, document.body)}
+        {dialog === "quick" && createPortal(<QuickStartDialog onClose={() => setDialog(null)} onDone={added} />, document.body)}
       </div>
     </div>
   );

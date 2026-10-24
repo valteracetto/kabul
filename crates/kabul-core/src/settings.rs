@@ -1,7 +1,7 @@
 //! Settings em camadas (da maior para a menor precedência):
 //! `~/.kabul/settings.managed.toml` > `<repo>/.kabul/settings.local.toml` >
 //! `<repo>/.kabul/settings.toml` (lido da branch padrão no remoto, com fallback no disco) >
-//! `~/.kabul/settings.toml` > padrões. Para compatibilidade, `.conductor/` é lido quando `.kabul/` não existe.
+//! `~/.kabul/settings.toml` > padrões. A pasta legada de `crate::compat` só é lida quando `.kabul/` não existe.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -37,13 +37,24 @@ pub struct Settings {
     pub file_include_globs: Vec<String>,
     /// Branch alvo dos PRs/diff (padrão: branch padrão do repo).
     pub target_branch: Option<String>,
+    /// Branch de onde nascem os workspaces novos (padrão: a padrão do repo).
+    #[serde(default)]
+    pub base_branch: Option<String>,
+    /// Remote usado para base, alvo, push e PR (padrão `origin`).
+    #[serde(default)]
+    pub remote: Option<String>,
+    /// Sobrescrevem, neste repo, as opções do usuário.
+    #[serde(default)]
+    pub delete_branch_on_archive: Option<bool>,
+    #[serde(default)]
+    pub archive_on_merge: Option<bool>,
     /// Variáveis de ambiente do repo (scripts e agentes); a camada local sobrescreve a compartilhada.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     /// Instruções extras por ação (Configurações › Actions).
     #[serde(default)]
     pub prompts: Prompts,
-    /// URL de preview; aceita `$CONDUCTOR_PORT`/`$KABUL_PORT` e `$((CONDUCTOR_PORT+N))`.
+    /// URL de preview; aceita `$KABUL_PORT` e `$((KABUL_PORT+N))` (e o prefixo legado).
     #[serde(default)]
     pub preview_url: Option<String>,
 }
@@ -72,10 +83,11 @@ impl Prompts {
     }
 }
 
-/// Troca `$CONDUCTOR_PORT`, `$KABUL_PORT` e `$((CONDUCTOR_PORT+N))` pela porta do workspace.
+/// Troca `$KABUL_PORT`, `${KABUL_PORT}` e `$((KABUL_PORT+N))` (e o prefixo legado) pela porta do workspace.
 pub fn expand_port(url: &str, port: u16) -> String {
     let mut out = url.to_string();
-    for var in ["CONDUCTOR_PORT", "KABUL_PORT"] {
+    for var in [format!("{}PORT", crate::compat::legacy_env_prefix()), "KABUL_PORT".to_string()] {
+        let var = var.as_str();
         while let Some(i) = out.find(&format!("$(({var}+")) {
             let rest = &out[i + var.len() + 4..];
             let Some(end) = rest.find("))") else { break };
@@ -120,6 +132,10 @@ pub fn merge(lo: Settings, hi: Settings) -> Settings {
         scripts: Scripts { setup: hi.scripts.setup.or(lo.scripts.setup), archive: hi.scripts.archive.or(lo.scripts.archive), run_mode: hi.scripts.run_mode.or(lo.scripts.run_mode), run },
         file_include_globs: if hi.file_include_globs.is_empty() { lo.file_include_globs } else { hi.file_include_globs },
         target_branch: hi.target_branch.or(lo.target_branch),
+        base_branch: hi.base_branch.or(lo.base_branch),
+        remote: hi.remote.or(lo.remote),
+        delete_branch_on_archive: hi.delete_branch_on_archive.or(lo.delete_branch_on_archive),
+        archive_on_merge: hi.archive_on_merge.or(lo.archive_on_merge),
         env: { let mut e = lo.env; e.extend(hi.env); e },
         prompts: Prompts::merge(lo.prompts, hi.prompts),
         preview_url: hi.preview_url.or(lo.preview_url),
@@ -138,8 +154,9 @@ fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
 }
 
-fn dir_for(repo: &Path) -> &'static str {
-    if repo.join(".kabul").is_dir() || !repo.join(".conductor").is_dir() { ".kabul" } else { ".conductor" }
+fn dir_for(repo: &Path) -> String {
+    let legacy = crate::compat::legacy_dir();
+    if repo.join(".kabul").is_dir() || !repo.join(&legacy).is_dir() { ".kabul".into() } else { legacy }
 }
 
 /// Lê as camadas e devolve settings efetivos + quais arquivos foram encontrados.
@@ -206,8 +223,10 @@ mod tests {
 
     #[test]
     fn porta_e_env() {
-        assert_eq!(expand_port("http://localhost:$CONDUCTOR_PORT/x", 41000), "http://localhost:41000/x");
-        assert_eq!(expand_port("http://localhost:$((CONDUCTOR_PORT+2))", 41000), "http://localhost:41002");
+        assert_eq!(expand_port("http://localhost:$KABUL_PORT/x", 41000), "http://localhost:41000/x");
+        assert_eq!(expand_port("http://localhost:$((KABUL_PORT+2))", 41000), "http://localhost:41002");
+        let legacy = format!("http://localhost:${}PORT", crate::compat::legacy_env_prefix());
+        assert_eq!(expand_port(&legacy, 41000), "http://localhost:41000");
         assert_eq!(expand_port("http://127.0.0.1:${KABUL_PORT}", 41010), "http://127.0.0.1:41010");
         assert_eq!(parse_env("# x\nexport A=1\nB=\"dois\"\n1X=ruim\nC D=ruim\nE='tres'"), vec![("A".into(), "1".into()), ("B".into(), "dois".into()), ("E".into(), "tres".into())]);
         let s = AppSettings::default();
@@ -240,6 +259,10 @@ pub struct AppSettings {
     #[serde(default)]
     pub env_file: Option<String>,
 
+    /// Pasta onde "Abrir projeto do GitHub" e "Início rápido" criam os projetos (lembra a última usada).
+    #[serde(default = "d_clone_dir")]
+    pub clone_dir: String,
+
     // ---- General ----
     /// Som de conclusão: `none` ou o nome de um som do sistema (padrão `Glass`).
     #[serde(default = "d_sound")]
@@ -267,6 +290,21 @@ pub struct AppSettings {
     /// `squash` (padrão), `merge` ou `rebase`.
     #[serde(default = "d_squash")]
     pub merge_method: String,
+    /// Acrescenta à descrição do PR o link do workspace no Kabul.
+    #[serde(default = "d_true")]
+    pub pr_include_workspace_link: bool,
+    /// Liga o auto-merge (`gh pr merge --auto`) ao criar o PR.
+    #[serde(default)]
+    pub automerge: bool,
+    /// Checks opcionais que falham também bloqueiam o merge (sem isso, só os obrigatórios).
+    #[serde(default)]
+    pub optional_checks_blocking: bool,
+    /// `git push -u` (grava o upstream) nos pushes do Kabul.
+    #[serde(default = "d_true")]
+    pub push_set_upstream: bool,
+    /// PRs empilhados: o PR novo pode ter como base a branch de outro PR.
+    #[serde(default = "d_true")]
+    pub stacked_prs: bool,
     /// Simula as ações do GitHub (push, merge, ready, re-run): mostra os comandos sem executar.
     #[serde(default)]
     pub github_dry_run: bool,
@@ -298,6 +336,9 @@ pub struct AppSettings {
     pub scrollback_mb: u32,
 }
 
+fn d_clone_dir() -> String {
+    "~/Developer".into()
+}
 fn d_sound() -> String {
     "Glass".into()
 }
@@ -325,7 +366,7 @@ pub struct EnvVar {
     pub scope: String,
 }
 
-/// prefixo padrão = usuário do GitHub (cai para $USER sem `gh`).
+/// Prefixo padrão = usuário do GitHub (cai para $USER sem `gh`).
 fn d_prefix_type() -> String {
     "github".into()
 }
@@ -357,6 +398,17 @@ impl AppSettings {
         let file = self.env_file.as_deref().filter(|f| !f.trim().is_empty()).and_then(|f| std::fs::read_to_string(f).ok()).map(|t| parse_env(&t)).unwrap_or_default();
         file.into_iter().chain(self.env.iter().filter(|e| e.scope == "all" || e.scope == harness).map(|e| (e.key.clone(), e.value.clone()))).collect()
     }
+    /// Executáveis escolhidos em Configurações › Avançado viram `KABUL_BIN_*` (lidos por `harness::which`).
+    pub fn apply_bin_overrides(&self) {
+        for (bin, p) in [("claude", &self.claude_path), ("codex", &self.codex_path), ("opencode", &self.opencode_path)] {
+            let var = crate::harness::bin_override_var(bin);
+            match p.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+                Some(p) => std::env::set_var(var, p),
+                None => std::env::remove_var(var),
+            }
+        }
+    }
+
     /// Prefixo efetivo da branch.
     pub fn branch_prefix(&self) -> String {
         match self.branch_prefix_type.as_str() {

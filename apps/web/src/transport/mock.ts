@@ -25,19 +25,22 @@ const db = {
   history: {} as Record<string, any>,
   endpoints: [] as any[],
   registry: "",
-  settings: { branch_prefix_type: "github", branch_prefix_custom: "", notifications: true, sound: true, caffeinate: true, auto_rename_branch: true, env: [] },
-  repoSettings: { scripts: { setup: "echo instalando", archive: null, run_mode: "concurrent", run: { web: { command: "npm run dev", default: true, icon: "globe", available_in: null } } }, file_include_globs: [], target_branch: null },
+  settings: { branch_prefix_type: "github", branch_prefix_custom: "", notifications: true, sound: true, caffeinate: true, auto_rename_branch: true, env: [], env_file: null, completion_sound: "Glass", always_show_context: false, auto_convert_long_text: true, not_absolutely_right: false, open_prs_in: "github", delete_branch_on_archive: false, archive_on_merge: false, rename_ws_on_branch: true, merge_method: "squash", github_dry_run: false, pr_include_workspace_link: true, automerge: false, optional_checks_blocking: false, push_set_upstream: true, stacked_prs: true, clone_dir: "~/Developer", claude_output_style: "default", codex_personality: "pragmatic", review_model: null, default_plan: false, claude_path: null, codex_path: null, opencode_path: null, scrollback_mb: 10 } as any,
+  repoSettings: { scripts: { setup: "echo instalando", archive: null, run_mode: "concurrent", run: { web: { command: "npm run dev", default: true, icon: "globe", available_in: null } } }, file_include_globs: [], target_branch: null, env: { API_URL: "http://localhost:$KABUL_PORT" }, prompts: { general: null, review: null, create_pr: null, fix_errors: null, resolve_conflicts: null, branch_rename: null }, preview_url: "http://localhost:$KABUL_PORT" } as any,
   chats: {} as Record<string, { pending: string | null; turn: number }>,
   linear: false,
   accounts: [] as any[],
   mirror: false,
   ghToken: false,
+  sections: [] as any[],
+  pr: {} as Record<string, any>,
+  git: {} as Record<string, any>,
   ghAccounts: [{ host: "github.com", login: "dev", active: true, scopes: ["gist", "read:org", "repo", "workflow"], source: "keyring", ok: true }] as any[],
 };
 const CITIES = ["kabul", "lisboa", "cusco", "quito"];
 const models = [
   { key: "claude:opus", harness: "claude", id: "opus", label: "Opus 5.5", provider: "anthropic", efforts: ["low", "medium", "high", "xhigh", "max"], effort_in_id: false, local: null, context: 200000 },
-  { key: "codex:gpt-6.1-sol", harness: "codex", id: "gpt-6.1-sol", label: "GPT-6.1 Sol", provider: "openai", efforts: ["low", "medium", "high"], effort_in_id: false, local: null, context: 272000 },
+  { key: "codex:gpt-6-luna", harness: "codex", id: "gpt-6-luna", label: "GPT-6-Luna", provider: "openai", efforts: ["low", "medium", "high"], effort_in_id: false, local: null, context: 272000 },
   { key: "agy:gemini-4-argon", harness: "antigravity", id: "gemini-4-argon", label: "Gemini 4 Argon", provider: "google", efforts: ["low", "medium", "high"], effort_in_id: true, local: null, context: 1000000 },
   { key: "local:lmstudio:qwen3-8b", harness: "opencode", id: "qwen3-8b", label: "Qwen3 8B", provider: "local", efforts: [], effort_in_id: false, context: 40960, local: { source: "lmstudio", source_name: "LM Studio", model: "qwen3-8b", family: "Qwen", note: "qwen → OpenCode (Qwen Code preferido, não instalado)", missing: ["qwen"], size_bytes: 4623782544, quant: "4bit", fits: true } },
 ];
@@ -73,6 +76,18 @@ function agentTurn(chatId: string, text: string, wid: string) {
     ev({ type: "approval_request", request_id: "q-" + ch.turn, tool: "AskUserQuestion", input: { questions: [{ header: "Banco", question: "Qual banco usar?", options: [{ label: "Postgres", description: "relacional" }, { label: "SQLite", description: "arquivo" }] }, { header: "Testes", question: "Escrever testes?", options: [{ label: "Sim" }, { label: "Não" }] }] } }, 120);
     return;
   }
+  if (/diagrama/i.test(text)) {
+    done("Fluxo:\n\n```mermaid\ngraph TD\n  A[Mensagem] --> B[Agente]\n  B --> C[Resposta]\n```\n\nE a fórmula:\n\n$$\nE = mc^2\n$$\n\n```mermaid\nisso não é mermaid válido ->>\n```", 80);
+    return;
+  }
+  if (/\bcerto\b/i.test(text)) {
+    done("You're absolutely right! Corrigi o teste.", 80);
+    return;
+  }
+  if (/demorad/i.test(text)) {
+    done("Terminei a tarefa demorada.", 1500);
+    return;
+  }
   if (/segundo plano/i.test(text)) {
     ev({ type: "tool_use", id: "bg1-" + ch.turn, name: "Bash", input: { command: "npm run dev", run_in_background: true, description: "Sobe o servidor" } }, 80);
     ev({ type: "tool_result", id: "bg1-" + ch.turn, output: "Command running in background with ID: 1", is_error: false }, 100);
@@ -90,7 +105,7 @@ function agentTurn(chatId: string, text: string, wid: string) {
 }
 
 const handlers: Record<string, (a: any) => unknown> = {
-  repos_list: () => db.repos,
+  repos_list: () => db.repos.map((r) => ({ ...r })),
   repo_add: ({ path }) => {
     const r = { id: id(), name: path.split("/").filter(Boolean).pop(), path, default_branch: "main" };
     db.repos.push(r);
@@ -100,7 +115,8 @@ const handlers: Record<string, (a: any) => unknown> = {
   repo_remove: ({ id: rid }) => void (db.repos = db.repos.filter((r) => r.id !== rid)),
   repo_settings: () => ({ settings: db.repoSettings, layers: [{ name: "usuário", path: "~/.kabul/settings.toml", found: false }, { name: "repo", path: ".kabul/settings.toml", found: true }, { name: "repo local", path: ".kabul/settings.local.toml", found: false }, { name: "gerenciado", path: "~/.kabul/settings.managed.toml", found: false }] }),
   repo_settings_save: ({ settings }) => ((db.repoSettings = settings), ".kabul/settings.local.toml"),
-  workspaces_list: () => db.workspaces,
+  // Cópias, como num transporte de verdade (o React precisa ver objetos novos).
+  workspaces_list: () => db.workspaces.map((w) => ({ ...w })),
   workspace_create: ({ repoId }) => {
     const used = db.workspaces.map((w) => w.name);
     const name = CITIES.find((c) => !used.includes(c)) ?? `ws${seq}`;
@@ -110,7 +126,7 @@ const handlers: Record<string, (a: any) => unknown> = {
     setTimeout(() => ((w.state = "ready"), emit("workspace-state", { id: w.id, state: "ready" })), 400);
     return w;
   },
-  workspace_update: ({ id: wid, patch }) => Object.assign(ws(wid), Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))),
+  workspace_update: ({ id: wid, patch }) => Object.assign(ws(wid), Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined).map(([k, v]) => [k, k === "section" && v === "" ? null : v]))),
   workspace_rename_branch: ({ id: wid, name }) => Object.assign(ws(wid), { branch: name, user_set_branch: true }),
   workspace_auto_branch: ({ workspaceId, text }) => {
     const w = ws(workspaceId);
@@ -118,10 +134,64 @@ const handlers: Record<string, (a: any) => unknown> = {
     w.branch = "dev/" + text.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").split("-").filter(Boolean).slice(0, 5).join("-");
     return w;
   },
-  workspace_archive: ({ id: wid }) => void Object.assign(ws(wid), { archived: true, state: "archived", archive_checkpoint: "archive-" + wid }),
+  workspace_archive: ({ id: wid, closePr }) => { if (closePr && db.pr[wid]) db.pr[wid].state = "CLOSED"; Object.assign(ws(wid), { archived: true, state: "archived", archive_checkpoint: "archive-" + wid }); },
   workspace_unarchive: ({ id: wid }) => Object.assign(ws(wid), { archived: false, state: "ready" }),
-  workspace_changes: ({ workspaceId }) => changes(workspaceId),
-  workspace_file_diff: ({ workspaceId, path }) => `@@ -1,1 +1,2 @@\n-${(db.files[path] ?? "").split("\n")[0]}\n+${(db.changed[workspaceId]?.[path] ?? "").split("\n").join("\n+")}`,
+  workspace_changes: ({ workspaceId, scope }) => (scope === "branch" ? changes(workspaceId).filter((c) => !c.untracked) : changes(workspaceId)),
+  workspace_file_diff: ({ workspaceId, path, ignoreWs }) => {
+    const body = (db.changed[workspaceId]?.[path] ?? "").replace(/\n$/, "");
+    const old = (db.files[path] ?? "").replace(/\n$/, "").split("\n");
+    const neu = body.split("\n");
+    const out = [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, `@@ -1,${old.length} +1,${neu.length} @@`];
+    // Diff simples linha a linha (o suficiente para o mock): iguais viram contexto.
+    const n = Math.max(old.length, neu.length);
+    for (let i = 0; i < n; i++) {
+      const a = old[i], b = neu[i];
+      if (a === b || (ignoreWs && a !== undefined && b !== undefined && a.replace(/\s+/g, "") === b.replace(/\s+/g, ""))) out.push(" " + (b ?? a));
+      else { if (a !== undefined && db.files[path] !== undefined) out.push("-" + a); if (b !== undefined) out.push("+" + b); }
+    }
+    return out.join("\n");
+  },
+  git_status: ({ workspaceId }) => ({ branch: ws(workspaceId).branch, target: ws(workspaceId).target_branch ?? "main", upstream: db.git[workspaceId]?.upstream ?? null, dirty: changes(workspaceId).length, ahead: db.git[workspaceId]?.ahead ?? 0, behind: db.git[workspaceId]?.behind ?? 0, behind_target: db.git[workspaceId]?.behind_target ?? 0, conflicts: db.git[workspaceId]?.conflicts ?? [] }),
+  git_pull: ({ workspaceId }) => ((db.git[workspaceId] = { ...(db.git[workspaceId] ?? {}), behind: 0 }), { ok: true, dry_run: false, commands: [`git pull --no-rebase --no-edit origin ${ws(workspaceId).branch}`], output: "Already up to date." }),
+  git_push: ({ workspaceId }) => ((db.git[workspaceId] = { ...(db.git[workspaceId] ?? {}), ahead: 0, upstream: "origin/" + ws(workspaceId).branch }), { ok: true, dry_run: false, commands: ["git push -u origin HEAD"], output: "" }),
+  workspace_discard: ({ workspaceId, path }) => void delete db.changed[workspaceId]?.[path],
+  workspace_grep: ({ query }) => Object.entries(db.files).flatMap(([p, body]) => body.split("\n").map((t, i) => ({ path: p, line: i + 1, text: t })).filter((h) => query && h.text.toLowerCase().includes(String(query).toLowerCase()))),
+  pr_view: ({ workspaceId }) => db.pr[workspaceId] ?? null,
+  pr_merge: ({ workspaceId }) => { const p = db.pr[workspaceId]; if (p) p.state = "MERGED"; ws(workspaceId).status = "done"; const rs = db.repoSettings as any; if (rs.archive_on_merge ?? db.settings.archive_on_merge) handlers.workspace_archive({ id: workspaceId }); return { ok: true, dry_run: false, commands: [`gh pr merge --${db.settings.merge_method}`], output: "" }; },
+  pr_ready: ({ workspaceId }) => { const p = db.pr[workspaceId]; if (p) (p.is_draft = false, p.merge_state = "CLEAN"); return { ok: true, dry_run: false, commands: ["gh pr ready"], output: "" }; },
+  pr_edit: ({ workspaceId, title, body }) => { Object.assign(db.pr[workspaceId] ?? {}, { title, body }); return { ok: true, dry_run: false, commands: ["gh pr edit --title …"], output: "" }; },
+  checks_rerun: ({ links }) => ({ ok: true, dry_run: true, commands: [...new Set((links as string[]).map((l) => /runs\/(\d+)/.exec(l)?.[1]).filter(Boolean))].map((r) => `gh run rerun ${r} --failed`), output: "" }),
+  check_log: ({ link }) => `Run npm run lint\nsrc/app.tsx:12:3  error  'x' is assigned a value but never used  no-unused-vars\n✖ 1 problem (1 error, 0 warnings)\nProcess completed with exit code 1. (${link})`,
+  sections_list: () => db.sections,
+  section_save: ({ section }) => { const s = { ...section, id: section.id || id(), order: section.id ? section.order : db.sections.length }; db.sections = [...db.sections.filter((x: any) => x.id !== s.id), s].sort((a: any, b: any) => a.order - b.order); return s; },
+  section_delete: ({ id: sid }) => { db.sections = db.sections.filter((x: any) => x.id !== sid); db.workspaces.forEach((w) => w.section === sid && (w.section = null)); },
+  repo_update: ({ id: rid, hidden, icon }) => Object.assign(db.repos.find((r) => r.id === rid), hidden === undefined ? {} : { hidden }, icon === undefined ? {} : { icon: icon || null }),
+  repo_env_layers: () => [["repo", { API_URL: "http://localhost:$KABUL_PORT", LOG: "info" }], ["repo local", { LOG: "debug" }]],
+  gh_repos: () => [
+    { name_with_owner: "dev/demo-app", owner: "dev", private: true, updated_at: "2026-10-20T10:00:00Z", url: "https://github.com/dev/demo-app", description: "App de demonstração", avatar: "" },
+    { name_with_owner: "acme/site", owner: "acme", private: false, updated_at: "2026-10-18T10:00:00Z", url: "https://github.com/acme/site", description: null, avatar: "" },
+    { name_with_owner: "dev/dotfiles", owner: "dev", private: false, updated_at: "2026-09-01T10:00:00Z", url: "https://github.com/dev/dotfiles", description: "configs", avatar: "" },
+  ],
+  repo_clone_to: async ({ input, dir }) => {
+    const name = String(input).replace(/\.git$/, "").split(/[/:]/).pop();
+    if (name === "nao-existe") throw new Error("Repositório não encontrado. Confira a URL e se a conta do GitHub conectada tem acesso.");
+    for (const [phase, pct] of [["Receiving objects", 40], ["Receiving objects", 100], ["Resolving deltas", 100]] as const) {
+      emit("clone-progress", { phase, pct });
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    db.settings.clone_dir = dir;
+    return handlers.repo_add({ path: `${String(dir).replace(/\/$/, "")}/${name}` });
+  },
+  repo_quick_start: ({ name, dir }) => ((db.settings.clone_dir = dir), handlers.repo_add({ path: `${String(dir).replace(/\/$/, "")}/${name}` })),
+  git_identity: () => ({ ...{ name: "Dev", email: "dev@example.com", scope: "global", global_name: "Dev", global_email: "dev@example.com" }, ...(db as any).identity }),
+  git_identity_set: ({ name, email }) => ((db as any).identity = name || email ? { name, email, scope: "repo" } : {}, handlers.git_identity({})),
+  repo_remotes: () => ["origin", "upstream"],
+  pr_open_url: ({ workspaceId, prUrl }) => { const t = db.settings.open_prs_in; const w = ws(workspaceId); if (t === "linear" && w.linear) return w.linear.url; if (t === "graphite") { const m = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(prUrl); if (m) return `https://app.graphite.dev/github/pr/${m[1]}/${m[2]}/${m[3]}`; } return prUrl; },
+  diagnostics: () => ({ checks: [{ group: "Essenciais", name: "git", ok: true, detail: "git version 2.50 (/usr/bin/git)" }, { group: "Essenciais", name: "tmux", ok: true, detail: "tmux 3.5" }, { group: "Agentes", name: "Qwen Code", ok: false, detail: "não encontrado no PATH" }, { group: "Ambiente", name: "HOME", ok: true, detail: "/home/dev" }], report: "Kabul — diagnóstico\n✓ git\nHOME /home/dev", redacted: "Kabul — diagnóstico\n✓ git\nHOME ~" }),
+  app_quit: () => void ((window as any).__quit = true),
+  open_devtools: () => void ((window as any).__devtools = true),
+  machine_info: () => ({ name: "Mac de Dev", user: { login: "dev", email: "dev@example.com", avatar: null } }),
+  sound_play: ({ name }) => void ((window as any).__sound = name),
   workspace_files: () => [...Object.keys(db.files), ".gitignore", "Cargo.toml", "src/app.tsx", "src/styles.css", "docs/guia.md", ".context/notes.md"],
   workspace_read_file: ({ path }) => db.files[path] ?? "",
   workspace_busy: () => "clean",
@@ -148,7 +218,7 @@ const handlers: Record<string, (a: any) => unknown> = {
   attach_file: ({ path }) => ".context/attachments/" + path.split("/").pop(),
   attach_bytes: ({ name }) => ".context/attachments/" + name,
   pick_file: () => "/mock/Downloads/especificacao.pdf",
-  pick_folder: () => "/mock/repos/demo",
+  pick_folder: () => (window as any).__mock?.pickFolder ?? "/mock/repos/demo",
   script_run: ({ workspaceId, which, runId }) => {
     const s = `kabul-${ws(workspaceId).name}-${which}${runId ? "-" + runId : ""}`;
     setTimeout(() => emit("term-output", { session: s, pane: "%9", data: [...new TextEncoder().encode(`$ ${which === "setup" ? "echo instalando" : "npm run dev"}\r\n[kabul] saiu com 0\r\n`)] }), 100);
@@ -210,7 +280,7 @@ const handlers: Record<string, (a: any) => unknown> = {
   history_delete: ({ id: hid }) => void delete db.history[hid],
   history_search: ({ q }) => Object.values(db.history).filter((h: any) => JSON.stringify(h.items).toLowerCase().includes(q.toLowerCase())).map((h: any) => [h.workspace_id, h.id, h.title, q]),
   slash_commands: () => [["/compact", "resumir a conversa"], ["/review", "revisar as mudanças"], ["/plan", "alternar plan mode"]],
-  sessions_list: () => ({ tmux: [{ session: "kabul-kabul", window_index: 0, pane_index: 0, pane_id: "%1", pid: 1, command: "zsh", path: "/mock/ws/kabul", active: true, title: "", agent: "shell" }], conductor_workspaces: [], conductor_sessions: [{ id: "c1", workspace_id: null, status: "idle", title: "Sessão do Conductor", model: "opus", agent_type: "claude", updated_at: null }], conductor_error: null }),
+  sessions_list: () => ({ tmux: [{ session: "kabul-kabul", window_index: 0, pane_index: 0, pane_id: "%1", pid: 1, command: "zsh", path: "/mock/ws/kabul", active: true, title: "", agent: "shell" }], imported_workspaces: [], imported_sessions: [{ id: "c1", workspace_id: null, status: "idle", title: "Sessão importada", model: "opus", agent_type: "claude", updated_at: null }], imported_error: null }),
   auth_status: () => ["claude", "codex", "antigravity", "opencode", "qwen", "gemini"].map((k) => ({ kind: k, logged_in: !["qwen", "gemini"].includes(k), source: "mock", method: null, error: null, installed: !["qwen", "gemini"].includes(k) })),
   auth_login: ({ kind }) => {
     emit("auth-event", { kind, event: { Url: "https://claude.ai/oauth/authorize?mock=1" } });
@@ -267,9 +337,18 @@ const handlers: Record<string, (a: any) => unknown> = {
     { id: "terminal", name: "Terminal", kind: "terminal", app: "/System/Applications/Utilities/Terminal.app", icon: null },
   ],
   open_in: ({ target, path }) => void ((window as any).__opened = `${target}:${path}`),
-  pr_checks: () => ({ checks: [{ name: "build", state: "SUCCESS", bucket: "pass", link: "https://x/1", workflow: "CI" }, { name: "e2e", state: "IN_PROGRESS", bucket: "pending", link: "https://x/2", workflow: "CI" }, { name: "lint", state: "FAILURE", bucket: "fail", link: "https://x/3", workflow: "CI" }], message: null }),
-  open_external: () => undefined,
+  pr_checks: () => (db as any).checks ?? ({ checks: [{ name: "build", state: "SUCCESS", bucket: "pass", link: "https://github.com/dev/demo/actions/runs/101/job/1", workflow: "CI", required: true }, { name: "e2e", state: "IN_PROGRESS", bucket: "pending", link: "https://github.com/dev/demo/actions/runs/101/job/2", workflow: "CI", required: true }, { name: "lint", state: "FAILURE", bucket: "fail", link: "https://github.com/dev/demo/actions/runs/102/job/3", workflow: "CI", required: true }], message: null }),
+  open_external: ({ target }) => void ((window as any).__external = target),
   transcribe: () => "texto ditado de teste",
+};
+
+// Ganchos para os testes montarem estados de git/PR sem backend.
+if (typeof window !== "undefined") (window as any).__mock = {
+  db,
+  pr: (wid: string | null, p: any) => { const w = wid ?? db.workspaces[0]?.id; db.pr[w] = p && { number: 7, title: "Corrige login", body: "Descrição do PR", url: "https://github.com/dev/demo/pull/7", state: "OPEN", is_draft: false, mergeable: "MERGEABLE", merge_state: "CLEAN", review_decision: "", head: ws(w)?.branch, base: "main", comments: [], ...p }; },
+  git: (wid: string | null, g: any) => { const w = wid ?? db.workspaces[0]?.id; db.git[w] = { ...(db.git[w] ?? {}), ...g }; },
+  emit: (channel: string, payload: unknown) => emit(channel, payload),
+  change: (wid: string | null, path: string, body: string) => { const w = wid ?? db.workspaces[0]?.id; (db.changed[w] ??= {})[path] = body; },
 };
 
 export const mockTransport: Transport = {
@@ -278,7 +357,7 @@ export const mockTransport: Transport = {
     const h = handlers[command];
     if (!h) throw new Error(`mock: comando desconhecido ${command}`);
     await new Promise((r) => setTimeout(r, 15));
-    return h(args ?? {}) as T;
+    return (await h(args ?? {})) as T;
   },
   subscribe(channel, handler) {
     const s = subs.get(channel) ?? new Set();

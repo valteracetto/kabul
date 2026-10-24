@@ -3,7 +3,7 @@ use anyhow::{bail, Result};
 mod serve;
 use clap::{Parser, Subcommand};
 use kabul_core::harness::{HarnessKind, SessionOptions};
-use kabul_core::{agent, auth, conductor_db::ConductorDb, tmux, worktree};
+use kabul_core::{agent, auth, import::sessions::SessionImporter, tmux, worktree};
 
 #[derive(Parser)]
 #[command(name = "kabul", about = "Sessões de agentes (Claude, Codex, Antigravity) no tmux")]
@@ -14,11 +14,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Lista sessões tmux (com o agente detectado) e sessões importadas.
+    /// Lista sessões tmux (com o agente detectado) e as sessões importadas de outro app.
     Ls {
-        /// Não lê o conductor.db.
+        /// Não lê o banco de sessões importadas.
         #[arg(long)]
-        sem_conductor: bool,
+        sem_importadas: bool,
     },
     /// Cria uma sessão tmux rodando o agente: claude | codex | agy | shell.
     Run {
@@ -69,7 +69,7 @@ enum Cmd {
 
 fn main() -> Result<()> {
     match Cli::parse().cmd {
-        Cmd::Ls { sem_conductor } => ls(!sem_conductor),
+        Cmd::Ls { sem_importadas } => ls(!sem_importadas),
         Cmd::Run { agente, nome, cwd, model, remote_control, worktree: wt } => run(&agente, nome, cwd, model, remote_control, wt),
         Cmd::Local => {
             let src = kabul_core::local::discover(&[]);
@@ -83,7 +83,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Serve { port, home } => serve::serve(port, home.into()),
+        Cmd::Serve { port, home } => { kabul_core::shell_env::apply(&[]); serve::serve(port, home.into()) },
         Cmd::Chat { prompt, agente, model, local, cwd, aprovar } => chat(&prompt, &agente, model, local, cwd, aprovar == "allow"),
         Cmd::Auth => {
             for k in [HarnessKind::Claude, HarnessKind::Codex, HarnessKind::Antigravity] {
@@ -97,19 +97,19 @@ fn main() -> Result<()> {
     }
 }
 
-fn ls(conductor: bool) -> Result<()> {
+fn ls(importadas: bool) -> Result<()> {
     let panes = tmux::list_panes()?;
     println!("== tmux ({} panes)", panes.len());
     for p in &panes {
         let a = agent::detect_pane(&p.command, p.pid);
         println!("{:<6} {:<12} {}:{}.{}  {:<10} {}", p.pane_id, a.label(), p.session, p.window_index, p.pane_index, p.command, p.path);
     }
-    if conductor {
-        match ConductorDb::open_default() {
+    if importadas {
+        match SessionImporter::open_detected(None) {
             Ok(db) => {
                 let ws = db.workspaces()?;
                 let ss = db.sessions()?;
-                println!("\n== conductor ({} workspaces, {} sessões)", ws.len(), ss.len());
+                println!("\n== sessões importadas ({} workspaces, {} sessões)", ws.len(), ss.len());
                 for w in &ws {
                     println!("{} / {} [{}]", w.repo_name.as_deref().unwrap_or("?"), w.directory_name.as_deref().unwrap_or("?"), w.branch.as_deref().unwrap_or("-"));
                     for s in ss.iter().filter(|s| s.workspace_id.as_deref() == Some(&w.id)).take(5) {
@@ -117,7 +117,7 @@ fn ls(conductor: bool) -> Result<()> {
                     }
                 }
             }
-            Err(e) => println!("\n== conductor indisponível: {e}"),
+            Err(e) => println!("\n== sessões importadas indisponíveis: {e}"),
         }
     }
     Ok(())

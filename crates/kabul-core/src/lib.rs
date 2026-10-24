@@ -1,22 +1,28 @@
-//! Núcleo do Kabul: tmux, detecção de agente, worktrees, importação de sessões e harnesses.
+//! Núcleo do Kabul: tmux, detecção de agente, worktrees, sessões importadas e harnesses.
 pub mod accounts;
 pub mod agent;
 pub mod auth;
+pub mod chat;
 pub mod checkpoint;
+pub mod clone;
 pub mod cloud;
-pub mod conductor_db;
+pub mod compat;
+pub mod diagnostics;
 pub mod github;
 pub mod gitops;
 pub mod harness;
 pub mod history;
+pub mod import;
 pub mod linear;
 pub mod local;
+pub mod machine;
 pub mod mcp;
 pub mod models;
 pub mod registry;
 pub mod runs_on;
 pub mod speech;
 pub mod settings;
+pub mod shell_env;
 pub mod store;
 pub mod tmux;
 pub mod transcript;
