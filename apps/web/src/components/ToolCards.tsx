@@ -64,7 +64,7 @@ export function ToolCard({ name, input, output, error, onOpenFile }: { name: str
     sub = short(JSON.stringify(input) ?? "", 100);
     body = <><pre>{JSON.stringify(input, null, 2)}</pre>{output !== undefined && <pre className="tc-out">{short(output, 4000)}</pre>}</>;
   }
-  // Todo e edição abertos por padrão (como o Conductor mostra o conteúdo).
+  // Todo e edição abertos por padrão.
   useEffect(() => void ((name === "TodoWrite" || ["Edit", "MultiEdit", "Write"].includes(name)) && setOpen(true)), [name]);
   return (
     <div className={"tool-card" + (error ? " err" : "") + (pending ? " pending" : "")} data-testid="tool-card" data-tool={name}>

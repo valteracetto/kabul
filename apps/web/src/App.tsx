@@ -37,7 +37,7 @@ export function App() {
   const [opened, setOpened] = useState<string[]>([]);
   const [agents, setAgents] = useState<Record<string, AgentState | undefined>>({});
   const onAgent = useCallback((id: string, st: AgentState | undefined) => setAgents((a) => (a[id] === st ? a : { ...a, [id]: st })), []);
-  // Histórico de navegação (voltar/avançar como no Conductor).
+  // Histórico de navegação (voltar/avançar).
   const [hist, setHist] = useState<{ stack: Route[]; i: number }>({ stack: [{ kind: "home" }], i: 0 });
   const go = useCallback((r: Route) => {
     setRoute(r);
@@ -184,7 +184,7 @@ function Palette({ repos, workspaces, onClose, onRoute }: { repos: Repo[]; works
       { label: "Tema: Claro", hint: "aparência", route: { kind: "home" }, action: () => setThemePref("light") },
       { label: "Tema: Sistema", hint: "segue o macOS · ⌥⌘T alterna", route: { kind: "home" }, action: () => setThemePref("system") },
       ...workspaces.filter((w) => !w.archived).map((w) => ({ label: wsTitle(w), hint: `${repos.find((r) => r.id === w.repo_id)?.name ?? ""} · ${w.branch}`, route: { kind: "workspace", id: w.id } as Route })),
-      { label: "Painel de sessões", hint: "tmux + Conductor", route: { kind: "sessions" } },
+      { label: "Painel de sessões", hint: "tmux + importadas", route: { kind: "sessions" } },
       { label: "Modelos locais", hint: "runtimes, downloads, registro", route: { kind: "local" } },
       { label: "Configurações", hint: "geral, contas, repositório", route: { kind: "settings", tab: "geral" } },
       { label: "Contas", hint: "login dos agentes", route: { kind: "settings", tab: "contas" } },

@@ -1,4 +1,4 @@
-/* Kabul — tema escuro quente (paleta medida no Conductor; código próprio). */
+/* Kabul — tema escuro quente. */
 :root {
   --bg: #131110;          /* área central */
   --panel: #1b1917;       /* barra lateral e painel direito */
@@ -488,7 +488,7 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 @container (max-width: 400px) { .review-btn .txt { display: none; } .rtabs { padding: 8px 8px; } .rtab { padding: 3px 7px; } }
 .messages { padding-right: 46px; }
 .minimap { right: 14px; }
-/* escala de texto mais próxima do Conductor */
+/* escala de texto */
 .msg-assistant, .msg-user { font-size: 14px; line-height: 1.65; }
 .thread { max-width: 820px; gap: 14px; }
 .center-top { font-size: 13.5px; }

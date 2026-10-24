@@ -1,8 +1,8 @@
-//! Codex. Modo principal (igual ao Conductor): `codex app-server --listen stdio://`, JSON-RPC por linha
+//! Codex. Modo principal: `codex app-server --listen stdio://`, JSON-RPC por linha
 //! (`initialize` → `thread/start|thread/resume` → `turn/start`). Alternativa: `codex exec --json`.
 //!
 //! A CONFIRMAR: o codex instalado nesta máquina está quebrado (falta `codex-darwin-arm64`), então
-//! nomes de métodos/campos seguem a documentação do app-server v2 e o que o Conductor usa; fixtures
+//! nomes de métodos/campos seguem a documentação do app-server v2; fixtures
 //! sintéticas. O mesmo vale para `codex cloud`.
 use super::*;
 use serde_json::json;

@@ -1,5 +1,5 @@
 //! Linear: chave de API no Keychain do macOS e GraphQL (api.linear.app/graphql) via curl.
-//! O contexto da issue vai para `.context/[LINEAR]-<ID>.md` no workspace (mesmo formato do Conductor).
+//! O contexto da issue vai para `.context/[LINEAR]-<ID>.md` no workspace.
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

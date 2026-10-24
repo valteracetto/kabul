@@ -597,7 +597,7 @@ async fn chat_start(handle: AppHandle, app: State<'_, App>, workspace_id: String
         effort,
         resume,
         approvals_via_app: h.app_approvals(),
-        // Como o Conductor: sessão em `default` (aprovações vêm para o app) ou `plan`.
+        // sessão em `default` (aprovações vêm para o app) ou `plan`.
         permission_mode: if plan.unwrap_or(false) { Some("plan".into()) } else if k == HarnessKind::Claude { Some("default".into()) } else { None },
         endpoint,
         env,

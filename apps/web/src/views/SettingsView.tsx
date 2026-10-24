@@ -249,7 +249,7 @@ function Integrations({ onError }: { onError: (e: string) => void }) {
   );
 }
 
-/** GitHub como no Conductor: status do `gh`, entrar pelo navegador com código, trocar conta e token pessoal. */
+/** GitHub: status do `gh`, entrar pelo navegador com código, trocar conta e token pessoal. */
 function GitHub({ onError }: { onError: (e: string) => void }) {
   const [acc, setAcc] = useState<import("../api").GhAccount[] | null>(null);
   const [flow, setFlow] = useState<{ code?: string; url?: string; done?: string } | null>(null);

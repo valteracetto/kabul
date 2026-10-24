@@ -74,7 +74,7 @@ pub fn target_ref(repo: &Repo, ws: &Workspace) -> String {
     }
 }
 
-/// Escopo do diff, como no Conductor: tudo contra a alvo, só os commits da branch ou só o não commitado.
+/// Escopo do diff: tudo contra a alvo, só os commits da branch ou só o não commitado.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {

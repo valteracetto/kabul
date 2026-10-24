@@ -1,4 +1,4 @@
-//! Núcleo do Kabul: tmux, detecção de agente, worktrees, leitura do Conductor e harnesses.
+//! Núcleo do Kabul: tmux, detecção de agente, worktrees, importação de sessões e harnesses.
 pub mod accounts;
 pub mod agent;
 pub mod auth;

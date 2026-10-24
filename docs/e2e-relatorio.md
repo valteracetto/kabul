@@ -30,11 +30,11 @@ O teste foi feito de três formas:
 | 15 | Arquivar e desarquivar | some da lista; "Arquivados"; volta com as mudanças | e2e; o teste do core usou git real | ok |
 | 16 | Configurações e Contas | geral, 6 contas, camadas do repo | real (Contas) + e2e | ok |
 | 17 | Modelos locais | runtimes, modelos, baixar com confirmação, registro | real (descoberta) + e2e | ok |
-| 18 | Painel de sessões | tmux com agente + Conductor | real + e2e | ok |
+| 18 | Painel de sessões | tmux com agente + sessões importadas | real + e2e | ok |
 
 ## Falhas encontradas e corrigidas (rodei de novo até passar)
 
-1. **`.context/` aparecia em Alterações.** Agora fica em `info/exclude` do repositório (como no Conductor).
+1. **`.context/` aparecia em Alterações.** Agora fica em `info/exclude` do repositório.
 2. **O terminal abria vazio.** `tmux has-session -t kabul-kabul` casava por prefixo com `kabul-kabul-setup`, então o terminal principal nunca era criado. Todos os alvos agora usam o nome exato (`=nome`).
 3. **O app quebrava no Chromium novo.** `scrollTo` devolve uma Promise e o React tratava isso como retorno de limpeza do efeito.
 4. **Clique na linha errada do diff.** O diff mostrava uma linha "1" falsa antes de carregar; o conteúdo pulava e o clique ia para outra linha. Agora mostra "Carregando o diff…".
@@ -44,7 +44,7 @@ O teste foi feito de três formas:
 8. **Nomes de modelo quebravam em duas linhas** e os ícones encolhiam no seletor.
 9. **OpenCode ignorava o modelo local** ("Model unavailable"). O `opencode run` usa um serviço de fundo que já estava com outra config. Agora usa `--standalone` quando há config injetada.
 10. **O turno com erro deixava o chat preso em "trabalhando".** Todo turno agora termina com `TurnCompleted`.
-11. **As aprovações não apareciam**, porque o Claude da máquina de teste usa `defaultMode: auto`. A sessão agora sobe em `--permission-mode default`, como no Conductor.
+11. **As aprovações não apareciam**, porque o Claude da máquina de teste usa `defaultMode: auto`. A sessão agora sobe em `--permission-mode default`.
 12. **O anel de contexto ficava quase vazio com o Claude.** Agora soma também os tokens de cache.
 
 ## Problemas de UX que ficaram

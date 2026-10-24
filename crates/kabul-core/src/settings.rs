@@ -325,7 +325,7 @@ pub struct EnvVar {
     pub scope: String,
 }
 
-/// Como o Conductor: prefixo padrão = usuário do GitHub (cai para $USER sem `gh`).
+/// prefixo padrão = usuário do GitHub (cai para $USER sem `gh`).
 fn d_prefix_type() -> String {
     "github".into()
 }

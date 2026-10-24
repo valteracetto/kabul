@@ -14,7 +14,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Lista sessões tmux (com o agente detectado) e sessões do Conductor.
+    /// Lista sessões tmux (com o agente detectado) e sessões importadas.
     Ls {
         /// Não lê o conductor.db.
         #[arg(long)]
