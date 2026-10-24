@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"c0ffee00-0000-4000-8000-000000000001","model":"claude-opus-5-5","cwd":"/tmp","tools":["Bash","Read"]}
+{"type":"assistant","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Vou listar."},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]},"session_id":"c0ffee00-0000-4000-8000-000000000001"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"a.txt\nb.txt","is_error":false}]},"session_id":"c0ffee00-0000-4000-8000-000000000001"}
+{"type":"assistant","message":{"id":"msg_2","role":"assistant","content":[{"type":"text","text":"Dois arquivos."}]},"session_id":"c0ffee00-0000-4000-8000-000000000001"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":4200,"num_turns":2,"result":"Dois arquivos.","session_id":"c0ffee00-0000-4000-8000-000000000001","total_cost_usd":0.0123,"usage":{"input_tokens":100,"output_tokens":20}}

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "comment": "Melhor harness por família de modelo local. O Kabul usa o primeiro harness instalado que fale uma API do endpoint; os outros são fallbacks.",
+  "families": [
+    { "family": "gpt-oss", "match": ["gpt-oss"], "harnesses": ["codex", "opencode"] },
+    { "family": "qwen", "match": ["qwen"], "harnesses": ["qwen", "opencode"] },
+    { "family": "deepseek", "match": ["deepseek"], "harnesses": ["claude", "opencode"] },
+    { "family": "kimi", "match": ["kimi", "moonshot"], "harnesses": ["claude", "opencode"] },
+    { "family": "glm", "match": ["glm", "chatglm"], "harnesses": ["claude", "opencode"] },
+    { "family": "minimax", "match": ["minimax"], "harnesses": ["claude", "opencode"] },
+    { "family": "gemma", "match": ["gemma"], "harnesses": ["gemini", "opencode"] },
+    { "family": "outros", "match": [], "harnesses": ["opencode"] }
+  ]
+}

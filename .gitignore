@@ -1,0 +1,8 @@
+target/
+node_modules/
+dist/
+.context/
+apps/desktop/src-tauri/gen/
+*.tsbuildinfo
+test-results/
+playwright-report/

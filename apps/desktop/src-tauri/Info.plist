@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>O Kabul usa o microfone para o ditado no campo de mensagem.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>O Kabul transcreve o ditado para o campo de mensagem.</string>
+</dict>
+</plist>

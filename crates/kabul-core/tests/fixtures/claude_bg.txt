@@ -1,0 +1,2 @@
+Started background session bg-7f3a (name: fix-login)
+Attach with: claude attach bg-7f3a

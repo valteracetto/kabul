@@ -1,0 +1,5 @@
+[2mBrowser didn't open? Use the url below to sign in (c to copy)[0m
+
+https://claude.ai/oauth/authorize?code=true&client_id=EXAMPLE&response_type=code&redirect_uri=https%3A%2F%2Fconsole.anthropic.com%2Foauth%2Fcode%2Fcallback&state=s1
+
+Paste code here if prompted > 

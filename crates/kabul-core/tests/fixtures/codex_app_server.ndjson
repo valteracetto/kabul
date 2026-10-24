@@ -1,0 +1,11 @@
+{"id":1,"result":{"userAgent":"codex_cli_rs/0.162.1"}}
+{"id":2,"result":{"thread":{"id":"thr_123","preview":"","modelProvider":"openai"},"model":"gpt-5.5-codex"}}
+{"method":"thread/started","params":{"thread":{"id":"thr_123"}}}
+{"id":3,"result":{"turn":{"id":"turn_1","status":"inProgress","items":[]}}}
+{"method":"turn/started","params":{"threadId":"thr_123","turn":{"id":"turn_1","status":"inProgress"}}}
+{"method":"item/started","params":{"threadId":"thr_123","turnId":"turn_1","item":{"id":"it_1","type":"commandExecution","command":"ls","cwd":"/tmp","status":"inProgress"}}}
+{"id":"srv-0","method":"item/commandExecution/requestApproval","params":{"threadId":"thr_123","turnId":"turn_1","itemId":"it_1","command":"ls","reason":"precisa listar"}}
+{"method":"item/completed","params":{"threadId":"thr_123","turnId":"turn_1","item":{"id":"it_1","type":"commandExecution","command":"ls","aggregatedOutput":"a.txt\nb.txt\n","exitCode":0,"status":"completed"}}}
+{"method":"item/agentMessage/delta","params":{"threadId":"thr_123","turnId":"turn_1","itemId":"it_2","delta":"Dois "}}
+{"method":"item/completed","params":{"threadId":"thr_123","turnId":"turn_1","item":{"id":"it_2","type":"agentMessage","text":"Dois arquivos."}}}
+{"method":"turn/completed","params":{"threadId":"thr_123","turn":{"id":"turn_1","status":"completed"}}}

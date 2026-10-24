@@ -1,0 +1,4 @@
+Created cloud session: Resposta curta sem ferramentas
+View: https://claude.ai/code/session_01AbcDefGhiJklMnoPqrStu?from=cli&m=0
+Resume with: claude --teleport session_01AbcDefGhiJklMnoPqrStu
+Branch dev/feature is not on GitHub, so the cloud session starts from the newest commit beneath it that origin/main has (0123456789ab), 3 commits back. Commits that origin/main lacks, and any uncommitted changes, stay on this machine; push the branch to start from it.

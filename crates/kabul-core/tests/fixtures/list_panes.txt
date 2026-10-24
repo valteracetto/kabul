@@ -1,0 +1,4 @@
+kabul-claude	0	main	0	%0	4242	claude	/home/dev/proj	1	Claude Code
+kabul-codex	1	w	0	%1	5000	codex	/tmp	0	codex
+shell	0	zsh	1	%2	6000	zsh	/home/dev/com espaço	1	dev@mac
+agy	0	w	0	%3	7000	agy	/tmp	0	titulo	com tab

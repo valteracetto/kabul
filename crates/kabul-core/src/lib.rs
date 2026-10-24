@@ -1,0 +1,23 @@
+//! Núcleo do Kabul: tmux, detecção de agente, worktrees, leitura do Conductor e harnesses.
+pub mod accounts;
+pub mod agent;
+pub mod auth;
+pub mod checkpoint;
+pub mod cloud;
+pub mod conductor_db;
+pub mod github;
+pub mod gitops;
+pub mod harness;
+pub mod history;
+pub mod linear;
+pub mod local;
+pub mod mcp;
+pub mod models;
+pub mod registry;
+pub mod runs_on;
+pub mod speech;
+pub mod settings;
+pub mod store;
+pub mod tmux;
+pub mod transcript;
+pub mod worktree;
