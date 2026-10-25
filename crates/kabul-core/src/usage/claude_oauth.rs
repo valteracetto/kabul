@@ -109,6 +109,7 @@ pub fn keychain_service(config_dir: Option<&Path>) -> String {
 }
 
 /// Conta do item no Keychain: o usuário do sistema (o Claude Code usa um nome fixo se ele tiver caractere estranho).
+#[cfg(target_os = "macos")]
 fn keychain_account() -> String {
     let u = std::env::var("USER").unwrap_or_default();
     if !u.is_empty() && u.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)) {
