@@ -455,7 +455,7 @@ async fn arquivar_em_segundo_plano() {
     assert!(!wt.exists());
     let r = call(&mut ws, 999, "workspace_unarchive", json!({"id": "w1"})).await;
     assert_eq!(r["value"]["state"], "ready", "{r}");
-    assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap(), "mudou\n");
+    assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap().replace("\r\n", "\n"), "mudou\n");
     drop(srv);
     let _ = std::fs::remove_dir_all(&home);
 }
