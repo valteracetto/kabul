@@ -1,5 +1,5 @@
 /* i18n-ignore-file: capturas da demonstração. */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 import { BASE, composeCollab, frame, prepare, shot } from "./frame";
 
 // Pixel 8 (Chromium), PWA em tela cheia, inglês. Cru em .context/demo/raw/android-*.png; no fim,

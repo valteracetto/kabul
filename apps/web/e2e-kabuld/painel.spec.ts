@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 import { startKabuld, type Kabuld } from "./helpers";
 
 // Desktop (Chromium, 1440 px) servido pelo próprio kabuld: o navegador local é o dono.

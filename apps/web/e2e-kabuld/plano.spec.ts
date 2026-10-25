@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 import { startKabuld, type Kabuld } from "./helpers";
 
 // Plan mode no celular (iPhone e Android): nativo no Claude ao criar o workspace, cartão do plano com

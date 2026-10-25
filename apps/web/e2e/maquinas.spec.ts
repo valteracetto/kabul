@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 
 test("seletor de máquina no topo: nome do Mac, conta, ⌃1…⌃9, adicionar máquina; sem a tag LOCAL", async ({ page }) => {
   await page.goto("/?mock");

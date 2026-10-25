@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
+import { navTo } from "./helpers";
 import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -39,7 +40,9 @@ test("arquivar e desarquivar com backend real", async ({ page }) => {
   await page.getByTestId("archive").click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("ws-row")).toHaveCount(0);
-  expect(existsSync(wsPath)).toBe(false);
+  // Sumiu da lista na hora; a pasta sai depois da janela do "Desfazer", em segundo plano.
+  expect(existsSync(wsPath)).toBe(true);
+  await expect.poll(() => existsSync(wsPath), { timeout: 20_000 }).toBe(false);
   await page.screenshot({ path: "../../.context/e2e/real-arquivado.png" });
 
   await page.getByTestId("group-menu").click();
@@ -55,7 +58,7 @@ test("GitHub real: conta do gh e aviso de acesso para repo sem remote", async ({
   await page.getByTestId("set-tab-contas").click();
   const gh = execSync("gh auth status --json hosts --jq '.hosts[\"github.com\"][] | select(.active) | .login'").toString().trim();
   await expect(page.getByTestId("github")).toContainText(`@${gh}`);
-  await page.locator(".side-nav button", { hasText: "Início" }).click();
+  await navTo(page, "home");
   await page.locator('[data-testid^="new-ws-"]').first().click().catch(() => {});
   await page.getByTestId("create-go").click().catch(() => {});
   await page.getByTestId("ws-row").first().click();

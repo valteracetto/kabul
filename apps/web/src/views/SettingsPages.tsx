@@ -257,6 +257,9 @@ export function MiscPage({ repos, repoId, onError, onRoute, onChange }: { repos:
       <Row label={t("settings.misc.preview")} hint={t("settings.misc.preview.hint")}>
         {s && <input {...noSuggest} autoComplete="off" defaultValue={s.preview_url ?? ""} placeholder="http://localhost:$KABUL_PORT" onBlur={(e) => api.saveRepoSettings(repo.id, { ...s, preview_url: e.target.value || null }).catch((x) => onError(String(x)))} data-testid="preview-url" />}
       </Row>
+      <Row label={t("settings.misc.browserHosts")} hint={t("settings.misc.browserHosts.hint")} id="browser_hosts">
+        {s && <input {...noSuggest} autoComplete="off" defaultValue={(s.browser_hosts ?? []).join(", ")} placeholder={t("settings.misc.browserHosts.ph")} onBlur={(e) => { const hosts = e.target.value.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean); const n = { ...s, browser_hosts: hosts }; setS(n); api.saveRepoSettings(repo.id, n).catch((x) => onError(String(x))); }} data-testid="browser-hosts" />}
+      </Row>
       <Row label={t("settings.misc.remove")} hint={t("settings.misc.remove.hint")}>
         <button className="btn danger" onClick={async () => { if (await confirmDialog(t("settings.misc.remove.confirm", { name: repo.name }), { ok: t("common.remove"), danger: true })) api.removeRepo(repo.id).then(() => (onChange(), onRoute({ kind: "settings", tab: "geral" })), (e) => onError(String(e))); }} data-testid="repo-remove">{t("settings.misc.remove.button")}</button>
       </Row>

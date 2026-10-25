@@ -23,6 +23,7 @@
   "mobile.home.pin": "Fixar",
   "mobile.home.restore": "Restaurar",
   "mobile.home.archive": "Arquivar",
+  "mobile.home.archiveFailed": "Não deu para arquivar {name}: {error}\n\nTentar de novo?",
   "mobile.home.new": "Novidade",
   "mobile.home.archived": "arquivado",
   "mobile.home.invite": "Convidar",
@@ -295,5 +296,8 @@
   },
   "mobile.pv.showMore": "Mostrar mais ({n} restantes)",
   "mobile.pv.badJson": "JSON inválido ({error}): mostrando o texto.",
-  "mobile.pv.more": "mais {n}"
+  "mobile.pv.more": "mais {n}",
+  "mobile.pv.browserTab": "Navegador",
+  "mobile.pv.browser.closed": "O navegador deste workspace está fechado no computador.",
+  "mobile.pv.browser.readOnly": "Só leitura: a página que você e os agentes estão usando no computador, atualizada a cada segundo e meio."
 }

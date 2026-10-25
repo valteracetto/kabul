@@ -1,5 +1,5 @@
 import { addRepo as pickRepo } from "./helpers";
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
 
 async function addRepo(page: Page) {
   await page.goto("/?mock");
@@ -65,7 +65,7 @@ test("+ do repo e Criar abrem o modal com o repo selecionado (não criam direto)
 
 test("Criar abre o modal; Adicionar projeto só no seletor de repo (rodapé); ⌥⌘A; estado vazio", async ({ page }) => {
   await page.goto("/?mock");
-  await expect(page.locator(".side-nav button", { hasText: "Adicionar projeto" })).toHaveCount(0);
+  await expect(page.locator(".side-nav2 button", { hasText: "Adicionar projeto" })).toHaveCount(0);
   await page.getByTestId("empty-add-project").click();
   // Submenu com 3 itens; o primeiro destacado; setas mudam o destaque.
   await expect(page.getByTestId("add-menu")).toBeFocused();

@@ -1,4 +1,5 @@
 import { KeptProcesses } from "../components/KeptProcesses";
+import { OverviewTabs } from "./SideNav";
 import { useEffect, useState } from "react";
 import { api, type ExternalSessions, type Model, type Sessions, type Workspace } from "../api";
 import { RunsOnBadge, cloudList, cloudRunsOn } from "../components/RunsOn";
@@ -55,7 +56,7 @@ export function SessionsView({ onError, onRoute }: { onError: (e: string) => voi
 
   return (
     <section className="page">
-      <header className="page-head" data-tauri-drag-region><h2>{t("app.sessions.title")}</h2><span className="dim">{t("app.sessions.refresh")}</span></header>
+      <header className="page-head" data-tauri-drag-region><OverviewTabs on="sessions" /><span className="dim">{t("app.sessions.refresh")}</span></header>
       <KeptProcesses wsName={Object.fromEntries(wss.map((w) => [w.id, w.title || w.name]))} onError={onError} />
       <h3>tmux <span className="count">{s?.tmux.length ?? 0}</span></h3>
       <table>

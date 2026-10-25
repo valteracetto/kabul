@@ -1,0 +1,23 @@
+# Scripts › "Multiple actions" e a ação com porta deslocada.
+[scripts]
+run_mode = "concurrent"
+
+[scripts.run.web]
+available_in = [ "local", "cloud" ]
+command = "pnpm dev --port $LEGACY_PORT"
+default = true
+icon = "play"
+
+[scripts.run.worker]
+available_in = [ "local", "cloud" ]
+command = "pnpm worker:dev"
+icon = "server"
+
+[scripts.run.test]
+available_in = [ "local", "cloud" ]
+command = "pnpm test:watch"
+icon = "test-tube"
+
+[scripts.run.api]
+available_in = [ "local" ]
+command = "pnpm api --port $((LEGACY_PORT + 1))"

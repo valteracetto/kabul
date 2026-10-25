@@ -271,6 +271,56 @@ pub struct Store {
     pub root: PathBuf,
     pub branch_prefix: String,
     pub state: State,
+    /// Carimbo do arquivo na última leitura/gravação deste processo: se mudar, outro escritor
+    /// (kabuld, CLI, celular) gravou e o estado em memória está velho.
+    seen: Option<Stamp>,
+}
+
+/// Identidade de uma versão do `state.json`: mtime + tamanho (+ inode no Unix, que muda a cada
+/// gravação porque ela troca o arquivo por rename — pega até duas gravações no mesmo tique do relógio).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    mtime: Option<std::time::SystemTime>,
+    len: u64,
+    ino: u64,
+}
+
+fn stamp(file: &Path) -> Option<Stamp> {
+    let m = std::fs::metadata(file).ok()?;
+    #[cfg(unix)]
+    let ino = std::os::unix::fs::MetadataExt::ino(&m);
+    #[cfg(not(unix))]
+    let ino = 0;
+    Some(Stamp { mtime: m.modified().ok(), len: m.len(), ino })
+}
+
+/// Estado de um processo que convive com outros escritores do mesmo `state.json` (o app desktop
+/// com o kabuld embutido, o `kabul` CLI, o celular). Cada `lock()` relê o arquivo se ele mudou desde
+/// a última leitura/gravação deste processo: o que vem depois (ler ou gravar) parte do estado do
+/// disco e nunca sobrescreve a mudança de outro com uma cópia velha.
+pub struct SharedStore(std::sync::Mutex<Store>);
+
+impl SharedStore {
+    pub fn new(store: Store) -> Self {
+        Self(std::sync::Mutex::new(store))
+    }
+
+    pub fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'_, Store>> {
+        match self.0.lock() {
+            Ok(mut g) => {
+                if let Err(err) = g.reload_if_changed() {
+                    eprintln!("kabul: relendo {}: {err:#}", g.file.display());
+                }
+                Ok(g)
+            }
+            Err(p) => Err(p),
+        }
+    }
+
+    /// Outro processo gravou o arquivo desde a última leitura/gravação deste (sem reler).
+    pub fn changed_on_disk(&self) -> bool {
+        self.0.lock().map(|g| g.changed_on_disk()).unwrap_or(false)
+    }
 }
 
 impl Store {
@@ -282,6 +332,8 @@ impl Store {
     }
 
     pub fn open(file: PathBuf, root: PathBuf, branch_prefix: String) -> Result<Self> {
+        // Carimbo antes de ler: uma gravação no meio deixa o carimbo velho e a próxima checagem relê.
+        let seen = stamp(&file);
         let mut state: State = match std::fs::read_to_string(&file) {
             Ok(s) => {
                 let mut doc: serde_json::Value = serde_json::from_str(&s).with_context(|| format!("lendo {}", file.display()))?;
@@ -298,17 +350,33 @@ impl Store {
             Err(_) => State::default(),
         };
         state.schema_version = crate::schema::STATE;
-        Ok(Self { file, root, branch_prefix, state })
+        Ok(Self { file, root, branch_prefix, state, seen })
     }
 
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&mut self) -> Result<()> {
         if let Some(d) = self.file.parent() {
             std::fs::create_dir_all(d)?;
         }
         let tmp = self.file.with_extension("tmp");
         std::fs::write(&tmp, serde_json::to_vec_pretty(&self.state)?)?;
         std::fs::rename(tmp, &self.file)?;
+        self.seen = stamp(&self.file);
         Ok(())
+    }
+
+    /// O arquivo mudou desde a última leitura/gravação deste `Store` (outro processo gravou).
+    pub fn changed_on_disk(&self) -> bool {
+        stamp(&self.file) != self.seen
+    }
+
+    /// Relê o arquivo se outro processo gravou nele; `true` se releu. Seguro porque toda mudança em
+    /// memória é gravada na hora (nada pendente se perde).
+    pub fn reload_if_changed(&mut self) -> Result<bool> {
+        if !self.changed_on_disk() {
+            return Ok(false);
+        }
+        *self = Self::open(self.file.clone(), self.root.clone(), self.branch_prefix.clone())?;
+        Ok(true)
     }
 
     pub fn repo(&self, id: &str) -> Result<&Repo> {
@@ -508,39 +576,73 @@ impl Store {
         })
     }
 
-    /// Arquiva: checkpoint das mudanças, copia `.context/` para `archived-contexts`, remove o worktree.
-    /// A branch e o checkpoint ficam (permite desarquivar).
+    /// Arquiva de uma vez (síncrono): checkpoint das mudanças, `.context/` para `archived-contexts`,
+    /// worktree para a lixeira (apagada em segundo plano). A branch e o checkpoint ficam (permite
+    /// desarquivar). O app usa [`Store::begin_archive`] + [`crate::archive::spawn`].
     pub fn archive_workspace(&mut self, id: &str) -> Result<Workspace> {
         self.archive_workspace_opts(id, false)
     }
 
     /// Arquiva; com `delete_branch`, apaga a branch local (o checkpoint guarda o HEAD e o desarquivar a recria).
     pub fn archive_workspace_opts(&mut self, id: &str, delete_branch: bool) -> Result<Workspace> {
-        let w = self.workspace(id)?.clone();
-        let repo = self.repo(&w.repo_id)?.clone();
-        let wp = Path::new(&w.path);
-        let mut ckpt = None;
-        if wp.exists() {
-            let b = crate::checkpoint::busy(wp)?;
-            anyhow::ensure!(b == "clean", "git ocupado ({b}); termine a operação antes de arquivar");
-            ckpt = Some(crate::checkpoint::create(wp, &format!("archive-{}", w.id), "arquivamento")?.id);
-            let ctx = wp.join(".context");
-            if ctx.is_dir() {
-                let dest = self.archived_contexts().join(&repo.name).join(&w.name);
-                std::fs::create_dir_all(&dest)?;
-                copy_dir(&ctx, &dest)?;
-            }
-            worktree::remove(Path::new(&repo.path), wp, true)?;
-            if delete_branch && ckpt.is_some() {
-                git(Path::new(&repo.path), &["branch", "-D", &w.branch])?;
-            }
+        let plan = self.begin_archive(id, delete_branch)?;
+        let res = crate::archive::execute(&plan, &crate::archive::Options::bare());
+        if let Some(t) = res.as_ref().ok().and_then(|o| o.trash.as_deref()) {
+            crate::archive::purge(t);
         }
+        let res = res.map_err(|e| format!("{e:#}"));
+        let w = self.finish_archive(id, &plan.prev_state, &res)?;
+        res.map_err(anyhow::Error::msg)?;
+        Ok(w)
+    }
+
+    /// Começo do arquivamento (rápido; é o que o usuário espera): marca `archived` e `state =
+    /// "archiving"` e devolve o plano para o trabalho pesado, que roda sem o lock do estado.
+    pub fn begin_archive(&mut self, id: &str, delete_branch: bool) -> Result<crate::archive::Plan> {
+        let w = self.workspace(id)?.clone();
+        anyhow::ensure!(w.state != "archiving", "o workspace já está sendo arquivado");
+        anyhow::ensure!(!w.archived, "o workspace já está arquivado");
+        let plan = self.archive_plan(&w, delete_branch)?;
         self.update_workspace(id, |x| {
             x.archived = true;
-            x.state = "archived".into();
-            if ckpt.is_some() {
-                x.archive_checkpoint = ckpt;
+            x.state = "archiving".into();
+        })?;
+        Ok(plan)
+    }
+
+    fn archive_plan(&self, w: &Workspace, delete_branch: bool) -> Result<crate::archive::Plan> {
+        let repo = self.repo(&w.repo_id)?.clone();
+        let prev_state = if w.state == "archiving" || w.state == "archived" { "ready".to_string() } else { w.state.clone() };
+        Ok(crate::archive::Plan { contexts: self.archived_contexts().join(&repo.name).join(&w.name), trash: self.trash_dir(), ws: w.clone(), repo, prev_state, delete_branch })
+    }
+
+    /// Arquivamentos interrompidos (app fechado no meio): `state = "archiving"`. Para retomar na abertura.
+    pub fn interrupted_archives(&self, delete_branch: bool) -> Vec<crate::archive::Plan> {
+        self.state.workspaces.iter().filter(|w| w.state == "archiving").filter_map(|w| self.archive_plan(w, delete_branch).ok()).collect()
+    }
+
+    /// Grava o resultado do trabalho pesado: arquivado (com o checkpoint) ou, no erro, de volta à lista.
+    pub fn finish_archive(&mut self, id: &str, prev_state: &str, res: &std::result::Result<crate::archive::Outcome, String>) -> Result<Workspace> {
+        self.update_workspace(id, |x| match res {
+            Ok(o) => {
+                x.archived = true;
+                x.state = "archived".into();
+                if o.checkpoint.is_some() {
+                    x.archive_checkpoint = o.checkpoint.clone();
+                }
             }
+            Err(_) => {
+                x.archived = false;
+                x.state = prev_state.into();
+            }
+        })
+    }
+
+    /// Desfazer dentro da janela (nada foi tocado no disco): volta à lista como estava.
+    pub fn cancel_archive(&mut self, id: &str, prev_state: &str) -> Result<Workspace> {
+        self.update_workspace(id, |x| {
+            x.archived = false;
+            x.state = prev_state.into();
         })
     }
 
@@ -548,30 +650,50 @@ impl Store {
         self.root.parent().unwrap_or(&self.root).join("archived-contexts")
     }
 
+    /// Lixeira do Kabul (no mesmo volume dos worktrees): pastas de workspaces arquivados esperando
+    /// para ser apagadas.
+    pub fn trash_dir(&self) -> PathBuf {
+        self.root.join(crate::archive::TRASH)
+    }
+
+    /// Todas as lixeiras possíveis: a principal e a de cada pasta de workspaces fora dela (fallback
+    /// quando a principal está em outro volume).
+    pub fn trash_dirs(&self) -> Vec<PathBuf> {
+        let mut v = vec![self.trash_dir()];
+        for w in &self.state.workspaces {
+            if let Some(p) = Path::new(&w.path).parent().map(|p| p.join(crate::archive::TRASH)) {
+                if !v.contains(&p) && p.is_dir() {
+                    v.push(p);
+                }
+            }
+        }
+        v
+    }
+
     /// Recria o worktree na mesma branch, aplica o checkpoint do arquivamento e devolve `.context/`.
+    /// Síncrono; o app usa [`Store::unarchive_begin`] + [`restore_worktree`] + [`Store::unarchive_finish`]
+    /// para não prender o estado durante o git.
     pub fn unarchive_workspace(&mut self, id: &str) -> Result<Workspace> {
+        if let Some(p) = self.unarchive_begin(id)? {
+            restore_worktree(&p)?;
+        }
+        self.unarchive_finish(id)
+    }
+
+    /// O que restaurar (`None`: a pasta ainda existe, arquivamento interrompido antes de movê-la).
+    pub fn unarchive_begin(&self, id: &str) -> Result<Option<Restore>> {
         let w = self.workspace(id)?.clone();
         anyhow::ensure!(w.archived, "workspace não está arquivado");
+        if w.state == "archiving" && Path::new(&w.path).exists() {
+            return Ok(None);
+        }
         let repo = self.repo(&w.repo_id)?.clone();
-        let wp = PathBuf::from(&w.path);
-        std::fs::create_dir_all(wp.parent().unwrap())?;
-        let rp = Path::new(&repo.path);
-        if git(rp, &["rev-parse", "--verify", "-q", &format!("refs/heads/{}", w.branch)]).is_ok() {
-            git(rp, &["worktree", "add", &w.path, &w.branch])?;
-        } else {
-            // A branch foi apagada ao arquivar: recria no HEAD guardado pelo checkpoint.
-            let c = w.archive_checkpoint.as_deref().context("branch apagada e sem checkpoint para recriar")?;
-            let head = git(rp, &["rev-parse", &format!("refs/kabul-checkpoints/{c}^")])?;
-            git(rp, &["worktree", "add", "-b", &w.branch, &w.path, &head])?;
-        }
-        if let Some(c) = &w.archive_checkpoint {
-            // O ref vive no repositório comum, visível pelo worktree novo.
-            crate::checkpoint::restore(&wp, c)?;
-        }
         let ctx = self.archived_contexts().join(&repo.name).join(&w.name);
-        if ctx.is_dir() {
-            copy_dir(&ctx, &wp.join(".context"))?;
-        }
+        Ok(Some(Restore { ws: w, repo, ctx }))
+    }
+
+    /// Fim do desarquivar: porta livre e de volta à lista.
+    pub fn unarchive_finish(&mut self, id: &str) -> Result<Workspace> {
         let port = self.free_port();
         self.update_workspace(id, |x| {
             x.archived = false;
@@ -642,7 +764,7 @@ impl Store {
     }
 }
 
-fn copy_dir(from: &Path, to: &Path) -> Result<()> {
+pub(crate) fn copy_dir(from: &Path, to: &Path) -> Result<()> {
     std::fs::create_dir_all(to)?;
     for e in std::fs::read_dir(from)? {
         let e = e?;
@@ -652,6 +774,45 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
         } else {
             std::fs::copy(e.path(), t)?;
         }
+    }
+    Ok(())
+}
+
+/// Worktree a recriar no desarquivar (montado sob o lock, restaurado sem ele).
+#[derive(Debug, Clone)]
+pub struct Restore {
+    pub ws: Workspace,
+    pub repo: Repo,
+    /// `.context/` guardado ao arquivar.
+    pub ctx: PathBuf,
+}
+
+/// Recria o worktree na mesma branch (ou no HEAD do checkpoint, se a branch foi apagada), aplica o
+/// checkpoint e devolve `.context/`. Só git e disco: sem o lock do estado.
+pub fn restore_worktree(p: &Restore) -> Result<()> {
+    let (w, repo) = (&p.ws, &p.repo);
+    let wp = PathBuf::from(&w.path);
+    std::fs::create_dir_all(wp.parent().context("caminho do workspace sem pasta-mãe")?)?;
+    let rp = Path::new(&repo.path);
+    // Checkpoint gravado por um arquivamento interrompido antes de ir para o estado: o ref tem nome fixo.
+    let ckpt = w.archive_checkpoint.clone().or_else(|| {
+        let c = format!("archive-{}", w.id);
+        git(rp, &["rev-parse", "--verify", "-q", &format!("refs/kabul-checkpoints/{c}")]).ok().map(|_| c)
+    });
+    if git(rp, &["rev-parse", "--verify", "-q", &format!("refs/heads/{}", w.branch)]).is_ok() {
+        git(rp, &["worktree", "add", &w.path, &w.branch])?;
+    } else {
+        // A branch foi apagada ao arquivar: recria no HEAD guardado pelo checkpoint.
+        let c = ckpt.as_deref().context("branch apagada e sem checkpoint para recriar")?;
+        let head = git(rp, &["rev-parse", &format!("refs/kabul-checkpoints/{c}^")])?;
+        git(rp, &["worktree", "add", "-b", &w.branch, &w.path, &head])?;
+    }
+    if let Some(c) = &ckpt {
+        // O ref vive no repositório comum, visível pelo worktree novo.
+        crate::checkpoint::restore(&wp, c)?;
+    }
+    if p.ctx.is_dir() {
+        copy_dir(&p.ctx, &wp.join(".context"))?;
     }
     Ok(())
 }
@@ -692,11 +853,12 @@ pub fn exclude_context(repo: &Path) {
     }
 }
 
-/// Copia arquivos ignorados pelo git: padrões de `.worktreeinclude`, `globs` e `.env*`.
+/// Copia arquivos ignorados pelo git: padrões de `.env*`, `globs` e `.worktreeinclude`, nesta ordem (como
+/// no `.gitignore`, o último vence: `!.env.production` em `globs` ou no `.worktreeinclude` tira o arquivo).
 pub fn copy_ignored(repo: &Path, dest: &Path, globs: &[String]) -> Result<u32> {
-    let mut patterns: Vec<String> = std::fs::read_to_string(repo.join(".worktreeinclude")).map(|s| s.lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#')).map(String::from).collect()).unwrap_or_default();
+    let mut patterns: Vec<String> = vec![".env*".into()];
     patterns.extend(globs.iter().cloned());
-    patterns.push(".env*".into());
+    patterns.extend(std::fs::read_to_string(repo.join(".worktreeinclude")).map(|s| s.lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#')).map(String::from).collect::<Vec<_>>()).unwrap_or_default());
     // Nome único por chamada (duas cópias no mesmo segundo não podem dividir o arquivo de padrões).
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -970,7 +1132,7 @@ mod tests {
         let f = tmp.join("state.json");
         let v0 = r#"{"repos":[{"id":"r1","name":"app","path":"/x/app","default_branch":"main"}],"workspaces":[]}"#;
         std::fs::write(&f, v0).unwrap();
-        let s = Store::open(f.clone(), tmp.join("ws"), "val".into()).unwrap();
+        let mut s = Store::open(f.clone(), tmp.join("ws"), "val".into()).unwrap();
         assert_eq!((s.state.schema_version, s.state.repos[0].name.as_str()), (crate::schema::STATE, "app"));
         assert_eq!(std::fs::read_to_string(tmp.join("state.json.v0.bak")).unwrap(), v0);
         s.save().unwrap();
@@ -980,6 +1142,42 @@ mod tests {
         std::fs::write(&f, r#"{"schema_version":99,"repos":[],"workspaces":[],"coisa_nova":true}"#).unwrap();
         assert!(Store::open(f.clone(), tmp.join("ws"), "val".into()).is_ok());
         assert!(tmp.join("state.json.v99.bak").is_file());
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Dois processos no mesmo `state.json` (o app e o kabuld do celular): quem grava depois parte do
+    /// que o outro gravou, em vez de sobrescrever com a cópia velha que tinha em memória.
+    #[test]
+    fn dois_escritores_no_mesmo_estado_nao_se_sobrescrevem() {
+        let tmp = std::env::temp_dir().join(format!("kabul-state-shared-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let f = tmp.join("state.json");
+        let ws = |id: &str| Workspace { id: id.into(), repo_id: "r1".into(), name: id.into(), branch: format!("val/{id}"), path: tmp.join(id).display().to_string(), port: 0, ..Default::default() };
+        let mut seed = Store::open(f.clone(), tmp.join("ws"), "val".into()).unwrap();
+        seed.state.repos.push(Repo { id: "r1".into(), name: "app".into(), path: "/x/app".into(), default_branch: "main".into(), ..Default::default() });
+        seed.state.workspaces = vec![ws("lisboa"), ws("cusco")];
+        seed.save().unwrap();
+
+        // O app abre o estado; o "celular" (outro Store, outro processo) arquiva um workspace.
+        let desktop = SharedStore::new(Store::open(f.clone(), tmp.join("ws"), "val".into()).unwrap());
+        assert!(!desktop.changed_on_disk());
+        let mut phone = Store::open(f.clone(), tmp.join("ws"), "val".into()).unwrap();
+        phone.update_workspace("lisboa", |w| w.archived = true).unwrap();
+        assert!(desktop.changed_on_disk(), "a mudança de fora é detectada");
+
+        // O app lê: vê o arquivado. Grava outra coisa: o arquivado continua lá.
+        assert!(desktop.lock().unwrap().workspace("lisboa").unwrap().archived);
+        desktop.lock().unwrap().update_workspace("cusco", |w| w.title = Some("Login novo".into())).unwrap();
+        assert!(!desktop.changed_on_disk(), "a própria gravação não conta como mudança de fora");
+        let disk = Store::open(f.clone(), tmp.join("ws"), "val".into()).unwrap();
+        assert!(disk.workspace("lisboa").unwrap().archived, "o app não sobrescreveu o arquivamento do celular");
+        assert_eq!(disk.workspace("cusco").unwrap().title.as_deref(), Some("Login novo"));
+
+        // Duas gravações seguidas de fora (mesmo tique do relógio, mesmo tamanho) também são vistas.
+        phone.reload_if_changed().unwrap();
+        phone.update_workspace("cusco", |w| w.title = Some("Login novx".into())).unwrap();
+        assert_eq!(desktop.lock().unwrap().workspace("cusco").unwrap().title.as_deref(), Some("Login novx"));
         std::fs::remove_dir_all(&tmp).ok();
     }
 
@@ -1085,6 +1283,183 @@ mod tests {
         let a = s.after_merge(&w.id, true, true).unwrap();
         assert!(a.archived && a.status == "done");
         assert!(git(&repo, &["rev-parse", "--verify", "-q", "refs/heads/dev/corrigir-o-login-no-safari"]).is_err());
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Repo com um commit e um Store com `n` workspaces (pasta temporária própria).
+    fn repo_com_workspaces(tag: &str, n: usize) -> (PathBuf, Store, Vec<Workspace>) {
+        let tmp = std::env::temp_dir().join(format!("kabul-arq-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let repo = tmp.join("r");
+        std::fs::create_dir_all(&repo).unwrap();
+        let g = |a: &[&str]| assert!(crate::shell::command("git").arg("-C").arg(&repo).args(["-c", "user.name=t", "-c", "user.email=t@t"]).args(a).output().unwrap().status.success(), "{a:?}");
+        g(&["init", "-q", "-b", "main"]);
+        g(&["config", "core.autocrlf", "false"]);
+        std::fs::write(repo.join("a.txt"), "um\n").unwrap();
+        std::fs::write(repo.join(".gitignore"), "node_modules/\n").unwrap();
+        g(&["add", "."]);
+        g(&["commit", "-qm", "i"]);
+        let mut s = Store::open(tmp.join("state.json"), tmp.join("ws"), "t".into()).unwrap();
+        let r = s.add_repo(&repo).unwrap();
+        let ws = (0..n).map(|_| s.create_workspace(&r.id).unwrap()).collect();
+        (tmp, s, ws)
+    }
+
+    fn espera(cond: impl Fn() -> bool) -> bool {
+        let t = std::time::Instant::now();
+        while !cond() && t.elapsed() < std::time::Duration::from_secs(20) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        cond()
+    }
+
+    /// O trabalho pesado roda sem o lock do estado: com o lock preso aqui, o worktree sai do lugar mesmo
+    /// assim; o lock só é pedido no fim, para gravar o resultado.
+    #[test]
+    fn arquivar_nao_prende_o_estado() {
+        let (tmp, mut s, ws) = repo_com_workspaces("lock", 1);
+        let w = &ws[0];
+        let wp = PathBuf::from(&w.path);
+        std::fs::create_dir_all(wp.join("node_modules/x")).unwrap();
+        std::fs::write(wp.join("node_modules/x/i.js"), "x").unwrap();
+        std::fs::write(wp.join("a.txt"), "mudou\n").unwrap();
+        let plan = s.begin_archive(&w.id, true).unwrap();
+        assert!(s.workspace(&w.id).unwrap().archived, "some da lista na hora");
+        assert_eq!(s.workspace(&w.id).unwrap().state, "archiving");
+        let store = std::sync::Arc::new(std::sync::Mutex::new(s));
+        let guard = store.lock().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let st = store.clone();
+        let id = w.id.clone();
+        let prev = plan.prev_state.clone();
+        assert!(crate::archive::spawn(plan, crate::archive::Options::bare(), move |res| {
+            st.lock().unwrap().finish_archive(&id, &prev, &res).unwrap();
+            tx.send(res).unwrap();
+        }));
+        assert!(espera(|| !wp.exists()), "o worktree saiu do lugar com o lock do estado preso por outro");
+        assert!(rx.try_recv().is_err(), "o fim espera o lock");
+        drop(guard);
+        let out = rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap().unwrap();
+        crate::archive::wait(&w.id);
+        let s = store.lock().unwrap();
+        let a = s.workspace(&w.id).unwrap();
+        assert_eq!((a.archived, a.state.as_str(), a.archive_checkpoint.clone()), (true, "archived", Some(format!("archive-{}", w.id))));
+        let rp = PathBuf::from(&s.repo(&w.repo_id).unwrap().path);
+        assert!(git(&rp, &["rev-parse", "--verify", "-q", &format!("refs/heads/{}", w.branch)]).is_err(), "branch apagada");
+        // A pasta foi para a lixeira (mesmo volume) e é apagada em segundo plano.
+        let lixo = out.trash.expect("foi para a lixeira");
+        assert!(lixo.starts_with(s.trash_dir()));
+        assert!(espera(|| !lixo.exists()), "lixo apagado");
+        // Registro do worktree solto no git: dá para desarquivar na mesma pasta.
+        let wl = crate::worktree::list(&rp).unwrap();
+        assert!(!wl.iter().any(|x| x.path.ends_with(&format!("/{}", w.name))), "{wl:?}");
+        drop(s);
+        store.lock().unwrap().unarchive_workspace(&w.id).unwrap();
+        assert_eq!(std::fs::read_to_string(wp.join("a.txt")).unwrap(), "mudou\n");
+        assert!(!wp.join("node_modules").exists(), "ignorados não entram no checkpoint");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Desfazer dentro da janela: nada no disco foi tocado e o workspace volta como estava.
+    #[test]
+    fn desfazer_na_janela() {
+        let (tmp, mut s, ws) = repo_com_workspaces("undo", 1);
+        let w = &ws[0];
+        std::fs::create_dir_all(Path::new(&w.path).join("node_modules")).unwrap();
+        std::fs::write(Path::new(&w.path).join("node_modules/pesado.js"), "x").unwrap();
+        let plan = s.begin_archive(&w.id, false).unwrap();
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let c2 = called.clone();
+        let opts = crate::archive::Options { grace: std::time::Duration::from_secs(30), ..crate::archive::Options::bare() };
+        assert!(crate::archive::spawn(plan, opts, move |_| c2.store(true, std::sync::atomic::Ordering::SeqCst)));
+        assert!(crate::archive::running(&w.id));
+        let crate::archive::Undo::Cancelled { prev_state } = crate::archive::undo(&w.id) else { panic!("deveria cancelar") };
+        let back = s.cancel_archive(&w.id, &prev_state).unwrap();
+        assert_eq!((back.archived, back.state.as_str()), (false, "ready"));
+        assert!(Path::new(&w.path).join("node_modules/pesado.js").exists(), "nada apagado");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(!called.load(std::sync::atomic::Ordering::SeqCst), "o fim não roda depois do desfazer");
+        assert!(!crate::archive::running(&w.id));
+        // Sem trabalho rodando, desfazer é o desarquivar normal.
+        assert_eq!(crate::archive::undo(&w.id), crate::archive::Undo::NotRunning);
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Erro no segundo plano (git ocupado): o workspace volta para a lista, com a pasta intacta.
+    #[test]
+    fn erro_volta_para_a_lista() {
+        let (tmp, mut s, ws) = repo_com_workspaces("erro", 1);
+        let w = &ws[0];
+        let gd = git(Path::new(&w.path), &["rev-parse", "--git-dir"]).unwrap();
+        let gd = if Path::new(&gd).is_absolute() { PathBuf::from(gd) } else { Path::new(&w.path).join(gd) };
+        let head = git(Path::new(&w.path), &["rev-parse", "HEAD"]).unwrap();
+        std::fs::write(gd.join("MERGE_HEAD"), head).unwrap();
+        let err = s.archive_workspace(&w.id).unwrap_err().to_string();
+        assert!(err.contains("git ocupado"), "{err}");
+        let back = s.workspace(&w.id).unwrap();
+        assert_eq!((back.archived, back.state.as_str()), (false, "ready"));
+        assert!(Path::new(&w.path).join("a.txt").exists());
+        // Tentar de novo depois de resolver funciona.
+        std::fs::remove_file(gd.join("MERGE_HEAD")).unwrap();
+        assert!(s.archive_workspace(&w.id).unwrap().archived);
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Vários de uma vez (apagando as branches): em paralelo, sem serializar atrás de um lock e sem
+    /// brigar pelo `packed-refs.lock`.
+    #[test]
+    fn arquivar_varios_em_paralelo() {
+        let (tmp, mut s, ws) = repo_com_workspaces("lote", 4);
+        let rp = PathBuf::from(&s.state.repos[0].path);
+        git(&rp, &["pack-refs", "--all"]).unwrap();
+        let plans: Vec<_> = ws.iter().map(|w| s.begin_archive(&w.id, true).unwrap()).collect();
+        assert!(s.state.workspaces.iter().all(|w| w.archived));
+        let store = std::sync::Arc::new(std::sync::Mutex::new(s));
+        let (tx, rx) = std::sync::mpsc::channel();
+        for p in plans {
+            let (st, tx, id, prev) = (store.clone(), tx.clone(), p.ws.id.clone(), p.prev_state.clone());
+            crate::archive::spawn(p, crate::archive::Options::bare(), move |res| {
+                st.lock().unwrap().finish_archive(&id, &prev, &res).unwrap();
+                tx.send(res.map(|_| ())).unwrap();
+            });
+        }
+        let oks: Vec<_> = (0..4).map(|_| rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap()).collect();
+        assert_eq!(oks, vec![Ok(()); 4]);
+        let s = store.lock().unwrap();
+        assert!(s.state.workspaces.iter().all(|w| w.state == "archived" && !Path::new(&w.path).exists()));
+        assert!(git(&rp, &["for-each-ref", "refs/heads/t/"]).unwrap().is_empty(), "branches apagadas");
+        drop(s);
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// App fechado no meio: na abertura o arquivamento é retomado (pasta ainda lá) ou concluído (pasta
+    /// já na lixeira, checkpoint gravado), e o desarquivar acha o checkpoint pelo nome.
+    #[test]
+    fn arquivamento_interrompido() {
+        let (tmp, mut s, ws) = repo_com_workspaces("interr", 2);
+        let rp = PathBuf::from(&s.state.repos[0].path);
+        for w in &ws {
+            s.begin_archive(&w.id, false).unwrap();
+        }
+        // O segundo já tinha checkpoint e pasta movida quando o app caiu.
+        std::fs::write(Path::new(&ws[1].path).join("a.txt"), "salvo\n").unwrap();
+        crate::checkpoint::create(Path::new(&ws[1].path), &format!("archive-{}", ws[1].id), "arquivamento").unwrap();
+        crate::archive::remove_worktree(&rp, Path::new(&ws[1].path), &s.trash_dir()).unwrap();
+        let mut s = Store::open(s.file.clone(), s.root.clone(), "t".into()).unwrap();
+        let plans = s.interrupted_archives(false);
+        assert_eq!(plans.len(), 2);
+        for p in plans {
+            let r = crate::archive::execute(&p, &crate::archive::Options::bare()).map_err(|e| e.to_string());
+            assert!(r.as_ref().unwrap().checkpoint.is_some(), "{r:?}");
+            s.finish_archive(&p.ws.id, &p.prev_state, &r).unwrap();
+        }
+        assert!(s.state.workspaces.iter().all(|w| w.state == "archived"));
+        s.unarchive_workspace(&ws[1].id).unwrap();
+        assert_eq!(std::fs::read_to_string(Path::new(&ws[1].path).join("a.txt")).unwrap(), "salvo\n");
+        // Lixo pendente é apagado na abertura.
+        let hs = crate::archive::sweep(s.trash_dirs());
+        hs.into_iter().for_each(|h| h.join().unwrap());
+        assert_eq!(std::fs::read_dir(s.trash_dir()).map(|d| d.count()).unwrap_or(0), 0);
         std::fs::remove_dir_all(&tmp).ok();
     }
 

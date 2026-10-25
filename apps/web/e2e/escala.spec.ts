@@ -1,4 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
+import { navTo } from "./helpers";
 
 // Escala (docs/escala.md): só o workspace visível montado (estado guardado), eventos em segundo plano,
 // painel Agentes (filtros, subagentes, parar em lote), fila "aguardando vaga" e janela do chat longo.
@@ -58,7 +59,7 @@ test("painel Agentes: todos os ativos, filtros, subagentes com filhos, abrir a c
   await expect(chat(page).getByTestId("stop")).toBeVisible();
   // Subagente com eventos filhos (parent_tool_use_id): ferramentas e tokens no nó.
   await expect(chat(page).getByTestId("subagents-btn")).toContainText("subagente", { timeout: 6000 });
-  await page.getByTestId("nav-agents").click();
+  await navTo(page, "agents");
   await expect(page.getByTestId("agents-count")).toHaveText("2");
   const rows = page.getByTestId("agent-row");
   await expect(rows).toHaveCount(2);
@@ -76,7 +77,7 @@ test("painel Agentes: todos os ativos, filtros, subagentes com filhos, abrir a c
   await expect(host(page).locator(".crumb-title")).toHaveText("Tarefa 2");
   await expect(chat(page).getByTestId("stop")).toBeVisible();
   // Parar em lote (os dois workspaces fora da tela: um comando só no backend).
-  await page.getByTestId("nav-agents").click();
+  await navTo(page, "agents");
   await page.getByTestId("agents-search").fill("");
   await page.getByTestId("agents-select-all").click();
   await page.getByTestId("agents-stop-selected").click();
@@ -100,7 +101,7 @@ test("limite de agentes: o segundo fica 'aguardando vaga' (conversa, aba, barra 
   await expect(chat(page).getByTestId("slot-wait")).toContainText("Aguardando vaga · 1º na fila (limite de 1 agentes ao mesmo tempo)");
   await expect(host(page).getByTestId("tab-queued")).toBeVisible();
   await expect(page.locator('[data-ws="w2"]').getByTestId("ws-queued")).toBeVisible();
-  await page.getByTestId("nav-agents").click();
+  await navTo(page, "agents");
   await expect(page.getByTestId("agents-limit")).toContainText("Limite: 1 ao mesmo tempo · 1 rodando · 1 na fila");
   await page.getByTestId("agents-filter-queued").click();
   await expect(page.getByTestId("agent-row")).toHaveCount(1);
@@ -115,7 +116,7 @@ test("limite de agentes: o segundo fica 'aguardando vaga' (conversa, aba, barra 
   await expect(chat(page).getByTestId("slot-wait")).toHaveCount(0);
   await expect(chat(page).getByTestId("working")).toBeVisible();
   // Limite pelo painel (agents_config).
-  await page.getByTestId("nav-agents").click();
+  await navTo(page, "agents");
   await page.getByTestId("agents-limit-input").fill("4");
   await page.getByTestId("agents-limit-input").press("Enter");
   await expect(page.getByTestId("agents-limit")).toContainText("Limite: 4");

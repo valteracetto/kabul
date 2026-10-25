@@ -7,7 +7,7 @@
  * Usado por demo/iphone.capture.ts e demo/android.capture.ts. Cru em <repo>/.context/demo/raw/,
  * final em <repo>/docs/assets/.
  */
-import type { Browser, Page } from "@playwright/test";
+import type { Browser, Page } from "../playwright-silencio";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";

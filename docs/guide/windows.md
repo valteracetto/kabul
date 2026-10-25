@@ -50,6 +50,10 @@ Background processes (git, gh, agents) start without a console window.
 - **Dictation** needs `ffmpeg` and `whisper-cli.exe` installed by hand.
 - **Icons** in "Open in" are not shown (the menu uses initials).
 - The optional **CodexBar** usage source only exists on macOS; limits still come from the agents themselves.
+- **Kabul's browser** finds Chrome or Edge in `Program Files` / `%LOCALAPPDATA%`, keeps its profile in
+  `%APPDATA%\kabul\browser\<workspace>\profile` and runs detached without a console window, but it has
+  not been tried on a real Windows machine yet. Corporate policies that disable remote debugging block it;
+  use the downloaded browser (Settings › Browser) or point to another executable.
 - Not yet checked on real hardware: long paths and CRLF in worktrees, and some CLI folders.
 
 ## Reporting problems

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 import { startKabuld, wsAction, type Kabuld } from "./helpers";
 
 // Android (Pixel 8): visual Material pela plataforma e voltar do sistema pelo histórico (tela e folha).

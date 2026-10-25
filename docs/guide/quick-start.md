@@ -19,6 +19,16 @@ Press `⌘N` and open the project picker:
   GitHub CLI login;
 - **Quick start**: a new folder with `git init`, a README and a first commit.
 
+From the terminal, add several at once with the `kabul` CLI (it writes the same state as the app; an open app
+shows the new projects in the sidebar within a second, no restart):
+
+```sh
+kabul repo add ~/code/api ~/code/web ../site   # skips folders that aren't git repositories or are already in Kabul
+kabul repo ls                                  # name, default branch, path (--json for scripts)
+```
+
+A subfolder adds the whole repository. `KABUL_HOME` (or `--home`) points to another state folder, as in the tests.
+
 Kabul never changes your main checkout. Every task gets its own worktree next to it.
 
 ## 2. Describe the task

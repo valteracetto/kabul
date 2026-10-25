@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { OverviewTabs } from "./SideNav";
 import { api, wsTitle, type AgentsStatus, type Repo, type Workspace } from "../api";
 import type { Route } from "../App";
 import { chatStore, statusOf, type ChatInfo, type ChatStatus } from "../components/chatStore";
@@ -85,7 +86,7 @@ export function AgentsView({ workspaces, repos, onRoute }: { workspaces: Workspa
   return (
     <section className="page agents-view" data-testid="agents-view">
       <header className="page-head" data-tauri-drag-region>
-        <h2>{t("app.agents.title")}</h2>
+        <OverviewTabs on="agents" />
         <span className="dim">{t("app.agents.counts", { working: counts.working, waiting: counts.waiting, queued: counts.queued })}</span>
         <span className="grow" />
         {status && (

@@ -18,7 +18,9 @@ export const saveSessionDisabled = (sessionId: string, v: string[]) => localStor
 
 /** Id do harness como aparece nas origens do registro (`agy` para o Antigravity). */
 const originId = (h: HarnessKind) => (h === "antigravity" ? "agy" : h);
-const ORIGIN_LABEL: Record<string, string> = { claude: "Claude", codex: "Codex", agy: "Antigravity", opencode: "OpenCode", gemini: "Gemini CLI", qwen: "Qwen Code", goose: "Goose", cursor: "Cursor" };
+const ORIGIN_LABEL: Record<string, string> = { claude: "Claude", codex: "Codex", agy: "Antigravity", opencode: "OpenCode", gemini: "Gemini CLI", qwen: "Qwen Code", goose: "Goose", cursor: "Cursor", kabul: "Kabul" };
+/** MCP embutido do Kabul (o navegador `kabul-browser`): vai para todas as IAs, sem config nativa. */
+const builtin = (m: McpShared) => m.origins.some((o) => o.harness === "kabul");
 
 /** 3200 → "3,2k" (pt-BR) / "3.2k" (en). */
 export function fmtTokens(n: number): string {
@@ -141,6 +143,7 @@ export function McpPanel({ workspaceId, repoId, harness, live, sessionOff, setSe
                 <button className={"text-btn star" + (essential.includes(m.name) ? " on" : "")} title={t("chat.mcp.starTitle")} onClick={() => toggleEssential(m.name)} data-testid="mcp-star">{essential.includes(m.name) ? "★" : "☆"}</button>
                 <b>{m.name}</b>
                 {m.origins.map((o) => <span key={o.harness} className="badge" title={`${o.scope} · ${o.source}`}>{t("chat.mcp.from", { origin: ORIGIN_LABEL[o.harness] ?? o.harness })}</span>)}
+                {builtin(m) && <span className="badge" title={t("chat.mcp.builtinTitle")} data-testid="mcp-builtin">{t("chat.mcp.builtin")}</span>}
                 {m.conflict && <span className="badge warn" title={t("chat.mcp.conflictTitle")}>{t("chat.mcp.conflict")}</span>}
                 {st === "failed" && <span className="error small">{t("chat.mcp.failed")}</span>}
               </div>
@@ -150,6 +153,8 @@ export function McpPanel({ workspaceId, repoId, harness, live, sessionOff, setSe
                 <span className="grow" />
                 {!native(m) && harness === "antigravity" ? (
                   <button className="text-btn small" onClick={() => exportAgy(m)} title={t("chat.mcp.agyGlobal")} data-testid="mcp-export-agy">{t("chat.mcp.exportAgy")}</button>
+                ) : builtin(m) ? (
+                  <span className="dim small">{t("chat.mcp.allAis")}</span>
                 ) : (
                   <label className="row mcp-share" title={m.shared ? t("chat.mcp.sharedAll") : m.transport !== "stdio" ? t("chat.mcp.remoteLogin") : t("chat.mcp.originOnly")}>
                     <span className={"toggle small" + (m.shared ? " on" : "")} onClick={() => toggleShared(m)} data-testid="mcp-share"><span /></span>{t("chat.mcp.allAis")}

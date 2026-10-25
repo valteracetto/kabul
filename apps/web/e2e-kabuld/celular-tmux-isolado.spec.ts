@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 import { execFileSync } from "node:child_process";
 import { startKabuld, tmux, TMUX_SOCKET, type Kabuld } from "./helpers";
 

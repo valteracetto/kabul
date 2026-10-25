@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
 import { addRepo } from "./helpers";
 
 const chat = (page: Page) => page.locator(".ws-host:not([hidden]) .center-body:not([hidden])");

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 import { addRepo } from "./helpers";
 
 test("ao abrir, volta à última rota; links do workspace e da conversa", async ({ page }) => {

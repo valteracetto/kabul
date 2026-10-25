@@ -1,5 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { addRepo } from "./helpers";
+import { test, expect, type Page } from "../playwright-silencio";
+import { addRepo, navTo } from "./helpers";
 
 const host = (page: Page) => page.locator(".ws-host:not([hidden])");
 async function setup(page: Page) {
@@ -13,7 +13,7 @@ async function setup(page: Page) {
 
 test("Quadro: colunas por status; arrastar o cartão muda o status; clique abre o workspace", async ({ page }) => {
   await setup(page);
-  await page.getByTestId("nav-dashboard").click();
+  await navTo(page, "dashboard");
   const card = page.getByTestId("kb-card").first();
   await expect(page.getByTestId("col-in-progress").getByTestId("kb-card")).toHaveCount(1);
   const from = (await card.boundingBox())!;
@@ -33,7 +33,7 @@ test("Quadro: colunas por status; arrastar o cartão muda o status; clique abre 
 test("Rotinas: cron validado (mínimo 15 min), próximas execuções, salvar ⌘S, rodar agora abre conversa; evento de PR (merge) dispara", async ({ page }) => {
   await setup(page);
   await page.evaluate(() => (window as any).__mock.pr(null, { state: "OPEN" }));
-  await page.getByTestId("nav-routines").click();
+  await navTo(page, "routines");
   await page.getByTestId("routine-new").click();
   await page.getByTestId("routine-name").fill("Revisar PRs");
   await page.getByTestId("routine-prompt").fill("liste");
@@ -52,7 +52,7 @@ test("Rotinas: cron validado (mínimo 15 min), próximas execuções, salvar ⌘
   await expect(host(page).locator(".ctab.on")).toContainText("Revisar PRs");
   await expect(host(page).locator(".center-body:not([hidden]) .msg-user")).toHaveText("liste");
   // Evento do PR: com merge, roda.
-  await page.getByTestId("nav-routines").click();
+  await navTo(page, "routines");
   await page.getByTestId("routine-new").click();
   await page.getByTestId("routine-name").fill("Depois do merge");
   await page.getByTestId("routine-prompt").fill("liste de novo");

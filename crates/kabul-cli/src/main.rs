@@ -107,6 +107,28 @@ enum Cmd {
         #[arg(long)]
         label: Option<String>,
     },
+    /// Servidores MCP embutidos: `kabul mcp browser --workspace <id>` (navegador do Kabul, stdio).
+    Mcp {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Navegador do Kabul de um workspace: status | open [url] | stop | clear | install.
+    Browser {
+        acao: String,
+        /// URL (com `open`).
+        url: Option<String>,
+        /// Workspace (padrão: o da pasta atual).
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Pasta de estado (como KABUL_HOME).
+        #[arg(long)]
+        home: Option<String>,
+    },
+    /// Repositórios do Kabul (o mesmo estado do app; o app aberto vê a mudança sozinho).
+    Repo {
+        #[command(subcommand)]
+        acao: RepoCmd,
+    },
     /// Processo servidor do loadtest (interno).
     #[command(hide = true)]
     LoadtestWorker {
@@ -130,8 +152,31 @@ enum Cmd {
     },
 }
 
+#[derive(Subcommand)]
+enum RepoCmd {
+    /// Adiciona repositórios git (vários caminhos). Pula o que não é repositório git e o que já está
+    /// no Kabul; uma subpasta adiciona o repositório inteiro.
+    Add {
+        #[arg(required = true)]
+        caminhos: Vec<std::path::PathBuf>,
+        /// Pasta de estado (padrão: KABUL_HOME ou a do app).
+        #[arg(long)]
+        home: Option<std::path::PathBuf>,
+    },
+    /// Lista os repositórios (nome, branch padrão, caminho).
+    Ls {
+        /// Pasta de estado (padrão: KABUL_HOME ou a do app).
+        #[arg(long)]
+        home: Option<std::path::PathBuf>,
+        /// Saída em JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 fn main() -> Result<()> {
     match Cli::parse().cmd {
+        Cmd::Repo { acao } => repo(acao),
         Cmd::Ls { sem_importadas } => ls(!sem_importadas),
         Cmd::Run { agente, nome, cwd, model, remote_control, worktree: wt } => run(&agente, nome, cwd, model, remote_control, wt),
         Cmd::Local => {
@@ -157,6 +202,11 @@ fn main() -> Result<()> {
         Cmd::LoadtestWorker { home, port, workspaces, agents, rate, tmux, monitor_ms, max_agents } => {
             loadtest::worker(loadtest::WorkerOpts { home, port, workspaces, agents, rate, tmux, monitor_ms, max_agents: (max_agents > 0).then_some(max_agents) })
         }
+        Cmd::Mcp { args } => {
+            let argv: Vec<String> = std::iter::once("mcp".to_string()).chain(args).collect();
+            kabul_core::browser::mcp::dispatch(&argv).unwrap_or_else(|| bail!("servidor MCP desconhecido (use: kabul mcp browser --workspace <id>)"))
+        }
+        Cmd::Browser { acao, url, workspace, home } => browser(&acao, url, workspace, home),
         Cmd::Chat { prompt, agente, model, local, cwd, aprovar } => chat(&prompt, agente, model, local, cwd, aprovar == "allow"),
         Cmd::Auth => {
             for k in [HarnessKind::Claude, HarnessKind::Codex, HarnessKind::Antigravity] {
@@ -290,4 +340,84 @@ fn chat(prompt: &str, agente: Option<String>, model: Option<String>, local: Opti
         }
     }
     Ok(())
+}
+
+fn browser(acao: &str, url: Option<String>, workspace: Option<String>, home: Option<String>) -> Result<()> {
+    use kabul_core::browser;
+    let home = home.map(std::path::PathBuf::from).unwrap_or_else(browser::mcp::default_home);
+    let ws = match workspace {
+        Some(w) => w,
+        None => {
+            let cwd = std::env::current_dir()?;
+            browser::mcp::workspace_from_cwd(&home, &cwd).ok_or_else(|| anyhow::anyhow!("esta pasta não é de um workspace do Kabul: use --workspace <id>"))?
+        }
+    };
+    let a = serde_json::json!({ "workspaceId": ws, "url": url });
+    let cmd = match acao {
+        "status" | "open" | "stop" | "clear" | "install" => acao,
+        o => bail!("ação desconhecida: {o} (use status, open, stop, clear ou install)"),
+    };
+    let v = browser::live::command(&home, cmd, &a)?;
+    println!("{}", serde_json::to_string_pretty(&v)?);
+    Ok(())
+}
+
+/// Estado do Kabul: `--home`, senão KABUL_HOME, senão o do app (mesma regra do app desktop).
+fn open_store(home: Option<std::path::PathBuf>) -> Result<kabul_core::store::Store> {
+    use kabul_core::store::Store;
+    let (file, root) = match home.or_else(|| std::env::var_os("KABUL_HOME").map(std::path::PathBuf::from)) {
+        Some(h) => (h.join("state.json"), h.join("workspaces")),
+        None => Store::default_paths(),
+    };
+    let dir = file.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let prefix = kabul_core::settings::AppSettings::load(&dir.join("app-settings.json")).branch_prefix();
+    Store::open(file, root, prefix)
+}
+
+fn repo(acao: RepoCmd) -> Result<()> {
+    match acao {
+        RepoCmd::Add { caminhos, home } => {
+            let mut st = open_store(home)?;
+            let (mut added, mut had, mut skipped) = (0, 0, 0);
+            for c in &caminhos {
+                let p = std::path::absolute(c).unwrap_or_else(|_| c.clone());
+                if !p.is_dir() {
+                    println!("- {}: pasta não encontrada", c.display());
+                    skipped += 1;
+                    continue;
+                }
+                let before = st.state.repos.len();
+                match st.add_repo(&p) {
+                    Ok(r) if st.state.repos.len() > before => {
+                        println!("+ {}  {}", r.name, r.path);
+                        added += 1;
+                    }
+                    Ok(r) => {
+                        println!("= {}  {} (já estava no Kabul)", r.name, r.path);
+                        had += 1;
+                    }
+                    Err(e) => {
+                        println!("- {}: {}", c.display(), e);
+                        skipped += 1;
+                    }
+                }
+            }
+            println!("{added} adicionado(s), {had} já estava(m), {skipped} pulado(s).");
+            Ok(())
+        }
+        RepoCmd::Ls { home, json } => {
+            let st = open_store(home)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&st.state.repos)?);
+                return Ok(());
+            }
+            if st.state.repos.is_empty() {
+                println!("Nenhum repositório. Adicione com: kabul repo add <caminho>");
+            }
+            for r in &st.state.repos {
+                println!("{:<24} {:<12} {}{}", r.name, r.default_branch, r.path, if r.hidden { " (oculto)" } else { "" });
+            }
+            Ok(())
+        }
+    }
 }

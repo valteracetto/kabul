@@ -14,6 +14,16 @@ Tecle `⌘N` e abra o seletor de projeto:
   do GitHub CLI;
 - **Início rápido**: uma pasta nova com `git init`, um README e o primeiro commit.
 
+Pelo terminal, adicione vários de uma vez com o CLI `kabul` (ele grava o mesmo estado do app; um app aberto
+mostra os projetos novos na barra lateral em até um segundo, sem reiniciar):
+
+```sh
+kabul repo add ~/code/api ~/code/web ../site   # pula pastas que não são repositório git ou já estão no Kabul
+kabul repo ls                                  # nome, branch padrão, caminho (--json para scripts)
+```
+
+Uma subpasta adiciona o repositório inteiro. `KABUL_HOME` (ou `--home`) aponta outra pasta de estado, como nos testes.
+
 O Kabul nunca mexe no checkout principal. Cada tarefa ganha o seu próprio worktree ao lado dele.
 
 ## 2. Descreva a tarefa

@@ -239,6 +239,58 @@ pub fn shared(workspace: &Path, repo: &Path) -> Vec<Shared> {
     out
 }
 
+/// Executável que serve os MCPs embutidos (`<exe> mcp browser ...`): `KABUL_MCP_BIN` ou o próprio
+/// processo (app desktop, `kabuld` e `kabul` tratam esses argumentos).
+pub fn builtin_exe() -> String {
+    std::env::var("KABUL_MCP_BIN").ok().filter(|s| !s.is_empty()).or_else(|| std::env::current_exe().ok().map(|p| p.display().to_string())).unwrap_or_else(|| "kabul".into())
+}
+
+/// MCPs embutidos do Kabul (hoje: o navegador `kabul-browser`), no registro como os outros, com
+/// origem `kabul` (não é nativo de nenhum CLI, então vai para todos). `plan_flag`: arquivo que, enquanto
+/// existir, deixa o navegador só para leitura (modo plano; o app cria/apaga ao trocar de modo ao vivo).
+pub fn builtin(home: &Path, workspace_id: &str, plan_flag: Option<&Path>, hosts: &[String]) -> Vec<Shared> {
+    let mut args = vec!["mcp".to_string(), "browser".into(), "--workspace".into(), workspace_id.into(), "--home".into(), home.display().to_string()];
+    if let Some(f) = plan_flag {
+        args.extend(["--plan-flag".to_string(), f.display().to_string()]);
+    }
+    for h in hosts {
+        args.extend(["--allow-host".to_string(), h.clone()]);
+    }
+    let server = Server { name: crate::browser::mcp::NAME.into(), transport: "stdio".into(), command: Some(builtin_exe()), args, ..Default::default() };
+    vec![Shared { server, origins: vec![Origin { harness: "kabul".into(), scope: "builtin".into(), source: "Kabul".into() }], conflict: false }]
+}
+
+/// Registro completo de um workspace: as configs nativas + os embutidos (se ligados em Configurações).
+pub fn registry(home: &Path, workspace_id: &str, workspace: &Path, repo: &Path, default_branch: &str) -> Vec<Shared> {
+    let mut all = shared(workspace, repo);
+    if crate::settings::AppSettings::load(&home.join("app-settings.json")).browser_mcp {
+        let (rs, _) = crate::settings::load(repo, default_branch);
+        all.extend(builtin(home, workspace_id, None, &rs.browser_hosts));
+        all.sort_by(|a, b| a.server.name.cmp(&b.server.name));
+    }
+    all
+}
+
+/// Versão para a config global do Antigravity: o embutido acha o workspace pela pasta atual.
+pub fn for_global(mut sv: Server) -> Server {
+    if sv.name == crate::browser::mcp::NAME {
+        if let Some(i) = sv.args.iter().position(|a| a == "--workspace") {
+            if let Some(v) = sv.args.get_mut(i + 1) {
+                *v = "auto".into();
+            }
+        }
+    }
+    sv
+}
+
+/// Peso conhecido sem abrir o processo (definições fixas, compiladas no binário).
+pub fn builtin_weight(name: &str) -> Option<Weight> {
+    (name == crate::browser::mcp::NAME).then(|| {
+        let t = crate::browser::mcp::tools();
+        Weight { tools: t.as_array().map(Vec::len).unwrap_or(0), tokens: t.to_string().len().div_ceil(4) }
+    })
+}
+
 /// Preferências do registro (`<estado>/mcp-shared.json`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Prefs {
@@ -493,7 +545,7 @@ pub fn views(home: &Path, all: &[Shared], prefs: &Prefs) -> Vec<View> {
             conflict: x.conflict,
             shared: prefs.is_shared(&x.server),
             env_keys: x.server.env.keys().chain(x.server.headers.keys()).cloned().collect(),
-            weight: cached_weight(home, &x.server),
+            weight: builtin_weight(&x.server.name).filter(|_| x.origins.iter().any(|o| o.harness == "kabul")).or_else(|| cached_weight(home, &x.server)),
         })
         .collect()
 }
@@ -578,6 +630,24 @@ mod tests {
         assert!(j["mcpServers"]["x"].is_object() && j["mcpServers"]["eco"]["command"] == "node");
         assert!(std::fs::read_to_string(b).unwrap().contains("comentário"));
         std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn navegador_embutido_vai_para_todos() {
+        std::env::set_var("KABUL_MCP_BIN", "/opt/kabul");
+        let b = builtin(Path::new("/h"), "w1", Some(Path::new("/h/plano")), &["exemplo.com".into()]);
+        assert_eq!(b[0].server.command.as_deref(), Some("/opt/kabul"));
+        assert_eq!(b[0].server.args, ["mcp", "browser", "--workspace", "w1", "--home", "/h", "--plan-flag", "/h/plano", "--allow-host", "exemplo.com"]);
+        for k in [HarnessKind::Claude, HarnessKind::Codex, HarnessKind::GeminiCli, HarnessKind::QwenCode, HarnessKind::OpenCode, HarnessKind::Goose] {
+            let p = plan(k, &b, &[], &Prefs::default());
+            assert_eq!(p.inject.len(), 1, "{k:?}");
+            // Desligado na sessão: não vai.
+            assert!(plan(k, &b, &["kabul-browser".into()], &Prefs::default()).inject.is_empty());
+        }
+        let w = builtin_weight("kabul-browser").unwrap();
+        assert!(w.tools >= 15 && w.tokens > 300 && w.tokens < 2000, "{w:?}");
+        let v = views(Path::new("/nao-existe"), &b, &Prefs::default());
+        assert_eq!(v[0].weight, Some(w));
     }
 
     #[test]

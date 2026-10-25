@@ -36,6 +36,29 @@ lives in that CLI's store and another CLI would hang opening a new sign-in (Gemi
 start until every MCP server connects). Remote servers with a fixed header token and local (stdio) servers
 are shared by default.
 
+## Kabul's built-in browser
+
+The registry also has one server that comes with Kabul itself: **`kabul-browser`**, the shared
+[browser](./browser.md) of the workspace. It is listed with the source **Kabul**, is native to no CLI and
+therefore goes to every harness in its own format:
+
+| CLI | What it gets |
+|---|---|
+| Claude Code | an entry in `--mcp-config`, plus `--allowedTools=mcp__kabul-browser` (Kabul's browser policy does the approving) |
+| Codex | `-c mcp_servers.kabul-browser.command=…` and `.args=[…]` |
+| ACP agents (Gemini CLI, Qwen Code, Goose, OpenCode, Cursor) | a stdio entry in `mcpServers` of `session/new` / `session/load` |
+| Antigravity | no per-session injection; **Export to Antigravity** writes the entry to the global file |
+
+The command is Kabul's own executable (the desktop app, `kabuld` or `kabul`, whichever starts the session)
+with `mcp browser --workspace <id> --home <state>`, plus `--plan-flag <file>` (read-only while the file exists, that is, while the conversation is in plan mode) and `--allow-host` for each
+project domain. Turn it off for one session like any other server, or for every AI in **Settings ›
+Browser**. Its weight is known without starting it (the tool definitions are compiled into Kabul), so the
+panel shows it right away.
+
+For **Antigravity**, the exported entry carries the id of the workspace you exported from. Since the global
+file applies to every folder, change the argument to `--workspace auto`: the server then finds the workspace
+from the folder the agent runs in.
+
 ## Session panel
 
 ![Session MCP panel with tools and tokens per server and the tokens saved per turn](../assets/mcp.png)

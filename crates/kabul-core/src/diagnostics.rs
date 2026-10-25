@@ -61,6 +61,36 @@ pub fn run() -> Vec<Check> {
     v
 }
 
+/// Grupo das configurações dos repositórios no diagnóstico.
+pub const SETTINGS_GROUP: &str = "Configurações dos repositórios";
+
+/// Uma checagem por repositório: o que dos arquivos de settings não foi lido (arquivo › chave: motivo).
+pub fn repo_settings(repos: &[crate::store::Repo]) -> Vec<Check> {
+    repos
+        .iter()
+        .map(|r| {
+            let (_, layers) = crate::settings::load(std::path::Path::new(&r.path), &r.default_branch);
+            let warnings: Vec<_> = layers.iter().flat_map(|l| l.warnings.iter()).collect();
+            let detail = if warnings.is_empty() {
+                let found: Vec<_> = layers.iter().filter(|l| l.found).map(|l| rel(&l.path, &r.path)).collect();
+                if found.is_empty() {
+                    "sem arquivos de configuração".to_string()
+                } else {
+                    format!("tudo lido ({})", found.join(", "))
+                }
+            } else {
+                let items: Vec<_> = warnings.iter().map(|w| format!("{} › {}: {}", rel(&w.file, &r.path), if w.key.is_empty() { "(arquivo)" } else { &w.key }, w.reason())).collect();
+                format!("{} não lida(s): {}", warnings.len(), items.join("; "))
+            };
+            Check { group: SETTINGS_GROUP.into(), name: r.name.clone(), ok: warnings.is_empty(), detail }
+        })
+        .collect()
+}
+
+fn rel(path: &str, repo: &str) -> String {
+    path.strip_prefix(repo).map(|p| p.trim_start_matches(['/', '\\']).to_string()).unwrap_or_else(|| path.to_string())
+}
+
 /// Relatório em texto (uma linha por checagem).
 pub fn report(checks: &[Check]) -> String {
     let mut out = String::from("Kabul — diagnóstico\n");
@@ -132,5 +162,18 @@ mod tests {
         assert_eq!(redact("user dev; device", "", "dev", ""), "user <usuário>; device");
         assert!(!red.contains("example.com"));
         assert!(!run().is_empty());
+    }
+
+    #[test]
+    fn configuracoes_nao_lidas() {
+        let tmp = std::env::temp_dir().join(format!("kabul-diag-set-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join(".kabul")).unwrap();
+        std::fs::write(tmp.join(".kabul/settings.toml"), "file_include_globs = 1\n[scripts]\nsetup = \"ok\"\n").unwrap();
+        let r = crate::store::Repo { name: "demo".into(), path: tmp.display().to_string(), default_branch: "main".into(), ..Default::default() };
+        let c = repo_settings(&[r]);
+        assert_eq!((c.len(), c[0].ok, c[0].group.as_str()), (1, false, SETTINGS_GROUP));
+        assert!(c[0].detail.contains(".kabul/settings.toml › file_include_globs: tipo errado"), "{}", c[0].detail);
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }

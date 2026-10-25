@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 import { addRepo } from "./helpers";
 
 test("Configurações › Git: opções do usuário e do repo (base, remote, alvo, sobrescritas, identidade)", async ({ page }) => {

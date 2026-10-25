@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 import { startKabuld, type Kabuld } from "./helpers";
 
 // Celular (dono): a lista mostra as sessões de fora do Kabul e "Continuar" retoma a mesma conversa.

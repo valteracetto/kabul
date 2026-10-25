@@ -1,0 +1,25 @@
+# Campos com tipo errado no meio de um arquivo bom: só eles ficam de fora.
+file_include_globs = 42
+archive_on_merge = "sim"
+target_branch = "develop"
+
+[scripts]
+setup = ["pnpm", "install"]
+archive = "./sair.sh"
+run_mode = "paralelo"
+
+[scripts.run.web]
+command = "pnpm dev"
+default = "talvez"
+
+[scripts.run.quebrada]
+command = 7
+
+[env]
+A = "1"
+B = { nested = true }
+PORTA = 3000
+
+[prompts]
+general = "seja breve"
+review = false

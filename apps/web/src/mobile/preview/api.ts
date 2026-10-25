@@ -17,6 +17,9 @@ export const files = {
   proxy: (ws: string, port: number) => kcall<ProxyOpened>("proxy_open", { workspaceId: ws, port }),
   chats: (ws: string) => kcall<ChatSummary[]>("chat_list", { workspaceId: ws }),
   send: (chatId: string, text: string) => kcall<{ queued: boolean; id: string }>("chat_send", { chatId, text }),
+  /** Navegador do Kabul do workspace: captura atual (null = fechado) e estado. Só leitura no celular. */
+  browserShot: (ws: string) => kcall<{ data: string; width: number; height: number; url: string } | null>("browser_screenshot", { workspaceId: ws, quality: 55 }),
+  browserStatus: (ws: string) => kcall<{ running: boolean; url: string | null; title: string | null; paused: boolean; agent: { at: number; agent: string; tool: string; detail: string } | null }>("browser_status", { workspaceId: ws }),
 };
 
 /** Tamanho de uma página de texto (o arquivo vem por partes com `Range`). */

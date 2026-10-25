@@ -121,6 +121,86 @@ fn chat_call(chats: &mut Chats, st: &mut Store, home: &Path, cmd: &str, a: &Valu
     }))
 }
 
+type Shared = std::sync::Arc<std::sync::Mutex<Store>>;
+type Queue = std::sync::Arc<std::sync::Mutex<Vec<Value>>>;
+
+/// Estado relido do disco (o app pode ter mudado o arquivo), sob o lock.
+fn fresh(shared: &Shared) -> std::sync::MutexGuard<'_, Store> {
+    let mut st = shared.lock().unwrap();
+    if let Ok(f) = Store::open(st.file.clone(), st.root.clone(), st.branch_prefix.clone()) {
+        *st = f;
+    }
+    st
+}
+
+/// Arquivamento em segundo plano (mesmo caminho do app): o fim grava no estado e vira evento
+/// `workspace-state` (com `error` se falhou) para o `events_poll`.
+fn start_archive(shared: &Shared, queue: &Queue, plan: kabul_core::archive::Plan, opts: kabul_core::archive::Options) {
+    let id = plan.ws.id.clone();
+    queue.lock().unwrap().push(json!({"channel": "workspace-state", "payload": {"id": id, "state": "archiving"}}));
+    let (shared, queue, prev) = (shared.clone(), queue.clone(), plan.prev_state.clone());
+    kabul_core::archive::spawn(plan, opts, move |res| {
+        let _ = fresh(&shared).finish_archive(&id, &prev, &res);
+        let payload = match &res {
+            Ok(_) => json!({"id": id, "state": "archived"}),
+            Err(err) => json!({"id": id, "state": prev, "error": err, "action": "archive"}),
+        };
+        queue.lock().unwrap().push(json!({"channel": "workspace-state", "payload": payload}));
+    });
+}
+
+/// Abertura: retoma arquivamentos interrompidos e apaga o lixo pendente.
+fn resume_archives(shared: &Shared, queue: &Queue, home: &Path) {
+    let delete = settings::AppSettings::load(&home.join("app-settings.json")).delete_branch_on_archive;
+    let (plans, trash) = {
+        let st = shared.lock().unwrap();
+        (st.interrupted_archives(delete), st.trash_dirs())
+    };
+    drop(kabul_core::archive::sweep(trash));
+    for p in plans {
+        start_archive(shared, queue, p, archive_opts(false, false, std::time::Duration::ZERO));
+    }
+}
+
+/// Opções do `kabul serve`: como no app, menos matar sessões de terminal. O servidor de tmux é o do
+/// usuário e os nomes (`kabul-<cidade>`) não carregam a pasta de estado: o E2E derrubaria as sessões
+/// do app de verdade.
+fn archive_opts(close_pr: bool, dry_run: bool, grace: std::time::Duration) -> kabul_core::archive::Options {
+    kabul_core::archive::Options { close_pr, dry_run, grace, kill_sessions: false, ..kabul_core::archive::Options::app() }
+}
+
+/// Arquivar e desarquivar (também o "Desfazer"): sem prender o estado durante o git.
+fn archive_call(shared: &Shared, queue: &Queue, home: &Path, cmd: &str, a: &Value) -> Option<Result<Value>> {
+    let run = || -> Result<Value> {
+        let id = s(a, "id")?;
+        if cmd == "workspace_archive" {
+            let set = settings::AppSettings::load(&home.join("app-settings.json"));
+            let plan = {
+                let mut st = fresh(shared);
+                let w = st.workspace(&id)?.clone();
+                let r = st.repo(&w.repo_id)?.clone();
+                let (rs, _) = settings::load(Path::new(&r.path), &r.default_branch);
+                st.begin_archive(&id, rs.delete_branch_on_archive.unwrap_or(set.delete_branch_on_archive))?
+            };
+            let close_pr = a.get("closePr").and_then(Value::as_bool).unwrap_or(false);
+            start_archive(shared, queue, plan, archive_opts(close_pr, dry(a) || set.github_dry_run, kabul_core::archive::grace()));
+            return Ok(Value::Null);
+        }
+        let w = match kabul_core::archive::undo(&id) {
+            kabul_core::archive::Undo::Cancelled { prev_state } => fresh(shared).cancel_archive(&id, &prev_state)?,
+            _ => {
+                let plan = fresh(shared).unarchive_begin(&id)?;
+                if let Some(p) = plan {
+                    store::restore_worktree(&p)?;
+                }
+                fresh(shared).unarchive_finish(&id)?
+            }
+        };
+        Ok(json!(w))
+    };
+    matches!(cmd, "workspace_archive" | "workspace_unarchive").then(run)
+}
+
 fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
     let ws_repo = |st: &Store, id: &str| -> Result<(store::Workspace, store::Repo)> {
         let w = st.workspace(id)?.clone();
@@ -154,8 +234,6 @@ fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
             json!(store::branches(Path::new(&r.path)).unwrap_or_default())
         }
         "linear_status" => json!({"connected": false, "who": null, "error": null}),
-        "workspace_archive" => json!(st.archive_workspace(&s(a, "id")?).map(|_| ())?),
-        "workspace_unarchive" => json!(st.unarchive_workspace(&s(a, "id")?)?),
         "workspace_changes" => {
             let (w, r) = ws_repo(st, &s(a, "workspaceId")?)?;
             json!(gitops::changes(&r, &w, gitops::Scope::parse(a.get("scope").and_then(Value::as_str)))?)
@@ -192,6 +270,14 @@ fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
         "repo_remotes" => {
             let r = st.repo(&s(a, "repoId")?)?.clone();
             json!(gitops::remotes(Path::new(&r.path)))
+        }
+        "repo_settings_import_preview" => {
+            let r = st.repo(&s(a, "repoId")?)?.clone();
+            json!(kabul_core::settings_compat::import_preview(Path::new(&r.path), false))
+        }
+        "repo_settings_import" => {
+            let r = st.repo(&s(a, "repoId")?)?.clone();
+            json!(kabul_core::settings_compat::import_apply(Path::new(&r.path), false, &s(a, "digest")?)?)
         }
         "repo_settings_save" => {
             let r = st.repo(&s(a, "repoId")?)?.clone();
@@ -256,7 +342,8 @@ fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
         // Seletor de pasta "nativo" do E2E: a pasta vem do ambiente do servidor.
         "pick_folder" => json!(std::env::var("KABUL_PICK_FOLDER").ok()),
         "diagnostics" => {
-            let checks = kabul_core::diagnostics::run();
+            let mut checks = kabul_core::diagnostics::run();
+            checks.extend(kabul_core::diagnostics::repo_settings(&st.state.repos));
             let report = kabul_core::diagnostics::report(&checks);
             let redacted = kabul_core::diagnostics::redact(&report, &kabul_core::paths::home().display().to_string(), &kabul_core::machine::user_name(), &kabul_core::machine::computer_name());
             json!({"checks": checks, "report": report, "redacted": redacted})
@@ -390,9 +477,11 @@ fn read_request(c: &std::net::TcpStream) -> Result<(String, Headers, Vec<u8>)> {
 }
 
 pub fn serve(port: u16, home: PathBuf) -> Result<()> {
-    let mut st = Store::open(home.join("state.json"), home.join("workspaces"), std::env::var("USER").unwrap_or_else(|_| "kabul".into()))?;
+    let st = Store::open(home.join("state.json"), home.join("workspaces"), std::env::var("USER").unwrap_or_else(|_| "kabul".into()))?;
+    let shared: Shared = std::sync::Arc::new(std::sync::Mutex::new(st));
     let l = TcpListener::bind(("127.0.0.1", port))?;
     let mut chats = Chats::default();
+    resume_archives(&shared, &chats.queue, &home);
     eprintln!("kabul serve em http://127.0.0.1:{port} (estado em {}; só este computador)", home.display());
     for conn in l.incoming() {
         let mut c = match conn {
@@ -420,14 +509,17 @@ pub fn serve(port: u16, home: PathBuf) -> Result<()> {
             let req: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
             let cmd = req["command"].as_str().unwrap_or("");
             let args = req.get("args").cloned().unwrap_or(json!({}));
-            // Recarrega o estado a cada chamada (o app pode ter mudado o arquivo).
-            if let Ok(fresh) = Store::open(st.file.clone(), st.root.clone(), st.branch_prefix.clone()) {
-                st = fresh;
-            }
-            let res = match chat_call(&mut chats, &mut st, &home, cmd, &args) {
-                Ok(Some(v)) => Ok(v),
-                Ok(None) => call(&mut st, &home, cmd, &args),
-                Err(e) => Err(e),
+            let res = match archive_call(&shared, &chats.queue, &home, cmd, &args) {
+                Some(r) => r,
+                None => {
+                    // Recarrega o estado a cada chamada (o app pode ter mudado o arquivo).
+                    let mut st = fresh(&shared);
+                    match chat_call(&mut chats, &mut st, &home, cmd, &args) {
+                        Ok(Some(v)) => Ok(v),
+                        Ok(None) => call(&mut st, &home, cmd, &args),
+                        Err(e) => Err(e),
+                    }
+                }
             };
             match res {
                 Ok(v) => ("200 OK", json!({"ok": true, "value": v}).to_string()),

@@ -1,5 +1,5 @@
-import { addRepo } from "./helpers";
-import { test, expect, type Page } from "@playwright/test";
+import { addRepo, navTo } from "./helpers";
+import { test, expect, type Page } from "../playwright-silencio";
 
 const shot = (page: Page, n: string) => page.screenshot({ path: `../../.context/e2e/ng-${n}.png` });
 async function setup(page: Page) {
@@ -38,7 +38,7 @@ test("nuvem: criar pelo +, aba ☁︎, abrir no claude.ai, trazer para o Mac; �
   await page.locator(".palette .pop-row", { hasText: "Nova sessão na nuvem" }).first().click();
   await expect(page.getByTestId("cloud-dialog")).toBeVisible();
   await page.keyboard.press("Escape");
-  await page.locator(".side-nav button", { hasText: "Painel" }).click();
+  await navTo(page, "sessions");
   await expect(page.getByTestId("cloud-sessions")).toContainText("session_01MockCloud");
   await page.getByTestId("ws-row").click();
   // Espelhar no celular/claude.ai

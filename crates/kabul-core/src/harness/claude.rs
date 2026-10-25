@@ -59,6 +59,13 @@ impl ClaudeCode {
             a.push("--add-dir".into());
             a.push(d.clone());
         }
+        if !opts.allowed_tools.is_empty() {
+            // Com `=`: a opção é variádica e engoliria o prompt posicional do `--bg`.
+            a.push(format!("--allowedTools={}", opts.allowed_tools.join(",")));
+        }
+        if opts.chrome {
+            a.push("--chrome".into());
+        }
         if let Some(c) = &opts.mcp_config {
             a.extend(["--mcp-config".into(), c.clone()]);
             if opts.mcp_strict {

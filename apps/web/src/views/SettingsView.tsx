@@ -8,6 +8,8 @@ import { api, HARNESS_LABEL, type AuthStatus, type HarnessKind, type Layer, type
 import type { Route } from "../App";
 import { AccountsPanel } from "../components/Accounts";
 import { GitSettings } from "./SettingsGit";
+import { BrowserSettings } from "./SettingsBrowser";
+import { ImportSettings, SettingsWarnings } from "../components/SettingsCompat";
 import { CATEGORIES, shortcutLabel, SHORTCUTS, t, type Key } from "../i18n";
 import { tNode } from "../i18n/react";
 import { trError } from "../i18n/errors";
@@ -16,7 +18,7 @@ import { activeMachine, machines, normalizeUrl, saveMachines, switchMachine, typ
 
 /** Navegação das configurações, por grupo (pessoal, ambiente, repositório, mais). */
 const GROUPS: [Key, string[]][] = [
-  ["settings.group.personal", ["geral", "contas", "aparencia", "modelos", "git", "integracoes"]],
+  ["settings.group.personal", ["geral", "contas", "aparencia", "modelos", "git", "integracoes", "navegador"]],
   ["settings.group.env", ["ambiente"]],
   ["settings.group.repo", ["repo", "acoes", "diversos"]],
   ["settings.group.more", ["remoto", "celular", "avancado", "atalhos"]],
@@ -49,6 +51,7 @@ export function SettingsView({ tab, repoId, repos, onError, onRoute }: { tab: st
           {tab === "contas" && <><GitHub onError={onError} /><Accounts onError={onError} /><h3>{t("settings.accounts.multi")}</h3><AccountsPanel onError={onError} /></>}
           {tab === "git" && <GitSettings repos={repos} onError={onError} />}
           {tab === "integracoes" && <Integrations onError={onError} />}
+          {tab === "navegador" && <BrowserSettings onError={onError} />}
           {tab === "repo" && <RepoSettings repos={repos} repoId={repoId ?? repos[0]?.id} onError={onError} onRoute={onRoute} />}
           {tab === "remoto" && <Machines />}
           {tab === "celular" && <RemotePanel onError={onError} />}
@@ -109,15 +112,18 @@ function RepoSettings({ repos, repoId, onError, onRoute }: { repos: Repo[]; repo
   const [layers, setLayers] = useState<Layer[]>([]);
   const [saved, setSaved] = useState<string | null>(null);
   const [newRun, setNewRun] = useState({ id: "", command: "" });
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     if (repoId) api.repoSettings(repoId).then((r) => (setS(r.settings), setLayers(r.layers)), (e) => onError(String(e)));
-  }, [repoId, onError]);
+  }, [repoId, onError, reload]);
   if (!repos.length) return <p className="dim">{t("settings.repo.addFirst")}</p>;
   const repo = repos.find((r) => r.id === repoId);
   return (
     <div className="set-group" data-testid="repo-settings">
       <div className="set-row"><div>{t("settings.repo.label")}</div><select value={repoId} onChange={(e) => onRoute({ kind: "settings", tab: "repo", repoId: e.target.value })}>{repos.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
       {repo && <div className="dim small">{t("settings.repo.defaultBranch", { path: repo.path, branch: repo.default_branch })}</div>}
+      <SettingsWarnings layers={layers} repoPath={repo?.path} />
+      {repoId && <ImportSettings repoId={repoId} onDone={() => setReload((n) => n + 1)} onError={onError} />}
       <h3>{t("settings.repo.layers")}</h3>
       {layers.map((l) => <div key={l.path} className="layer"><span className={"dot " + (l.found ? "st-done" : "")} /> <b>{l.name}</b> <code>{l.path}</code> <span className="dim">{l.found ? t("settings.repo.found") : "—"}</span></div>)}
       {s && (

@@ -1,5 +1,5 @@
-import { addRepo } from "./helpers";
-import { test, expect } from "@playwright/test";
+import { addRepo, navTo } from "./helpers";
+import { test, expect } from "../playwright-silencio";
 
 test("Painel: agentes fora do Kabul, recentes dos CLIs, continuar no Kabul pela mesma sessão e nuvem por link", async ({ page }) => {
   await page.goto("/?mock");
@@ -7,7 +7,7 @@ test("Painel: agentes fora do Kabul, recentes dos CLIs, continuar no Kabul pela 
   await addRepo(page, "/mock/repos/demo");
   await page.getByTestId("create-go").click();
   await expect(page.getByTestId("ws-row")).toHaveCount(1);
-  await page.locator(".side-nav button", { hasText: "Painel" }).click();
+  await navTo(page, "sessions");
 
   const run = page.getByTestId("external-running").getByTestId("external-row");
   await expect(run).toHaveCount(2);
@@ -37,7 +37,7 @@ test("Painel: agentes fora do Kabul, recentes dos CLIs, continuar no Kabul pela 
   expect(await page.evaluate(() => (window as any).__kabulLastStart)).toEqual({ harness: "codex", resume: "0000-codex-sess" });
 
   // Recente do claude no mesmo workspace.
-  await page.locator(".side-nav button", { hasText: "Painel" }).click();
+  await navTo(page, "sessions");
   await page.getByTestId("external-recent").getByTestId("recent-continue").first().click();
   await expect(chat.locator(".notice", { hasText: "Continuando" }).last()).toContainText("Revisar a fila de mensagens");
   await expect(chat.locator(".composer-wrap")).toContainText("Opus");
@@ -46,7 +46,7 @@ test("Painel: agentes fora do Kabul, recentes dos CLIs, continuar no Kabul pela 
   await expect.poll(() => page.evaluate(() => (window as any).__kabulLastStart)).toEqual({ harness: "claude", resume: "2222-claude-hist" });
 
   // Nuvem criada fora: colar o link e trazer para o Mac.
-  await page.locator(".side-nav button", { hasText: "Painel" }).click();
+  await navTo(page, "sessions");
   await expect(page.getByTestId("cloud-paste")).toContainText("Cole o link");
   await expect(page.getByTestId("cloud-paste-go")).toBeDisabled();
   await page.getByTestId("cloud-paste-input").fill("https://claude.ai/code/session_01AbCdEfGh");

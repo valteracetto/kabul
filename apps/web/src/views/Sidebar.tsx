@@ -7,13 +7,13 @@ import { RunsOnBadge, cloudList, cloudRunsOn, type CloudRecord } from "../compon
 import { MachinePicker } from "../components/MachinePicker";
 import { ResourcesChip } from "../components/Resources";
 import { confirmDialog } from "../components/Confirm";
-import { chatStore, statusOf, useChatSelect } from "../components/chatStore";
+import { SideFootNav, SideNav } from "./SideNav";
 import { useDismiss, usePopover } from "../components/useDismiss";
 import { noSuggest } from "../noSuggest";
 import { t } from "../i18n";
-import { IBranch, IEye, IEyeOff, IHistory, ILink, IList, IPR, ITrash, IUpdate } from "../icons";
+import { IBranch, IEye, IEyeOff, ILink, IPR, ITrash, IUpdate } from "../icons";
 import { checkForUpdates, useUpdateAvailable } from "../components/Updates";
-import { IArchive, IBack, IChevronDown, IChevronRight, ICube, IFwd, IGauge, IGear, IGrid, IHelp, IHome, IMore, IPin, IPlus, ISearch, ISidebar, RepoMark } from "../icons";
+import { IArchive, IBack, IChevronDown, IChevronRight, IFwd, IGear, IHelp, IMore, IPin, IPlus, ISidebar, RepoMark } from "../icons";
 
 type RowH = { down: (w: Workspace, e: React.PointerEvent) => void; click: (w: Workspace) => void; ctx: (w: Workspace, e: React.MouseEvent) => void; enter: (w: Workspace) => void; leave: () => void; mdown: () => void; stay: () => void };
 
@@ -123,8 +123,6 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
     return () => window.removeEventListener("kabul:new-section", h);
   }, []);
 
-  // Conversas com agente ativo (todas as abas de todos os workspaces), para o contador de "Agentes".
-  const activeAgents = useChatSelect(() => chatStore.all().filter((c) => statusOf(c) !== "idle").length, Object.is);
   const patch = (w: Workspace, p: Parameters<typeof api.updateWorkspace>[1]) => api.updateWorkspace(w.id, p).then(onChange, (e) => onError(String(e)));
   const archived = workspaces.filter((w) => w.archived);
   const live = workspaces.filter((w) => !w.archived);
@@ -234,17 +232,7 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
         <button className="icon-btn" title={t("app.side.forward")} disabled={!onFwd} onClick={onFwd}><IFwd /></button>
       </div>
       <div className="machine"><MachinePicker onRoute={onRoute} /></div>
-      <nav className="side-nav">
-        <button className={route.kind === "sessions" ? "on" : ""} onClick={() => onRoute({ kind: "sessions" })}><IGrid /> {t("app.sessions.title")}</button>
-        <button className={route.kind === "agents" ? "on" : ""} onClick={() => onRoute({ kind: "agents" })} data-testid="nav-agents"><ICube /> {t("app.agents.title")} <span className="grow" />{activeAgents > 0 && <span className="nav-count" data-testid="agents-count">{activeAgents}</span>}</button>
-        <button className={route.kind === "dashboard" ? "on" : ""} onClick={() => onRoute({ kind: "dashboard" })} data-testid="nav-dashboard"><IList /> {t("app.board.title")}</button>
-        <button className={route.kind === "home" ? "on" : ""} onClick={() => onRoute({ kind: "home" })}><IHome /> {t("app.pal.n.home")} <span className="grow" /><kbd>⌘⇧H</kbd></button>
-        <button onClick={() => onCreate()} data-testid="create-ws"><IPlus /> {t("app.side.create")} <span className="grow" /><kbd>⌘N</kbd></button>
-        <button className={route.kind === "routines" ? "on" : ""} onClick={() => onRoute({ kind: "routines" })} data-testid="nav-routines"><IHistory /> {t("app.routine.title")}</button>
-        <button onClick={onSearch}><ISearch /> {t("common.search")} <span className="grow" /><kbd>⌘K</kbd></button>
-        <button className={route.kind === "local" ? "on" : ""} onClick={() => onRoute({ kind: "local" })}><ICube /> {t("app.pal.n.local")}</button>
-        <button className={route.kind === "usage" ? "on" : ""} onClick={() => onRoute({ kind: "usage" })} data-testid="nav-usage"><IGauge /> {t("app.side.usage")}</button>
-      </nav>
+      <SideNav route={route} onRoute={onRoute} onCreate={() => onCreate()} onSearch={onSearch} />
       <div className="side-section side-group-head">
         <span>{t("app.side.myWorkspaces")}</span><span className="grow" />
         <span className="picker" ref={groupMenu.ref}>
@@ -322,7 +310,7 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
             })}
       </div>
       <div className="side-foot">
-        <span className="grow" />
+        <SideFootNav route={route} onRoute={onRoute} />
         <UpdateButton />
         <button className="icon-btn" title={t("app.side.help")} onClick={onHelp} data-testid="help"><IHelp /></button>
         <button className={"icon-btn" + (route.kind === "settings" ? " on" : "")} title={t("app.side.settingsTitle")} onClick={() => onRoute({ kind: "settings", tab: "geral" })} data-testid="settings"><IGear /></button>

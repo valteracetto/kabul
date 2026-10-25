@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";

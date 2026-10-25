@@ -1,0 +1,8 @@
+# Referência de settings › "Preview URLs".
+[[preview_urls]]
+name = "Web"
+url = "http://localhost:$LEGACY_PORT"
+
+[[preview_urls]]
+name = "API"
+url = "http://localhost:$((LEGACY_PORT + 1))"

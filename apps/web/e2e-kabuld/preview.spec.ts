@@ -1,4 +1,6 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join, resolve } from "node:path";
@@ -237,4 +239,36 @@ test("Alterações e o app do workspace pelo proxy do Run (outro endereço, só 
   expect(u.port).not.toBe(String(kd.port));
   expect(u.port).not.toBe(String(wsPort));
   await popup.close();
+});
+
+test("Navegador do Kabul no celular: captura da página ao vivo, só leitura", async ({ page }) => {
+  // O navegador do workspace aberto pelo CLI (mesmo estado do app): o kabuld só lê. Assíncrono: a
+  // página é servida por este mesmo processo (o "app" do workspace) e um exec síncrono travaria o servidor.
+  const root = resolve(process.cwd(), "../..");
+  execFileSync("cargo", ["build", "-p", "kabul-cli"], { cwd: root, stdio: "inherit" });
+  const run = promisify(execFile);
+  const kabul = (...a: string[]) => run(join(root, "target/debug/kabul"), ["browser", ...a, "--home", join(kd.dir, "home"), "--workspace", "w1"]);
+  try {
+    await kabul("open", `http://127.0.0.1:${wsPort}/pagina-um`);
+  } catch (e) {
+    test.skip(String((e as { stderr?: string }).stderr ?? e).includes("Nenhum Chrome"), "sem Chrome/Chromium nesta máquina");
+    throw e;
+  }
+  try {
+    await pairPhone(page);
+    await wsAction(page, "Login novo", "m-files");
+    await page.getByTestId("pv-tab-browser").click();
+    await expect(page.getByTestId("pv-browser-img")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("pv-browser-url")).toContainText("/pagina-um");
+    // Sem controles de navegação nem entrada: só a imagem.
+    await expect(page.getByTestId("pv-browser").locator("input, button")).toHaveCount(0);
+    await shot(page, "navegador");
+    // A página muda no computador; o celular acompanha.
+    await kabul("open", `http://127.0.0.1:${wsPort}/pagina-dois`);
+    await expect(page.getByTestId("pv-browser-url")).toContainText("/pagina-dois", { timeout: 10_000 });
+    await kabul("stop");
+    await expect(page.getByTestId("pv-browser-closed")).toBeVisible({ timeout: 10_000 });
+  } finally {
+    await kabul("stop").catch(() => {});
+  }
 });

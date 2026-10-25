@@ -1,8 +1,10 @@
 //! Núcleo do Kabul: terminais (tmux ou PTY próprio), detecção de agente, worktrees, sessões importadas e harnesses.
 pub mod accounts;
 pub mod agent;
+pub mod archive;
 pub mod auth;
 pub mod batch;
+pub mod browser;
 pub mod cache;
 pub mod chat;
 pub mod checkpoint;
@@ -35,6 +37,7 @@ pub mod runs_on;
 pub mod schema;
 pub mod secrets;
 pub mod settings;
+pub mod settings_compat;
 pub mod shell;
 pub mod shell_env;
 pub mod speech;

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
 import { createServer, type Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";

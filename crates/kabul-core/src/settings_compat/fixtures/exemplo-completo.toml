@@ -1,0 +1,58 @@
+# Exemplo de settings › "More examples" (formato legado, da documentação pública do app anterior; `LEGACY_` é trocado pelo prefixo legado nos testes).
+"$schema" = "https://example.invalid/schemas/settings.repo.schema.json"
+
+# Disable features that require external AI providers.
+enterprise_data_privacy = false
+
+# Copy these gitignored files into each new local workspace when
+# .worktreeinclude is not present.
+file_include_globs = ".env*\nconfig/*.local.json\n"
+
+[scripts]
+# Runs after the app creates a workspace.
+setup = "pnpm install"
+
+# Runs before the app archives a workspace.
+archive = "./script/workspace-archive.sh"
+
+# Use "nonconcurrent" if the project depends on a fixed port, one local
+# database, one Docker stack, or another shared resource.
+run_mode = "concurrent"
+
+[scripts.run.dev]
+# Runs from the Run button. Use LEGACY_PORT so multiple workspaces
+# can run their own dev servers.
+command = "pnpm dev --port $LEGACY_PORT"
+default = true
+icon = "play"
+
+[scripts.run.test]
+command = "pnpm test --watch"
+icon = "test-tube"
+
+[environment_variables]
+# Top-level variables apply to local and cloud agents.
+ANTHROPIC_BASE_URL = "https://api.example.com"
+
+[environment_variables.local]
+# Local-only variables apply when agents run on your Mac.
+LOCAL_AGENT_MODE = "1"
+
+[environment_variables.cloud]
+# Cloud-only variables apply when agents run in cloud workspaces.
+OPENAI_BASE_URL = "https://openai.example.com"
+
+[prompts]
+general = "Prefer small, reviewable changes and run the narrowest relevant tests."
+code_review = "Focus on correctness, behavior changes, and missing tests."
+create_pr = "Write a concise PR description with test results."
+fix_errors = "Explain the likely cause before changing code."
+resolve_merge_conflicts = "Preserve user changes unless the conflict proves they are obsolete."
+rename_branch = "Use a short kebab-case branch name."
+
+[git]
+archive_on_merge = true
+delete_branch_on_archive = false
+worktree_push_auto_setup_remote = true
+branch_prefix_type = "custom"
+branch_prefix = "agent"

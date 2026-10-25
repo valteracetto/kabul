@@ -1,0 +1,13 @@
+# Página do JSON legado › "Migrate to settings.toml" (resultado da migração).
+"$schema" = "https://example.invalid/schemas/settings.repo.schema.json"
+enterprise_data_privacy = true
+
+[scripts]
+setup = "pnpm install"
+archive = "./script/workspace-archive.sh"
+run_mode = "concurrent"
+
+[scripts.run.dev]
+command = "pnpm dev --port $LEGACY_PORT"
+default = true
+icon = "play"

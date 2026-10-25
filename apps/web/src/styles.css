@@ -288,6 +288,10 @@ td.path { font: 11px var(--mono); color: var(--dim); word-break: break-all; }
 .update-banner .btn { flex: none; }
 .toasts { position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%); z-index: 40; display: flex; flex-direction: column; gap: 6px; align-items: center; width: min(560px, 90%); }
 .toast { max-width: 560px; background: var(--toast-bg); border: 1px solid var(--del-line); color: var(--toast-fg); padding: 10px 14px; border-radius: 10px; font-size: 12px; white-space: pre-wrap; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+.toast { display: flex; align-items: center; gap: 12px; }
+.toast .toast-text { flex: 1; min-width: 0; }
+.toast.info { border-color: var(--line); }
+.toast .toast-action { flex: none; font-weight: 600; color: var(--accent); }
 
 /* diff de arquivo */
 .filediff { height: 100%; overflow: auto; }
@@ -369,6 +373,10 @@ select { background: var(--raise); border: 1px solid var(--line-2); border-radiu
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-2); }
 .layer { font-size: 12px; display: flex; gap: 8px; align-items: center; }
 .layer code { color: var(--dim); }
+.settings-warn { border: 1px solid var(--warn-line); border-left: 3px solid var(--warn); border-radius: 8px; padding: 8px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+.settings-warn ul { margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+.settings-warn code { color: var(--dim); }
+.import-pre { max-height: 320px; overflow: auto; font-size: 11.5px; padding: 8px 10px; border: 1px solid var(--row-line); border-radius: 6px; white-space: pre; margin: 4px 0 0; }
 .shortcuts td { padding: 6px 10px; }
 .shortcuts td:first-child { width: 140px; }
 /* modelos locais */
@@ -1037,3 +1045,30 @@ input.invalid { border-color: var(--del); }
 .agents-foot { padding: 8px 10px; border-top: 1px solid var(--line); }
 .res-row { content-visibility: auto; contain-intrinsic-size: auto 26px; }
 .lazy-chunk { min-width: 100%; }
+
+/* ---------- aba Browser (navegador do Kabul por workspace) ---------- */
+.browser-tab { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.browser-bar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--row-line); }
+.browser-addr { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; background: var(--sunken); border: 1px solid var(--pop-line); border-radius: 8px; padding: 0 8px; color: var(--dim); }
+.browser-addr input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 5px 0; font-size: 12px; color: var(--text); outline: none; }
+.browser-tabs { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--row-line); overflow-x: auto; }
+.browser-chip { display: flex; align-items: center; gap: 4px; max-width: 200px; padding: 2px 4px 2px 8px; border-radius: 6px; font-size: 11.5px; color: var(--dim); cursor: pointer; }
+.browser-chip.on { background: var(--sel); color: var(--text); }
+.browser-chip .ctab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-approval { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; font-size: 12px; background: var(--raise); border-bottom: 1px solid var(--del-line); }
+.browser-code { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.browser-agent { display: flex; align-items: center; gap: 8px; padding: 5px 10px; font-size: 12px; background: var(--raise); border-bottom: 1px solid var(--row-line); }
+.browser-agent.paused { color: var(--accent); }
+.browser-agent-last { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+.browser-body { position: relative; flex: 1; min-height: 0; display: flex; }
+.browser-view { flex: 1; min-width: 0; display: flex; align-items: flex-start; justify-content: center; overflow: hidden; background: var(--sunken); outline: none; }
+.browser-view:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.browser-view img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; cursor: default; }
+.browser-view.mobile img { box-shadow: 0 0 0 1px var(--pop-line); border-radius: 10px; margin-top: 8px; max-height: calc(100% - 16px); }
+.browser-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 24px; color: var(--dim); }
+.browser-empty > div:first-of-type { color: var(--text); }
+.browser-install { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 8px; }
+.browser-log { position: absolute; right: 8px; top: 8px; bottom: 8px; width: min(360px, 45%); overflow: auto; background: var(--pop); border: 1px solid var(--pop-line); border-radius: 10px; padding: 8px 10px; box-shadow: 0 10px 30px rgba(0,0,0,.3); display: flex; flex-direction: column; gap: 4px; }
+.browser-log-row { overflow-wrap: anywhere; }
+.browser-profile { padding: 4px 10px 6px; max-width: 260px; }
+.browser-banner { top: 52px; z-index: 46; }

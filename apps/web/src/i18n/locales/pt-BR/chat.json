@@ -276,5 +276,7 @@
   "chat.fork.ws": "Fork para novo workspace",
   "chat.openDiffOf": "Abrir o diff de {path}",
   "chat.readAloud.stop": "Parar a leitura",
-  "chat.readAloud.start": "Ler em voz alta"
+  "chat.readAloud.start": "Ler em voz alta",
+  "chat.mcp.builtin": "embutido",
+  "chat.mcp.builtinTitle": "Do próprio Kabul: chega a todas as IAs sem configurar nada"
 }

@@ -2,6 +2,7 @@ import { cronMatches, loadRoutines, parseCron, PR_EVENTS, saveRoutines, type Rou
 import { trError } from "./i18n/errors";
 import { t } from "./i18n";
 import { lastNotify, parseKabulLink } from "./components/links";
+import { openBrowser } from "./components/browser";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api, wsTitle, type Repo, type Workspace } from "./api";
 import { Sidebar } from "./views/Sidebar";
@@ -28,6 +29,8 @@ const DiagnosticsView = lazy(() => import("./views/DiagnosticsView").then((m) =>
 const DashboardView = lazy(() => import("./views/DashboardView").then((m) => ({ default: m.DashboardView })));
 const RoutinesView = lazy(() => import("./views/RoutinesView").then((m) => ({ default: m.RoutinesView })));
 const AgentsView = lazy(() => import("./views/AgentsView").then((m) => ({ default: m.AgentsView })));
+// Pedidos de aprovação do navegador do Kabul (banner global): fora do JS inicial.
+const BrowserApprovals = lazy(() => import("./components/BrowserApprovals").then((m) => ({ default: m.BrowserApprovals })));
 const UsageView = lazy(() => import("./views/UsageView").then((m) => ({ default: m.UsageView })));
 
 export type AgentState = WsAgent;
@@ -66,6 +69,10 @@ export function applyZoom(step: number) {
   window.dispatchEvent(new CustomEvent("kabul:zoom-changed", { detail: next }));
 }
 
+type Toast = { id: number; text: string; key?: string; kind?: "info"; action?: { label: string; run: () => void; testid: string } };
+/** Quanto tempo o "Desfazer" do arquivar fica na tela (a janela do backend é de 5 s; depois dela o desfazer desarquiva). */
+const ARCHIVE_UNDO_MS = 6000;
+
 export function App() {
   // Uma inscrição só nos eventos dos agentes, antes de qualquer conversa começar.
   useState(() => chatStore.init());
@@ -73,8 +80,15 @@ export function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [stats, setStats] = useState<Record<string, [number, number]>>({});
   const [route, setRoute] = useState<Route>({ kind: "home" });
-  // Toasts empilhados (um erro novo não esconde o anterior); somem sozinhos em 10 s.
-  const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
+  // Toasts empilhados (um erro novo não esconde o anterior); somem sozinhos em 10 s. `key`: um por assunto
+  // (o "arquivando…" de um workspace vira o erro dele); `action`: botão (Desfazer, Tentar de novo).
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const showToast = useCallback((tt: Omit<Toast, "id">, ms = 10000) => {
+    const id = Date.now() + Math.random();
+    setToasts((x) => [...x.filter((y) => !tt.key || y.key !== tt.key), { ...tt, id }].slice(-4));
+    setTimeout(() => setToasts((x) => x.filter((y) => y.id !== id)), ms);
+  }, []);
+  const dropToast = useCallback((key: string) => setToasts((x) => x.filter((y) => y.key !== key)), []);
   const setError = useCallback((e: string | null) => {
     if (!e) return setToasts([]);
     // Erros do backend chegam em português: traduz os conhecidos (i18n/errors.ts).
@@ -238,6 +252,12 @@ export function App() {
       go({ kind: "workspace", id: l.id });
       if (l.session) setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:activate-tab", { detail: l.session })), 150);
     } else if (l.kind === "settings") go({ kind: "settings", tab: l.tab ?? "geral" });
+    else if (l.kind === "browser") {
+      const id = l.workspace ?? (routeRef.current.kind === "workspace" ? routeRef.current.id : null);
+      if (!id || !workspaces.some((w) => w.id === id && !w.archived)) return setError(t("app.link.browserNoWs"));
+      go({ kind: "workspace", id });
+      setTimeout(() => openBrowser(id, l.url), 150);
+    }
     else {
       const r = repos.find((x) => (l.repo && (x.id === l.repo || x.name === l.repo)) || (l.path && x.path === l.path));
       setCreating({ repo: r?.id, text: [l.prompt, l.branch && t("app.link.baseBranch", { branch: l.branch }), l.linear && t("app.link.issue", { id: l.linear })].filter(Boolean).join("\n") || undefined });
@@ -301,23 +321,69 @@ export function App() {
   const unreadCount = workspaces.filter((w) => w.unread && !w.archived).length;
   useEffect(() => void api.badgeSet(unreadCount).catch(() => {}), [unreadCount]);
 
-  /** Arquivar com confirmação: avisa de agentes rodando ("parar e arquivar") e oferece fechar o PR. */
-  const archive = useCallback(async (id: string) => {
+  /**
+   * Arquivar com confirmação: avisa de agentes rodando ("parar e arquivar") e oferece fechar o PR. Depois
+   * do OK o workspace some na hora (otimista), com "Desfazer" por alguns segundos; parar os agentes,
+   * fechar o PR e tirar o worktree seguem em segundo plano. Erro lá volta o workspace e avisa com
+   * "Tentar de novo" (`retry`: sem perguntar de novo).
+   */
+  const archiving = useRef(new Map<string, Promise<unknown>>());
+  const archive = useCallback(async (id: string, opts: { retry?: boolean } = {}) => {
     const w = workspaces.find((x) => x.id === id);
     if (!w || w.archived) return;
     const running = agents[id];
-    const msg = t("app.archive.confirm", { name: wsTitle(w) }) + (running ? "\n\n" + t("app.archive.running") : "");
-    const chats = [...liveChats.values()].filter((c) => c.ws === id).map((c) => c.chat);
-    const ok = await confirmClosing(chats, msg, { ok: running ? t("app.archive.stopAndArchive") : t("app.side.archive"), danger: true, ask: true, workspaceId: id, checkbox: w.pr_url ? { key: "kabul.archive.closePr", label: t("app.archive.closePr") } : undefined });
-    if (!ok) return;
-    if (running) await chatStore.stopWorkspace(id);
+    if (!opts.retry) {
+      const msg = t("app.archive.confirm", { name: wsTitle(w) }) + (running ? "\n\n" + t("app.archive.running") : "");
+      const chats = [...liveChats.values()].filter((c) => c.ws === id).map((c) => c.chat);
+      const ok = await confirmClosing(chats, msg, { ok: running ? t("app.archive.stopAndArchive") : t("app.side.archive"), danger: true, ask: true, workspaceId: id, checkbox: w.pr_url ? { key: "kabul.archive.closePr", label: t("app.archive.closePr") } : undefined });
+      if (!ok) return;
+    }
+    setWorkspaces((o) => o.map((x) => (x.id === id ? { ...x, archived: true, state: "archiving" } : x)));
+    // i18n-ignore: chave e tipo do toast
+    showToast({ key: `archive:${id}`, kind: "info", text: t("app.archive.archiving", { name: wsTitle(w) }), action: { label: t("common.undo"), testid: "archive-undo", run: () => void undoRef.current(id) } }, ARCHIVE_UNDO_MS);
+    if (running) void chatStore.stopWorkspace(id);
+    const p = api.archiveWorkspace(id, !!w.pr_url && localStorage.getItem("kabul.archive.closePr") === "1").then(
+      () => void reload(),
+      (e) => {
+        setWorkspaces((o) => o.map((x) => (x.id === id ? { ...x, archived: false, state: w.state } : x)));
+        archiveFailedRef.current(id, String(e), wsTitle(w));
+      },
+    );
+    archiving.current.set(id, p);
+    await p;
+    if (archiving.current.get(id) === p) archiving.current.delete(id);
+  }, [workspaces, agents, reload]);
+  /** "Desfazer": volta na hora; o backend cancela (ainda na janela) ou desarquiva. */
+  const undoArchive = useCallback(async (id: string) => {
+    dropToast(`archive:${id}`);
+    setWorkspaces((o) => o.map((x) => (x.id === id ? { ...x, archived: false, state: "ready" } : x)));
+    await archiving.current.get(id);
     try {
-      await api.archiveWorkspace(id, !!w.pr_url && localStorage.getItem("kabul.archive.closePr") === "1");
-      reload();
+      await api.unarchiveWorkspace(id);
     } catch (e) {
       setError(String(e));
     }
-  }, [workspaces, agents, reload]);
+    reload();
+  }, [reload]);
+  /** Falha no segundo plano: avisa (toast e, com o app em segundo plano, notificação) com "Tentar de novo". */
+  const archiveFailed = useCallback((id: string, error: string, name?: string) => {
+    const w = workspacesRef.current.find((x) => x.id === id);
+    const title = name ?? (w ? wsTitle(w) : id);
+    const text = t("app.archive.failed", { name: title, error: trError(error) });
+    // i18n-ignore: chave do toast (um por workspace)
+    showToast({ key: `archive:${id}`, text, action: { label: t("common.retry"), testid: "archive-retry", run: () => void archiveRef.current(id, { retry: true }) } }, 30000);
+    if (document.hidden || !document.hasFocus()) void api.notify(t("app.archive.failedTitle"), text).catch(() => {});
+    reload();
+  }, [reload]);
+  const archiveRef = useRef(archive);
+  archiveRef.current = archive;
+  const undoRef = useRef(undoArchive);
+  undoRef.current = undoArchive;
+  const archiveFailedRef = useRef(archiveFailed);
+  archiveFailedRef.current = archiveFailed;
+  const workspacesRef = useRef(workspaces);
+  workspacesRef.current = workspaces;
+  useEffect(() => api.onWorkspaceState((p) => void (p.error && p.action === "archive" && archiveFailedRef.current(p.id, p.error))), []);
   useEffect(() => {
     const h = (e: Event) => archive((e as CustomEvent).detail);
     window.addEventListener("kabul:archive", h);
@@ -387,7 +453,17 @@ export function App() {
       {sidebar && <Resizer axis="x" dir={1} {...side} onSize={side.setSize} onCollapse={() => setSidebar(false)} testid="resize-sidebar" />}
       <main className="main">
         <UpdateBanner />
-        {toasts.length > 0 && <div className="toasts">{toasts.map((toast) => <div key={toast.id} className="toast" role="alert" onClick={() => setToasts((x) => x.filter((y) => y.id !== toast.id))}>{toast.text}</div>)}</div>}
+        <Suspense fallback={null}><BrowserApprovals workspaces={workspaces} onOpen={(id) => (go({ kind: "workspace", id }), setTimeout(() => openBrowser(id), 150))} /></Suspense>
+        {toasts.length > 0 && (
+          <div className="toasts">
+            {toasts.map((toast) => (
+              <div key={toast.id} className={"toast" + (toast.kind === "info" ? " info" : "")} role={toast.kind === "info" ? "status" : "alert"} data-testid={toast.key?.startsWith("archive:") ? "archive-toast" : undefined} onClick={() => setToasts((x) => x.filter((y) => y.id !== toast.id))}>
+                <span className="toast-text">{toast.text}</span>
+                {toast.action && <button className="text-btn toast-action" data-testid={toast.action.testid} onClick={(e) => (e.stopPropagation(), setToasts((x) => x.filter((y) => y.id !== toast.id)), toast.action!.run())}>{toast.action.label}</button>}
+              </div>
+            ))}
+          </div>
+        )}
         {/* Só o workspace visível fica montado; os outros guardam o estado (abas, rascunho, rolagem, terminal) e remontam iguais. */}
         {[...new Set([...(route.kind === "workspace" ? [route.id] : []), ...bg])].map((id) => {
           const w = workspaces.find((x) => x.id === id && !x.archived);

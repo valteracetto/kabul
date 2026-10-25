@@ -1,4 +1,4 @@
-import { test, expect, devices, type Browser, type Page } from "@playwright/test";
+import { test, expect, devices, type Browser, type Page } from "../playwright-silencio";
 import { mkdirSync } from "node:fs";
 import { startKabuld, wsAction, type Kabuld } from "./helpers";
 

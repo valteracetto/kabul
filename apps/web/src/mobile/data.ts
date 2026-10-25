@@ -2,6 +2,8 @@ import { useEffect, useSyncExternalStore } from "react";
 import { transport } from "../transport";
 import type { Repo, Section, Workspace } from "../api";
 import { isOwner, k, ws, type LiveSession } from "./kabuld";
+import { t } from "../i18n";
+import { trError } from "../i18n/errors";
 
 /** Estado compartilhado pelas telas (lista, uso, novo workspace): sessões ao vivo, workspaces, repos, seções. */
 export interface Snap { list: LiveSession[]; machine: string; os: string; err: string | null; workspaces: Workspace[]; repos: Repo[]; sections: Section[]; loaded: boolean }
@@ -19,6 +21,31 @@ export const loadState = () =>
   ]);
 export const refresh = () => Promise.all([loadLive(), loadState()]);
 
+/** Atualização otimista de um workspace (o kabuld confirma depois por `workspaces-changed`). */
+export const patchWorkspace = (id: string, p: Partial<Workspace>) => set({ workspaces: snap.workspaces.map((w) => (w.id === id ? { ...w, ...p } : w)) });
+
+/**
+ * Arquivar/desarquivar. Arquivar some da lista na hora; o kabuld faz o resto em segundo plano e, se der
+ * errado, avisa por `workspace-state` (com `error`): o workspace volta e o aparelho oferece tentar de novo.
+ */
+export function archiveWorkspace(id: string, archive: boolean) {
+  const prev = snap.workspaces.find((w) => w.id === id);
+  patchWorkspace(id, archive ? { archived: true, state: "archiving" } : { archived: false, state: "ready" });
+  return k.workspaceArchive(id, archive).then(
+    () => void loadState(),
+    (e) => {
+      if (prev) patchWorkspace(id, { archived: prev.archived, state: prev.state });
+      alert(trError(e));
+    },
+  );
+}
+
+function archiveFailed(id: string, error: string) {
+  void loadState();
+  const w = snap.workspaces.find((x) => x.id === id);
+  if (confirm(t("mobile.home.archiveFailed", { name: w ? w.title || w.name : id, error: trError(error) }))) void archiveWorkspace(id, true);
+}
+
 let users = 0;
 let stop: (() => void) | null = null;
 function start() {
@@ -34,7 +61,8 @@ function start() {
   const offWs = transport.subscribe("workspaces-changed", () => void loadState());
   // Reconectou (kabuld reiniciado, volta do fundo): recarrega tudo na hora, sem esperar os intervalos.
   const offState = ws()?.onState((s) => s === "open" && void refresh());
-  stop = () => (clearInterval(t), clearInterval(t2), offs.forEach((o) => o()), offWs(), offState?.());
+  const offFail = transport.subscribe<{ id: string; error?: string; action?: string }>("workspace-state", (p) => void (p.error && p.action === "archive" && archiveFailed(p.id, p.error)));
+  stop = () => (clearInterval(t), clearInterval(t2), offs.forEach((o) => o()), offWs(), offState?.(), offFail());
 }
 
 export function useKabul(): Snap {

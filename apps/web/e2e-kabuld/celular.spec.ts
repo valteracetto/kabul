@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
 import { startKabuld, type Kabuld } from "./helpers";
 
 // iPhone (WebKit) contra o kabuld real exigindo pareamento até do navegador local

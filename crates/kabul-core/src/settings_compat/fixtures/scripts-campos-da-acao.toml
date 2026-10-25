@@ -1,0 +1,11 @@
+# Scripts › "Action fields": args, options.cwd, hide e available_in como texto.
+[scripts.run.storybook]
+command = "pnpm storybook"
+args = ["--port", "6006", "--no open"]
+options.cwd = "packages/ui"
+available_in = "local"
+icon = "monitor"
+
+[scripts.run.legacy]
+command = "make old"
+hide = true

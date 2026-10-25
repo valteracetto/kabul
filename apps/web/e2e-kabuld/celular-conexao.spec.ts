@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 import { startKabuld, type Kabuld } from "./helpers";
 
 // Conexão do celular com o kabuld real (iPhone e Android): o print do Val depois de reiniciar o Kabul era

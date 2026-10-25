@@ -26,6 +26,12 @@ struct Args {
 }
 
 fn main() -> anyhow::Result<()> {
+    // `kabuld mcp browser --workspace <id>`: as conversas iniciadas pelo kabuld usam o próprio
+    // executável como servidor MCP do navegador do Kabul.
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(r) = kabul_core::browser::mcp::dispatch(&argv) {
+        return r;
+    }
     let a = Args::parse();
     if let Some(s) = &a.secrets {
         std::env::set_var("KABULD_SECRETS", s);

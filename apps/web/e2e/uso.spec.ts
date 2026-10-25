@@ -1,5 +1,5 @@
 import { addRepo } from "./helpers";
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
 
 // Uso, custos e limites: aba Uso, popover da barra do Kabul, celular e a troca de conta/LLM sugerida perto do limite.
 const chat = (page: Page) => page.locator(".ws-host:not([hidden]) .center-body:not([hidden])");

@@ -1,5 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { addRepo } from "./helpers";
+import { test, expect, type Page } from "../playwright-silencio";
+import { addRepo, navTo } from "./helpers";
 
 const host = (page: Page) => page.locator(".ws-host:not([hidden])");
 const chat = (page: Page) => page.locator(".ws-host:not([hidden]) .center-body:not([hidden])");
@@ -63,7 +63,7 @@ test("Parar com servidor em segundo plano: lista o que ficou rodando; manter (pa
   await page.getByTestId("res-chip").click();
   await expect(page.getByTestId("kept-row")).toContainText("vite --port 3000");
   await page.keyboard.press("Escape");
-  await page.getByTestId("sidebar").getByRole("button", { name: "Painel", exact: true }).click();
+  await navTo(page, "sessions");
   await expect(page.getByTestId("kept-row")).toContainText("vite --port 3000");
   await page.getByTestId("kept-kill").click();
   await expect(page.getByTestId("kept-row")).toHaveCount(0);
@@ -98,6 +98,6 @@ test("Fechar a aba e arquivar listam os processos que o agente abriu; continuam 
   await expect(page.getByTestId("confirm")).toContainText("O agente deixou 1 processo rodando");
   await page.getByTestId("confirm-ok").click();
   // Mantido (não marcado): vai para a lista de mantidos.
-  await page.getByTestId("sidebar").getByRole("button", { name: "Painel", exact: true }).click();
+  await navTo(page, "sessions");
   await expect(page.getByTestId("kept-row")).toContainText("vite --port 3000");
 });

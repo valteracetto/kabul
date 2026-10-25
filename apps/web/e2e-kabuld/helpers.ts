@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, chmodSync, 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createServer } from "node:net";
-import type { Page } from "@playwright/test";
+import type { Page } from "../playwright-silencio";
 
 /** kabuld real + estado sintético + sessões tmux de teste (`kabul-test-*`) + agente falso no PATH. */
 export interface Kabuld {

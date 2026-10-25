@@ -1,0 +1,11 @@
+# Variáveis de ambiente › "Configure custom variables".
+"$schema" = "https://example.invalid/schemas/settings.repo.schema.json"
+
+[environment_variables]
+API_BASE_URL = "http://localhost:3000"
+
+[environment_variables.local]
+LEGACY_TARGET = "local"
+
+[environment_variables.cloud]
+LEGACY_TARGET = "cloud"

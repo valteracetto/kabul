@@ -18,7 +18,7 @@ type Item = { group: string; label: string; hint?: string; kbd?: string; run: ()
 export const wsAction = (ws: string, action: string) => window.dispatchEvent(new CustomEvent("kabul:ws-action", { detail: { ws, action } }));
 const fire = (name: string, detail?: unknown) => window.dispatchEvent(new CustomEvent(name, { detail }));
 
-const settingsTabs = (): [string, string][] => [["geral", t("app.pal.set.geral")], ["contas", t("app.pal.set.contas")], ["aparencia", t("app.pal.set.aparencia")], ["modelos", t("app.pal.set.modelos")], ["git", t("app.pal.set.git")], ["integracoes", t("app.pal.set.integracoes")], ["ambiente", t("app.pal.set.ambiente")], ["repo", t("app.pal.set.repo")], ["acoes", t("app.pal.set.acoes")], ["diversos", t("app.pal.set.diversos")], ["remoto", t("app.pal.set.remoto")], ["avancado", t("app.pal.set.avancado")], ["atalhos", t("app.help.shortcuts")]];
+const settingsTabs = (): [string, string][] => [["geral", t("app.pal.set.geral")], ["contas", t("app.pal.set.contas")], ["aparencia", t("app.pal.set.aparencia")], ["modelos", t("app.pal.set.modelos")], ["git", t("app.pal.set.git")], ["integracoes", t("app.pal.set.integracoes")], ["navegador", t("app.pal.set.navegador")], ["ambiente", t("app.pal.set.ambiente")], ["repo", t("app.pal.set.repo")], ["acoes", t("app.pal.set.acoes")], ["diversos", t("app.pal.set.diversos")], ["remoto", t("app.pal.set.remoto")], ["avancado", t("app.pal.set.avancado")], ["atalhos", t("app.help.shortcuts")]];
 
 /** Paleta de comandos (⌘K): abas Tudo / Workspaces (ativos e arquivados) / Projetos / Ações / Configurações; Tab e ⇧Tab trocam. */
 export function Palette({ repos, workspaces, current, archived, onClose, onRoute, onCreate, onChange }: { repos: Repo[]; workspaces: Workspace[]; current?: Workspace; archived?: boolean; onClose: () => void; onRoute: (r: Route) => void; onCreate: (o: { repo?: string; add?: boolean; from?: "prs" }) => void; onChange: () => void }) {
@@ -42,7 +42,7 @@ export function Palette({ repos, workspaces, current, archived, onClose, onRoute
     const v: Item[] = [];
     // Workspaces
     live.forEach((w) => v.push({ group: t("app.pal.group.workspaces"), kind: "ws", tab: "workspaces", label: wsTitle(w), hint: `${repoName(w)} · ${w.branch}`, run: go({ kind: "workspace", id: w.id }), words: w.name }));
-    workspaces.filter((w) => w.archived).forEach((w) => v.push({ group: t("app.pal.group.archived"), kind: "archived", tab: "workspaces", label: wsTitle(w), hint: `${repoName(w)} · ${t("app.pal.archivedHint")}`, run: () => api.unarchiveWorkspace(w.id).then(() => (onChange(), onRoute({ kind: "workspace", id: w.id })), () => {}), words: t("app.pal.archivedWords") }));
+    workspaces.filter((w) => w.archived).forEach((w) => v.push({ group: t("app.pal.group.archived"), kind: "archived", tab: "workspaces", label: wsTitle(w), hint: `${repoName(w)} · ${w.state === "archiving" ? t("app.pal.archivingHint") : t("app.pal.archivedHint")}`, run: () => api.unarchiveWorkspace(w.id).then(() => (onChange(), onRoute({ kind: "workspace", id: w.id })), () => {}), words: t("app.pal.archivedWords") }));
     live.flatMap((w) => cloudList(w.id).map((c) => ({ w, c }))).forEach(({ w, c }) => v.push({ group: t("app.pal.group.workspaces"), kind: "ws", tab: "workspaces", label: `☁︎ ${c.info.title ?? c.info.id}`, hint: t("app.pal.cloudHint", { ws: wsTitle(w) }), run: go({ kind: "workspace", id: w.id }) }));
     // Ações do workspace atual
     if (current) {
@@ -62,6 +62,7 @@ export function Palette({ repos, workspaces, current, archived, onClose, onRoute
       a(t("app.pal.a.review"), "review", "⌘⇧R", "code review");
       a(t("common.newChat"), "new-chat", "⌘T");
       a(t("app.pal.a.newTerminal"), "new-terminal", "⌘⇧T");
+      a(t("app.pal.a.openBrowser"), "open-browser", "⌘⇧B");
       v.push({ group: t("app.pal.group.current", { ws: wsTitle(current) }), kind: "current", tab: "actions", label: t("app.pal.a.copyLink"), kbd: "⌘⇧C", run: () => navigator.clipboard.writeText(`kabul://workspace?id=${current.id}`) });
       v.push({ group: t("app.pal.group.current", { ws: wsTitle(current) }), kind: "current", tab: "actions", label: t("app.pal.a.archive"), kbd: "⌘⇧A", run: () => fire("kabul:archive", current.id) });
     }
@@ -90,8 +91,12 @@ export function Palette({ repos, workspaces, current, archived, onClose, onRoute
     const n = (label: string, run: () => void, kbd?: string) => v.push({ group: t("app.pal.group.nav"), kind: "nav", tab: "all", label, kbd, run });
     n(t("app.pal.n.nextUnread"), () => fire("kabul:next-unread"), "⌘⌥L");
     n(t("app.pal.n.home"), go({ kind: "home" }), "⌘⇧H");
+    n(t("app.pal.n.agents"), go({ kind: "agents" }));
+    n(t("app.pal.n.board"), go({ kind: "dashboard" }));
     n(t("app.pal.n.sessions"), go({ kind: "sessions" }));
+    n(t("app.pal.n.routines"), go({ kind: "routines" }));
     n(t("app.pal.n.local"), go({ kind: "local" }));
+    n(t("app.pal.n.usage"), go({ kind: "usage" }));
     n(t("app.pal.n.archived"), () => (setTab("workspaces"), setArchivedTab(true)));
     n(t("app.help.shortcuts"), go({ kind: "settings", tab: "atalhos" }), "⌘⌥/");
     // Configurações

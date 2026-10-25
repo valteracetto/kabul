@@ -21,6 +21,9 @@ request compare against.
 side by side with `⌘D`). Each chat has a model, an account, a mode (default, plan, accept edits, approve
 everything) and a queue for messages sent while the agent is busy.
 
+**Browser.** Each workspace has its own isolated Chromium, shown live in the Browser tab (`⌘⇧B`) and
+driven by every agent through the built-in `kabul-browser` MCP server. See [Browser](./browser.md).
+
 **Harness.** The command-line agent that runs a model: Claude Code, Codex, Antigravity, Gemini CLI, Qwen Code,
 OpenCode, Goose or another [ACP](../acp.md) agent. Kabul drives the real CLI, so you keep its behavior, its
 updates and your settings. Local models go to the harness chosen by the

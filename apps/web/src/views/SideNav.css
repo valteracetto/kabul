@@ -1,0 +1,55 @@
+/* Topo e rodapé da barra lateral (SideNav.tsx). Separado do styles.css para o merge ficar simples. */
+.side-nav2 { display: flex; flex-direction: column; gap: 4px; padding: 2px 6px 8px; border-bottom: 1px solid var(--side-line); margin-bottom: 4px; }
+
+/* Linha de ação: "Novo workspace" (primário) + Buscar. */
+.side-actions { display: flex; gap: 6px; container-type: inline-size; margin-bottom: 2px; }
+.side-new { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 10px; border: 1px solid var(--line-2); background: var(--pop); color: var(--text); border-radius: 7px; font: 500 13.5px var(--sans); text-align: left; }
+.side-new:hover { background: var(--btn-hover); }
+.side-new svg { color: var(--text-2); flex: none; }
+.side-new-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.side-new kbd { flex: none; }
+.side-find { flex: none; width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-2); background: var(--pop); color: var(--text-2); border-radius: 7px; }
+.side-find:hover { background: var(--btn-hover); color: var(--text); }
+.side-new:focus-visible, .side-find:focus-visible, .side-entry:focus-visible, .usage-meter:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* Estreita: o atalho sai antes do rótulo cortar. */
+@container (max-width: 214px) { .side-new kbd { display: none; } }
+.side-new-short { display: none; }
+@container (max-width: 196px) { .side-new-label { display: none; } .side-new-short { display: inline; } }
+
+/* A: uma entrada só para Agentes · Quadro · Painel. */
+.side-entry { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 7px; border: none; background: none; color: var(--text-2); border-radius: 6px; font-size: 14px; text-align: left; min-width: 0; }
+.side-entry svg { color: var(--dim); width: 15px; height: 15px; flex: none; }
+.side-entry:hover, .side-entry.on { background: var(--sel); color: var(--text); }
+:root[data-theme="light"] .side-entry.on { background: #14100f0d; }
+.side-entry-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.nav-count.waiting { background: color-mix(in srgb, var(--blue) 26%, transparent); }
+
+/* B: faixa de ícones (flag de dev). */
+.side-icons { display: flex; gap: 2px; }
+.side-icons .icon-btn { position: relative; flex: 1; height: 32px; border-radius: 6px; }
+.side-icons .icon-btn.on { background: var(--sel); color: var(--text); }
+.side-icons .nav-count { position: absolute; top: 0; right: 0; min-width: 15px; height: 15px; padding: 0 4px; font-size: 10px; }
+
+/* Seletor dentro da tela (no lugar do título): Agentes · Quadro · Painel. */
+.ov-tabs { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); flex: none; }
+.ov-tabs button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: none; background: none; color: var(--muted); border-radius: 6px; font: 500 13px var(--sans); }
+.ov-tabs button:hover { color: var(--text); }
+.ov-tabs button.on { background: var(--sel); color: var(--text); }
+.ov-tabs .nav-count { height: 16px; min-width: 16px; font-size: 10.5px; }
+
+/* Rodapé: medidor de uso (o limite mais apertado) e o menu "Mais". */
+.side-foot { container-type: inline-size; }
+.usage-meter { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 8px; margin-left: -8px; border: none; background: none; color: var(--dim); border-radius: 6px; font: 500 12px var(--sans); min-width: 0; }
+.usage-meter svg { flex: none; }
+.usage-meter:hover, .usage-meter.on { background: var(--hover); color: var(--text); }
+.um-bar { width: 44px; height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; flex: none; }
+.um-fill { display: block; height: 100%; min-width: 2px; border-radius: 3px; background: var(--st-good, #0ca30c); }
+.usage-meter.lv-warning .um-fill { background: var(--st-warning, #fab219); }
+.usage-meter.lv-serious .um-fill { background: var(--st-serious, #ec835a); }
+.usage-meter.lv-critical .um-fill { background: var(--st-critical, #d03b3b); }
+.usage-meter.lv-serious, .usage-meter.lv-critical { color: var(--text-2); }
+.um-pct { font-variant-numeric: tabular-nums; }
+@container (max-width: 205px) { .um-bar { display: none; } }
+.more-pop { width: 220px; }
+.more-pop .pop-row { display: flex; align-items: center; gap: 8px; }
+.more-pop .pop-row svg { color: var(--dim); }

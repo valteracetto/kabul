@@ -276,5 +276,7 @@
   "chat.fork.ws": "Fork to new workspace",
   "chat.openDiffOf": "Open diff of {path}",
   "chat.readAloud.stop": "Stop reading",
-  "chat.readAloud.start": "Read aloud"
+  "chat.readAloud.start": "Read aloud",
+  "chat.mcp.builtin": "built in",
+  "chat.mcp.builtinTitle": "Kabul's own: reaches every AI with no setup"
 }

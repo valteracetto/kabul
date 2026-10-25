@@ -113,5 +113,13 @@
   "errors.ctxKeychain": "cofre do sistema",
   "errors.ctxLoadingModel": "carregando o modelo",
   "errors.noResponseCodexbar": "saída inesperada de claude auth status",
-  "errors.ghNoAccess": "Missing GitHub access: a conta ativa não acessa {slug}"
+  "errors.ghNoAccess": "Missing GitHub access: a conta ativa não acessa {slug}",
+  "errors.browserNoBinary": "Nenhum Chrome, Edge ou Chromium encontrado. Instale um deles ou baixe o navegador do Kabul em Configurações › Navegador (kabul browser install).",
+  "errors.browserApprovalGone": "pedido de aprovação não encontrado (expirou?)",
+  "errors.browserUnknownCmd": "comando do navegador desconhecido",
+  "errors.browserExited": "o navegador saiu ao iniciar",
+  "errors.browserNoDevtools": "o navegador não abriu o DevTools em 20 s",
+  "errors.browserUnzip": "não consegui descompactar o navegador baixado",
+  "errors.browserNoBack": "não há página anterior",
+  "errors.browserNoForward": "não há próxima página"
 }

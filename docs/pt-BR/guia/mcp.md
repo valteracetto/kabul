@@ -36,6 +36,29 @@ cofre daquele CLI e outro CLI travaria abrindo um login novo (o Gemini CLI segur
 cada MCP conectar). Remotos com token fixo em cabeçalho e servidores locais (stdio) são compartilhados
 por padrão.
 
+## O navegador embutido do Kabul
+
+O registro tem também um servidor que vem com o próprio Kabul: **`kabul-browser`**, o
+[navegador](./navegador.md) compartilhado do workspace. Ele aparece com a origem **Kabul**, não é nativo de
+nenhum CLI e por isso vai para todos os harnesses, no formato de cada um:
+
+| CLI | O que recebe |
+|---|---|
+| Claude Code | uma entrada no `--mcp-config`, mais `--allowedTools=mcp__kabul-browser` (quem aprova é a política do navegador do Kabul) |
+| Codex | `-c mcp_servers.kabul-browser.command=…` e `.args=[…]` |
+| Agentes ACP (Gemini CLI, Qwen Code, Goose, OpenCode, Cursor) | uma entrada stdio no `mcpServers` do `session/new` / `session/load` |
+| Antigravity | sem injeção por sessão; **Exportar para o Antigravity** grava a entrada no arquivo global |
+
+O comando é o próprio executável do Kabul (o app desktop, o `kabuld` ou o `kabul`, quem iniciar a sessão)
+com `mcp browser --workspace <id> --home <estado>`, mais `--plan-flag <arquivo>` (só leitura enquanto o arquivo existir, isto é, enquanto a conversa está em plan mode) e `--allow-host` para cada
+domínio do projeto. Desligue numa sessão como qualquer outro servidor, ou para todas as IAs em
+**Configurações › Navegador**. O peso é conhecido sem abrir o servidor (as definições das ferramentas vêm
+compiladas no Kabul), então o painel já mostra.
+
+No **Antigravity**, a entrada exportada leva o id do workspace de onde você exportou. Como o arquivo global
+vale para qualquer pasta, troque o argumento para `--workspace auto`: o servidor passa a achar o workspace
+pela pasta onde o agente roda.
+
 ## Painel da sessão
 
 ![Painel MCP da sessão com ferramentas e tokens por servidor e a economia por turno](../../assets/mcp.png)

@@ -1,5 +1,5 @@
 /* i18n-ignore-file: dados fictícios da demonstração. */
-import { test, expect, devices, type Page } from "@playwright/test";
+import { test, expect, devices, type Page } from "../playwright-silencio";
 import { mkdirSync } from "node:fs";
 
 // PWA do celular instalada na Tela de Início (standalone), em tela cheia: o topo encosta na barra de status

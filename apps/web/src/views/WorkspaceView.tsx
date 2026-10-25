@@ -11,10 +11,12 @@ import { useDismiss, usePopover } from "../components/useDismiss";
 import { api, STATUS_LABEL, wsTitle, type Checkpoint, type FileChange, type PrOptions, type PrResult, type Repo, type Workspace } from "../api";
 import { ChatTab } from "./ChatTab";
 import { TerminalTab } from "./TerminalLazy";
+import { BrowserTab } from "./BrowserLazy";
+import { pendingBrowserUrl } from "../components/browser";
 import { FileDiff, FileView, viewedMap } from "./FileDiff";
 import type { DiffScope } from "../api";
 import { ScriptsPane } from "./ScriptsPane";
-import { IChevronDown, IClose, IEye, IFile, IFolder, IHistory, IMore, IPanel, IPin, IPlus, IRestore, RepoMark } from "../icons";
+import { IChevronDown, IClose, IEye, IFile, IFolder, IGlobe, IHistory, IMore, IPanel, IPin, IPlus, IRestore, RepoMark } from "../icons";
 import { OpenIn } from "../components/OpenIn";
 import { FileTree } from "../components/FileTree";
 import { LazyChunks } from "../components/LazyChunks";
@@ -30,7 +32,7 @@ import { useSettings } from "../components/useSettings";
 import { RunsOnBadge, cloudAdd, cloudList, cloudRemove, cloudRunsOn } from "../components/RunsOn";
 import type { CloudInfo, RepoAccess } from "../api";
 
-type CenterTab = { kind: "chat"; id: string; title: string } | { kind: "cloud"; tmux: string; info: CloudInfo } | { kind: "term"; session: string; title: string; preset?: string } | { kind: "diff"; path: string } | { kind: "file"; path: string; line?: number };
+type CenterTab = { kind: "chat"; id: string; title: string } | { kind: "cloud"; tmux: string; info: CloudInfo } | { kind: "term"; session: string; title: string; preset?: string } | { kind: "diff"; path: string } | { kind: "file"; path: string; line?: number } | { kind: "browser" };
 type Bottom = "setup" | "run" | "terminal" | `t${number}`;
 type RightTab = "all" | "changes" | "checks" | "checkpoints";
 
@@ -160,7 +162,7 @@ export const WorkspaceView = memo(function WorkspaceView({ ws, repo, active, sid
   }, [loadRight, active]);
 
   const open = (tb: CenterTab) => {
-    const key = (x: CenterTab) => (x.kind === "chat" ? x.id : x.kind === "cloud" ? x.tmux : x.kind === "term" ? x.session : x.path);
+    const key = (x: CenterTab) => (x.kind === "chat" ? x.id : x.kind === "cloud" ? x.tmux : x.kind === "term" ? x.session : x.kind === "browser" ? "browser" : x.path);
     const i = tabs.findIndex((x) => x.kind === tb.kind && key(x) === key(tb));
     if (i >= 0) return (setActiveTab(i), tb.kind === "file" && setTabs((ts) => ts.map((x, k) => (k === i ? tb : x))));
     // Um diff por vez: abrir outro arquivo troca o caminho da aba de diff existente.
@@ -175,7 +177,7 @@ export const WorkspaceView = memo(function WorkspaceView({ ws, repo, active, sid
   const saveRef = useRef<() => WsMemory>(() => null as never);
   saveRef.current = () => ({ tabs, activeTab, split, right, bottom, bottomOpen, extraTerms, filter, rightOpen });
   useLayoutEffect(() => () => void wsMemory.set(ws.id, saveRef.current()), [ws.id]);
-  const tabKey = (x: CenterTab) => (x.kind === "chat" ? x.id : x.kind === "cloud" ? x.tmux : x.kind === "term" ? x.session : x.kind + x.path);
+  const tabKey = (x: CenterTab) => (x.kind === "chat" ? x.id : x.kind === "cloud" ? x.tmux : x.kind === "term" ? x.session : x.kind === "browser" ? "browser" : x.kind + x.path);
   const splitIdx = split ? tabs.findIndex((x) => tabKey(x) === split.key) : -1;
   const splitWith = (i: number) => {
     const tb = tabs[i];
@@ -239,6 +241,7 @@ export const WorkspaceView = memo(function WorkspaceView({ ws, repo, active, sid
       }
       else if (k === "w" && !e.shiftKey) (e.preventDefault(), closeTab(activeTab));
       else if (k === "j" && !e.shiftKey) (e.preventDefault(), setBottomOpen((b) => !b));
+      else if (e.code === "KeyB" && e.shiftKey && !e.altKey) (e.preventDefault(), open({ kind: "browser" }));
       else if (k === "p" && e.shiftKey) (e.preventDefault(), openPr());
       else if (k === "p" && !e.shiftKey && !e.altKey) (e.preventDefault(), setFinder("open"));
       else if (k === "f" && e.shiftKey && !e.altKey) (e.preventDefault(), setFinder("grep"));
@@ -304,7 +307,9 @@ export const WorkspaceView = memo(function WorkspaceView({ ws, repo, active, sid
       if (d.ws !== ws.id) return;
       open(changes.some((c) => c.path === d.path) ? { kind: "diff", path: d.path } : { kind: "file", path: d.path });
     };
-    const ev: [string, (e: Event) => void][] = [["kabul:fork-tab", forkTab], ["kabul:fork-ws", forkWs], ["kabul:new-chat-with", newWith], ["kabul:open-file", openFile]];
+    // Terminal (⌘⇧B), deep link kabul://browser e paleta: traz a aba Browser (a URL vai pelo pendingBrowserUrl).
+    const openB = (e: Event) => (e as CustomEvent).detail.ws === ws.id && open({ kind: "browser" });
+    const ev: [string, (e: Event) => void][] = [["kabul:fork-tab", forkTab], ["kabul:fork-ws", forkWs], ["kabul:new-chat-with", newWith], ["kabul:open-file", openFile], ["kabul:browser-open", openB]];
     ev.forEach(([n, h]) => window.addEventListener(n, h));
     return () => ev.forEach(([n, h]) => window.removeEventListener(n, h));
   }, [ws.id, tabs, changes]);
@@ -375,6 +380,8 @@ export const WorkspaceView = memo(function WorkspaceView({ ws, repo, active, sid
     return () => (window.removeEventListener("kabul:compose", h), window.removeEventListener("kabul:agent", send));
   }, [tabs, lastChat, ws.id]);
 
+  // Aba Browser pedida (deep link, terminal) antes de o workspace montar: abre quando as abas chegarem.
+  useEffect(() => void (tabs.length && pendingBrowserUrl[ws.id] && open({ kind: "browser" })), [tabs.length, ws.id]);
   // Conversa pedida de fora (painel Agentes) antes de o workspace montar.
   useEffect(() => {
     const want = pendingActivate[ws.id];
@@ -395,6 +402,7 @@ export const WorkspaceView = memo(function WorkspaceView({ ws, repo, active, sid
     else if (a === "toggle-right") toggleRight();
     else if (a === "new-chat") open({ kind: "chat", id: newChatId(), title: t("common.newChat") });
     else if (a === "new-terminal") newTerminalTab();
+    else if (a === "open-browser") open({ kind: "browser" });
     else runGit(a as GitActionId);
   };
   useEffect(() => {
@@ -557,7 +565,7 @@ ${l.slice(-2500)}
         </header>
         <div className="tabstrip">
           {tabs.map((tb, i) => (
-            <div key={tb.kind === "chat" ? tb.id : tb.kind === "cloud" ? tb.tmux : tb.kind === "term" ? tb.session : tb.kind + tb.path} onContextMenu={(e) => tb.kind === "chat" && (e.preventDefault(), setTabMenu({ i, x: e.clientX, y: e.clientY }))} data-testid="ctab" className={"ctab" + (i === activeTab ? " on" : "")} onClick={() => (setActiveTab(i), tb.kind === "chat" && chatStore.markUnread(tb.id, false))}>
+            <div key={tabKey(tb)} onContextMenu={(e) => tb.kind === "chat" && (e.preventDefault(), setTabMenu({ i, x: e.clientX, y: e.clientY }))} data-testid="ctab" className={"ctab" + (i === activeTab ? " on" : "")} onClick={() => (setActiveTab(i), tb.kind === "chat" && chatStore.markUnread(tb.id, false))}>
               {tb.kind === "chat" ? (
                 <>
                   <TabStatus id={tb.id} />
@@ -571,6 +579,8 @@ ${l.slice(-2500)}
                 <><RunsOnBadge r={cloudRunsOn({ tmux: tb.tmux, info: tb.info, created: 0 })} /><span className="ctab-title">{tb.info.title ?? t("code.ws.cloud")}</span></>
               ) : tb.kind === "term" ? (
                 <><span className="ctab-title">{tb.title}</span></>
+              ) : tb.kind === "browser" ? (
+                <><IGlobe size={13} /><span className="ctab-title" data-testid="ctab-browser">{t("code.browser.tab")}</span></>
               ) : (
                 <><IFile size={13} /><span className="ctab-title">{tb.path.split("/").pop()}{tb.kind === "diff" ? "" : t("code.ws.readOnly")}</span></>
               )}
@@ -583,6 +593,7 @@ ${l.slice(-2500)}
               <Floating className="status-pop plus-pop" placement="bottom-start">
                 <div className="pop-row" onClick={() => (setPlusMenu(false), open({ kind: "chat", id: newChatId(), title: t("common.newChat") }))} data-testid="new-chat">{t("common.newChat")} <span className="grow" /><span className="kbd-hint">⌘T</span></div>
                 <div className="pop-row" onClick={() => (setPlusMenu(false), newTerminalTab())} data-testid="new-term-tab">{t("code.ws.terminal")} <span className="grow" /><span className="kbd-hint">⌘⇧T</span></div>
+                <div className="pop-row" onClick={() => (setPlusMenu(false), open({ kind: "browser" }))} data-testid="new-browser-tab">{t("code.browser.tab")} <span className="grow" /><span className="kbd-hint">⌘⇧B</span></div>
                 <div className="pop-sep" />
                 <div className="pop-title">{t("code.ws.runsWhere")}</div>
                 <div className="pop-row" onClick={() => (setPlusMenu(false), open({ kind: "chat", id: newChatId(), title: t("common.newChat") }))}>{t("code.ws.thisMac")}</div>
@@ -608,6 +619,8 @@ ${l.slice(-2500)}
           <div key={tb.tmux} className={paneClass(i)}><CloudTab ws={ws} tmux={tb.tmux} initial={tb.info} onError={onError} onTeleport={(session) => open({ kind: "term", session, title: t("code.ws.teleport", { id: tb.info.id?.slice(-6) ?? "" }) })} /></div>
         ) : tb.kind === "term" ? (
           <div key={tb.session} className={paneClass(i)}><TerminalTab ws={ws} session={tb.session} visible initialCommand={tb.preset} gpu onError={onError} /></div>
+        ) : tb.kind === "browser" ? (
+          <div key="browser" className={paneClass(i)}><BrowserTab ws={ws} active={active && (i === activeTab || i === splitIdx)} onError={onError} /></div>
         ) : null)}
         {tab?.kind === "diff" && <div className="center-body"><FileDiff ws={ws} path={tab.path} scope={scope} files={changes.map((c) => c.path)} active={active} onNavigate={(p) => open({ kind: "diff", path: p })} onError={onError} /></div>}
         {tab?.kind === "file" && <div className="center-body"><FileView key={tab.path + (tab.line ?? "")} ws={ws} path={tab.path} line={tab.line} onError={onError} /></div>}

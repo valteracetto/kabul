@@ -12,7 +12,8 @@ export function ScriptsPane({ ws, repo, which, onError, onConfigure }: { ws: Wor
   useEffect(() => void api.repoSettings(repo.id).then((r) => setSettings(r.settings), (e) => onError(String(e))), [repo.id, onError]);
 
   if (!settings) return <div className="empty-state">{t("common.loading")}</div>;
-  const runs = Object.entries(settings.scripts.run);
+  // `hide` (no settings.local.toml, por exemplo) tira a ação do botão; sem comando não há o que rodar.
+  const runs = Object.entries(settings.scripts.run).filter(([, r]) => !r.hide && r.command.trim());
   const has = which === "setup" ? !!settings.scripts.setup : runs.length > 0;
   if (!has)
     return (

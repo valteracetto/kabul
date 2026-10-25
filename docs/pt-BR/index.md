@@ -27,6 +27,10 @@ features:
     title: Com um amigo, e pelo celular
     details: Convide um editor ou um observador para um workspace, dividam a fila e o terminal, e acompanhe todas as sessões num app de iOS ou Android servido pelo seu próprio computador.
     link: /pt-BR/guia/colaboracao
+  - icon: 🌐
+    title: Um navegador, compartilhado por você e por todas as IAs
+    details: Cada workspace tem o seu Chromium isolado. Acompanhe ao vivo na aba Browser enquanto Claude, Codex, Gemini, Qwen ou um modelo local o controlam pelo MCP embutido, com aprovação para o que sair do localhost.
+    link: /pt-BR/guia/navegador
   - icon: 🌳
     title: Um workspace por tarefa
     details: Cada tarefa é um git worktree na sua própria branch, com portas reservadas, scripts de setup e run, terminal e quantas conversas quiser.

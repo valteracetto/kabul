@@ -1,5 +1,5 @@
-import { addRepo } from "./helpers";
-import { test, expect, type Page } from "@playwright/test";
+import { addRepo, navTo } from "./helpers";
+import { test, expect, type Page } from "../playwright-silencio";
 
 const WIDTHS = [900, 1280, 1440, 1920, 2560];
 const THEMES = ["dark", "light"] as const;
@@ -8,7 +8,7 @@ const THEMES = ["dark", "light"] as const;
 async function problems(page: Page) {
   return page.evaluate(() => {
     const out: string[] = [];
-    const rows = document.querySelectorAll(".topbar, .rtabs, .btabs, .composer-foot, .side-nav button, .ws-row, .repo-row, .tabstrip, .file-row, .tree-row, .pop-row, .script-bar, .acc-head, .set-row, .source-head, .side-top, .side-foot");
+    const rows = document.querySelectorAll(".topbar, .rtabs, .btabs, .composer-foot, .side-nav2 button, .usage-meter, .ws-row, .repo-row, .tabstrip, .file-row, .tree-row, .pop-row, .script-bar, .acc-head, .set-row, .source-head, .side-top, .side-foot");
     const name = (e: Element) => e.tagName.toLowerCase() + (e.className && typeof e.className === "string" ? "." + e.className.trim().split(/\s+/).join(".") : "");
     rows.forEach((row) => {
       const kids = [...row.children].filter((k) => {
@@ -36,7 +36,7 @@ async function problems(page: Page) {
       if (r.right > mm.left + 1 && r.top < mm.bottom && r.bottom > mm.top) out.push("minimapa sobre mensagem");
     });
     // Nada sob os semáforos (x < 76, y < 30) além da área de arrasto.
-    document.querySelectorAll(".crumb-repo, .crumb-branch, .repo-mark, .machine, .side-nav").forEach((e) => {
+    document.querySelectorAll(".crumb-repo, .crumb-branch, .repo-mark, .machine, .side-nav2").forEach((e) => {
       const r = e.getBoundingClientRect();
       if (r.width && r.left < 76 && r.top < 30) out.push(`sob os semáforos: ${name(e)}`);
     });
@@ -77,9 +77,9 @@ for (const theme of THEMES) {
       await page.keyboard.press("Meta+b");
       await page.getByTestId("settings").click();
       await check("configuracoes");
-      await page.locator(".side-nav button", { hasText: "Modelos locais" }).click();
+      await navTo(page, "local");
       await check("modelos-locais");
-      await page.locator(".side-nav button", { hasText: "Painel" }).click();
+      await navTo(page, "sessions");
       await check("painel");
     }
     console.log(found.join("\n") || "sem problemas");

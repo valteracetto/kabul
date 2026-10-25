@@ -15,15 +15,14 @@ use kabul_core::harness::{self, HarnessKind, SessionOptions};
 use kabul_core::models::{self, Model};
 use kabul_core::runs_on::RunsOn;
 use kabul_core::settings::AppSettings;
-use kabul_core::store::{Repo, Store, Workspace};
+use kabul_core::store::{Repo, SharedStore, Store, Workspace};
 use kabul_core::term::{self, Launch, What};
-use kabul_core::{gitops, history, usage};
+use kabul_core::{archive, gitops, history, usage};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::SystemTime;
 
 /// Validade do QR de pareamento e dos convites.
 pub const PAIR_TTL: u64 = 5 * 60;
@@ -36,7 +35,7 @@ pub struct Hub {
     pub home: PathBuf,
     pub port: u16,
     pub machine: String,
-    store: Mutex<(Store, Option<SystemTime>)>,
+    store: SharedStore,
     pub bus: Bus,
     pub auth: Auth,
     pub terms: TermHub,
@@ -55,6 +54,8 @@ pub struct Hub {
     chat_models: Mutex<HashMap<String, ChatModel>>,
     /// Um watcher de arquivos por repo: invalida o cache do git e avisa `workspace-fs-changed`.
     pub watchers: kabul_core::watch::RepoWatchers,
+    /// O próprio hub (para o fim dos arquivamentos em segundo plano gravar no estado).
+    me: std::sync::OnceLock<std::sync::Weak<Hub>>,
 }
 
 fn s(a: &Value, k: &str) -> Result<String> {
@@ -100,19 +101,22 @@ impl Hub {
             home,
             port,
             machine: kabul_core::machine::computer_name(),
-            store: Mutex::new((store, None)),
+            store: SharedStore::new(store),
             bus,
             live: RwLock::new(vec![]),
             alive: AtomicBool::new(true),
             conn_seq: AtomicU64::new(0),
             chat_models: Mutex::new(HashMap::new()),
             watchers,
+            me: std::sync::OnceLock::new(),
         })
         .init())
     }
 
     /// Governança (configuração salva em `agents.json`) e retomada dos chats suspensos.
     fn init(self: Arc<Self>) -> Arc<Self> {
+        let _ = self.me.set(Arc::downgrade(&self));
+        self.resume_archives();
         if let Some(cfg) = std::fs::read_to_string(self.home.join("agents.json")).ok().and_then(|t| serde_json::from_str::<kabul_core::governor::Config>(&t).ok()) {
             self.chats.governor.set_config(cfg);
         }
@@ -127,6 +131,38 @@ impl Hub {
             Ok((agent, hub.record_usage(rx, k, &model, account.as_deref(), &w.id)))
         }));
         self
+    }
+
+    /// Arquivamento em segundo plano (`kabul_core::archive`): o resultado vai para o estado (lock só no
+    /// fim) e para os clientes (`workspace-state`, com `error` se falhou, e `workspaces-changed`).
+    fn start_archive(&self, plan: archive::Plan, opts: archive::Options) {
+        let id = plan.ws.id.clone();
+        self.bus.emit("workspace-state", json!({"id": id, "state": "archiving"}), Some(id.clone()), None);
+        self.bus.emit("workspaces-changed", json!({}), None, None);
+        let (me, bus, prev) = (self.me.get().cloned(), self.bus.clone(), plan.prev_state.clone());
+        archive::spawn(plan, opts, move |res| {
+            if let Some(hub) = me.and_then(|m| m.upgrade()) {
+                let _ = hub.with_store(|st| st.finish_archive(&id, &prev, &res));
+            }
+            let payload = match &res {
+                Ok(_) => json!({"id": id, "state": "archived"}),
+                Err(err) => json!({"id": id, "state": prev, "error": err, "action": "archive"}),
+            };
+            bus.emit("workspace-state", payload, Some(id.clone()), None);
+            bus.emit("workspaces-changed", json!({}), None, None);
+        });
+    }
+
+    /// Abertura: retoma arquivamentos interrompidos e apaga o lixo pendente da lixeira.
+    fn resume_archives(&self) {
+        let delete = AppSettings::load(&self.home.join("app-settings.json")).delete_branch_on_archive;
+        let Ok((plans, trash)) = self.with_store(|st| Ok((st.interrupted_archives(delete), st.trash_dirs()))) else { return };
+        drop(archive::sweep(trash));
+        for p in plans {
+            if !archive::running(&p.ws.id) {
+                self.start_archive(p, archive::Options { grace: std::time::Duration::ZERO, ..archive::Options::app() });
+            }
+        }
     }
 
     fn agents_config(&self, a: &Value) -> Result<Value> {
@@ -153,17 +189,7 @@ impl Hub {
 
     /// Estado do Kabul relido do disco quando o arquivo muda (o app desktop também escreve nele).
     fn with_store<T>(&self, f: impl FnOnce(&mut Store) -> Result<T>) -> Result<T> {
-        let mut g = self.store.lock().unwrap();
-        let mtime = std::fs::metadata(&g.0.file).and_then(|m| m.modified()).ok();
-        if mtime != g.1 {
-            if let Ok(fresh) = Store::open(g.0.file.clone(), g.0.root.clone(), g.0.branch_prefix.clone()) {
-                g.0 = fresh;
-            }
-            g.1 = mtime;
-        }
-        let out = f(&mut g.0);
-        g.1 = std::fs::metadata(&g.0.file).and_then(|m| m.modified()).ok();
-        out
+        f(&mut self.store.lock().unwrap())
     }
 
     fn snapshot(&self) -> (Vec<Repo>, Vec<Workspace>) {
@@ -363,6 +389,17 @@ impl Hub {
             // Agentes e sessões de fora do Kabul (só o dono: o policy não libera a convidados).
             "external_sessions" => json!(kabul_core::external::collect(&self.home, 40)),
 
+            // ---------- navegador do Kabul (aba Browser; mesmos comandos do app) ----------
+            // O celular não tem screencast: usa `browser_screenshot` periódico.
+            c if c.starts_with("browser_") && c != "browser_screencast" => {
+                let sub = &c["browser_".len()..];
+                if sub == "info" {
+                    json!({ "claudeChrome": kabul_core::browser::claude_chrome_available(), "binary": kabul_core::browser::find_binary(&self.home) })
+                } else {
+                    kabul_core::browser::live::command(&self.home, sub, a)?
+                }
+            }
+
             // ---------- terminal ----------
             "term_attach" => {
                 let session = s(a, "session")?;
@@ -463,9 +500,37 @@ impl Hub {
                 self.bus.emit("workspaces-changed", json!({}), None, None);
                 json!(w)
             }
-            "workspace_archive" | "workspace_unarchive" => {
+            "workspace_archive" => {
+                // Some da lista na hora; o resto roda em segundo plano (mesmo caminho do app desktop).
                 let id = s(a, "id")?;
-                let w = self.with_store(|st| if cmd == "workspace_archive" { st.archive_workspace(&id) } else { st.unarchive_workspace(&id) })?;
+                let set = AppSettings::load(&self.home.join("app-settings.json"));
+                let (_, r) = self.ws_repo(&id)?;
+                let (rs, _) = kabul_core::settings::load(Path::new(&r.path), &r.default_branch);
+                let delete = rs.delete_branch_on_archive.unwrap_or(set.delete_branch_on_archive);
+                let plan = self.with_store(|st| st.begin_archive(&id, delete))?;
+                let w = plan.ws.clone();
+                // Conversas do workspace param junto (como o "parar e arquivar" do app).
+                for c in self.chats.list(Some(&id)).into_iter().filter(|c| c.status != Status::Idle) {
+                    let _ = self.chats.stop(&c.meta.id);
+                }
+                let close_pr = a.get("closePr").and_then(Value::as_bool).unwrap_or(false);
+                let dry_run = a.get("dryRun").and_then(Value::as_bool).unwrap_or(false) || set.github_dry_run;
+                self.start_archive(plan, archive::Options { close_pr, dry_run, ..archive::Options::app() });
+                json!(Workspace { archived: true, state: "archiving".into(), ..w })
+            }
+            "workspace_unarchive" => {
+                // Também é o "Desfazer": na janela só volta o estado; depois, recria o worktree sem lock.
+                let id = s(a, "id")?;
+                let w = match archive::undo(&id) {
+                    archive::Undo::Cancelled { prev_state } => self.with_store(|st| st.cancel_archive(&id, &prev_state))?,
+                    _ => {
+                        if let Some(p) = self.with_store(|st| st.unarchive_begin(&id))? {
+                            kabul_core::store::restore_worktree(&p)?;
+                        }
+                        self.with_store(|st| st.unarchive_finish(&id))?
+                    }
+                };
+                self.bus.emit("workspace-state", json!({"id": id, "state": w.state}), Some(id.clone()), None);
                 self.bus.emit("workspaces-changed", json!({}), None, None);
                 json!(w)
             }

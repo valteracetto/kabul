@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 import { addRepo } from "./helpers";
 
 test("cartão de prévia do workspace: abre após 700 ms de hover, some 200 ms depois de sair; passada rápida não abre", async ({ page }) => {

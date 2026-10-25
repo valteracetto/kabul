@@ -27,6 +27,10 @@ features:
     title: With a friend, and from your phone
     details: Invite an editor or an observer into a workspace, share one queue and one terminal, and follow every session from an iOS or Android app served by your own computer.
     link: /guide/collaboration
+  - icon: 🌐
+    title: One browser, shared by you and every AI
+    details: Each workspace has its own isolated Chromium. Watch it live in the Browser tab while Claude, Codex, Gemini, Qwen or a local model drive it through the built-in MCP, with approvals for anything outside localhost.
+    link: /guide/browser
   - icon: 🌳
     title: One workspace per task
     details: Each task is a git worktree on its own branch, with reserved ports, setup and run scripts, a terminal and any number of chats.

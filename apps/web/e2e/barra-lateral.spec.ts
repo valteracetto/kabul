@@ -1,5 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { addRepo } from "./helpers";
+import { test, expect, type Page } from "../playwright-silencio";
+import { addRepo, navTo } from "./helpers";
 
 async function setup(page: Page, n = 3) {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -102,7 +102,7 @@ test("repo: clique direito (criar, ocultar, remover); ⌘⌥↓ e ⌘⇧H; não 
   await host.getByTestId("composer").fill("tarefa demorada");
   await host.getByTestId("composer").press("Enter");
   await expect(page.locator(`[data-ws="${first}"] .spinner`)).toBeVisible();
-  await page.locator(".side-nav button", { hasText: "Painel" }).click();
+  await navTo(page, "sessions");
   await expect(page.locator(`[data-ws="${first}"]`)).toHaveClass(/unread/);
   await page.keyboard.press("Meta+Alt+l");
   await expect(page.locator(`[data-ws="${first}"]`)).not.toHaveClass(/unread/);

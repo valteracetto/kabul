@@ -14,6 +14,8 @@ const subs = new Map<string, Set<H>>();
 const emit = (ch: string, p: unknown) => setTimeout(() => (subs.get(ch)?.forEach((h) => h(p)), recordUsage(ch, p)), 0);
 let seq = 0;
 const id = () => `m${++seq}`;
+/** Arquivamentos "em segundo plano" do mock (para o desfazer cancelar). */
+const archiving = new Map<string, { t: ReturnType<typeof setTimeout>; prev: string }>();
 const now = () => Math.floor(Date.now() / 1000);
 
 const db = {
@@ -27,8 +29,12 @@ const db = {
   history: {} as Record<string, any>,
   endpoints: [] as any[],
   registry: "",
-  settings: { branch_prefix_type: "github", branch_prefix_custom: "", notifications: true, sound: true, caffeinate: true, show_resources: true, auto_rename_branch: true, env: [], env_file: null, completion_sound: "Glass", always_show_context: false, auto_convert_long_text: true, not_absolutely_right: false, open_prs_in: "github", delete_branch_on_archive: false, archive_on_merge: false, rename_ws_on_branch: true, merge_method: "squash", github_dry_run: false, pr_include_workspace_link: true, automerge: false, optional_checks_blocking: false, push_set_upstream: true, stacked_prs: true, clone_dir: "~/Developer", claude_output_style: "default", codex_personality: "pragmatic", review_model: null, default_plan: false, claude_path: null, codex_path: null, opencode_path: null, scrollback_mb: 10, tray: true, tray_icon: { mode: "auto", pinned: [], style: "bars_percent", show_spend: false }, usage_alert_pct: 80, usage_daily_budget: null, usage_monthly_budget: null, usage_codexbar: true, auto_update: true, update_channel: "stable" } as any,
+  settings: { branch_prefix_type: "github", branch_prefix_custom: "", notifications: true, sound: true, caffeinate: true, show_resources: true, auto_rename_branch: true, env: [], env_file: null, completion_sound: "Glass", always_show_context: false, auto_convert_long_text: true, not_absolutely_right: false, open_prs_in: "github", delete_branch_on_archive: false, archive_on_merge: false, rename_ws_on_branch: true, merge_method: "squash", github_dry_run: false, pr_include_workspace_link: true, automerge: false, optional_checks_blocking: false, push_set_upstream: true, stacked_prs: true, clone_dir: "~/Developer", claude_output_style: "default", codex_personality: "pragmatic", review_model: null, default_plan: false, claude_path: null, codex_path: null, opencode_path: null, scrollback_mb: 10, tray: true, tray_icon: { mode: "auto", pinned: [], style: "bars_percent", show_spend: false }, usage_alert_pct: 80, usage_daily_budget: null, usage_monthly_budget: null, usage_codexbar: true, auto_update: true, update_channel: "stable", browser_mcp: true, browser_policy: "localhost", browser_path: null, claude_chrome: false } as any,
   repoSettings: { scripts: { setup: "echo instalando", archive: null, run_mode: "concurrent", run: { web: { command: "npm run dev", default: true, icon: "globe", available_in: null } } }, file_include_globs: [], target_branch: null, env: { API_URL: "http://localhost:$KABUL_PORT" }, prompts: { general: null, review: null, create_pr: null, fix_errors: null, resolve_conflicts: null, branch_rename: null }, preview_url: "http://localhost:$KABUL_PORT" } as any,
+  /** Camadas de settings (com avisos) e a prévia de importação da pasta legada; os specs trocam. */
+  repoLayers: null as any[] | null,
+  importPreview: null as any,
+  importWritten: [] as string[],
   chats: {} as Record<string, { pending: string | null; turn: number; last?: string; ws?: string; model?: string; provider?: string; since?: number; working?: boolean }>,
   kept: [] as any[],
   linear: false,
@@ -322,7 +328,17 @@ const handlers: Record<string, (a: any) => unknown> = {
   },
   repo_clone: ({ url }) => handlers.repo_add({ path: "/mock/repos/" + url.split("/").pop().replace(".git", "") }),
   repo_remove: ({ id: rid }) => void (db.repos = db.repos.filter((r) => r.id !== rid)),
-  repo_settings: () => ({ settings: db.repoSettings, layers: [{ name: "usuário", path: "~/.kabul/settings.toml", found: false }, { name: "repo", path: ".kabul/settings.toml", found: true }, { name: "repo local", path: ".kabul/settings.local.toml", found: false }, { name: "gerenciado", path: "~/.kabul/settings.managed.toml", found: false }] }),
+  repo_settings: () => ({ settings: db.repoSettings, layers: db.repoLayers ?? [{ name: "usuário", path: "~/.kabul/settings.toml", found: false, warnings: [] }, { name: "repo", path: ".kabul/settings.toml", found: true, warnings: [] }, { name: "repo local", path: ".kabul/settings.local.toml", found: false, warnings: [] }, { name: "gerenciado", path: "~/.kabul/settings.managed.toml", found: false, warnings: [] }] }),
+  repo_settings_import_preview: () => db.importPreview ?? { available: false, source: "", files: [], warnings: [], digest: "" },
+  repo_settings_import: ({ digest }) => {
+    const p = db.importPreview;
+    if (!p?.available) throw new Error("nada para importar");
+    if (p.digest !== digest) throw new Error("a configuração mudou desde a prévia; abra a prévia de novo");
+    db.importWritten = p.files.map((f: any) => f.target);
+    db.importPreview = { ...p, available: false, files: [] };
+    db.repoLayers = (db.repoLayers ?? []).map((l: any) => ({ ...l, warnings: [] }));
+    return db.importWritten;
+  },
   repo_settings_save: ({ settings }) => ((db.repoSettings = settings), ".kabul/settings.local.toml"),
   // Cópias, como num transporte de verdade (o React precisa ver objetos novos).
   workspaces_list: () => db.workspaces.map((w) => ({ ...w })),
@@ -332,7 +348,8 @@ const handlers: Record<string, (a: any) => unknown> = {
     const w = { id: id(), repo_id: repoId, name, branch: `dev/${name}`, path: `/mock/ws/${name}`, archived: false, created_at: now(), title: null, status: "in-progress", state: "setting_up", pinned: false, notes: "", port: 41000 + db.workspaces.length * 10, target_branch: null, pr_url: null, archive_checkpoint: null, user_set_branch: false, files_copied: 1 };
     db.workspaces.push(w);
     db.changed[w.id] = {};
-    setTimeout(() => ((w.state = "ready"), emit("workspace-state", { id: w.id, state: "ready" })), 400);
+    // Fim do setup não mexe num workspace já arquivado (ou arquivando).
+    setTimeout(() => void (!w.archived && ((w.state = "ready"), emit("workspace-state", { id: w.id, state: "ready" }))), 400);
     return w;
   },
   workspace_update: ({ id: wid, patch }) => Object.assign(ws(wid), Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined).map(([k, v]) => [k, k === "section" && v === "" ? null : v]))),
@@ -343,8 +360,33 @@ const handlers: Record<string, (a: any) => unknown> = {
     w.branch = "dev/" + text.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").split("-").filter(Boolean).slice(0, 5).join("-");
     return w;
   },
-  workspace_archive: ({ id: wid, closePr }) => { if (closePr && db.pr[wid]) db.pr[wid].state = "CLOSED"; Object.assign(ws(wid), { archived: true, state: "archived", archive_checkpoint: "archive-" + wid }); },
-  workspace_unarchive: ({ id: wid }) => Object.assign(ws(wid), { archived: false, state: "ready" }),
+  // Como o backend: some na hora (`archiving`) e o resto roda "em segundo plano"; o fim chega por
+  // `workspace-state` (com `error` se falhar, e o workspace volta). Ganchos: `__mock.archiveMs` (duração,
+  // padrão 300 ms), `__mock.archiveFail` (texto do erro), `__mock.archiveCallMs` (a própria chamada demora,
+  // como o backend síncrono de antes: a UI não pode esperar por ela).
+  workspace_archive: async ({ id: wid, closePr }) => {
+    const w = ws(wid), m = (window as any).__mock ?? {};
+    if (w.archived) throw new Error(w.state === "archiving" ? "o workspace já está sendo arquivado" : "o workspace já está arquivado");
+    const prev = w.state;
+    Object.assign(w, { archived: true, state: "archiving" });
+    emit("workspace-state", { id: wid, state: "archiving" });
+    const t = setTimeout(() => {
+      archiving.delete(wid);
+      const fail = (window as any).__mock?.archiveFail;
+      if (fail) return (Object.assign(w, { archived: false, state: prev }), emit("workspace-state", { id: wid, state: prev, error: fail, action: "archive" }));
+      if (closePr && db.pr[wid]) db.pr[wid].state = "CLOSED";
+      Object.assign(w, { state: "archived", archive_checkpoint: "archive-" + wid });
+      emit("workspace-state", { id: wid, state: "archived" });
+    }, m.archiveMs ?? 300);
+    archiving.set(wid, { t, prev });
+    if (m.archiveCallMs) await new Promise((r) => setTimeout(r, m.archiveCallMs));
+  },
+  // Também o "Desfazer": ainda arquivando, cancela e volta como estava.
+  workspace_unarchive: ({ id: wid }) => {
+    const a = archiving.get(wid);
+    if (a) (clearTimeout(a.t), archiving.delete(wid));
+    return Object.assign(ws(wid), { archived: false, state: a?.prev ?? "ready" });
+  },
   workspace_changes: ({ workspaceId, scope }) => (scope === "branch" ? changes(workspaceId).filter((c) => !c.untracked) : changes(workspaceId)),
   workspace_file_diff: ({ workspaceId, path, ignoreWs }) => {
     const body = (db.changed[workspaceId]?.[path] ?? "").replace(/\n$/, "");
@@ -649,10 +691,11 @@ const handlers: Record<string, (a: any) => unknown> = {
   mcp_add: () => undefined,
   // Registro único: linear vem do Claude e do Codex; docs só do projeto (Claude); figma é remoto com login (não compartilhado).
   // Cópia, como o backend de verdade (JSON novo a cada chamada): o painel re-renderiza ao recarregar.
-  mcp_shared: () => structuredClone(db.mcp ??= [
+  // `__mock.builtinMcp`: o navegador embutido do Kabul aparece no registro (origem "kabul").
+  mcp_shared: () => structuredClone([...(db.mcp ??= [
     { name: "docs", transport: "stdio", target: "npx -y docs-mcp", origins: [{ harness: "claude", scope: "project", source: ".mcp.json" }], conflict: false, shared: true, env_keys: [], weight: null },
     { name: "linear", transport: "http", target: "https://mcp.linear.app/mcp", origins: [{ harness: "claude", scope: "user", source: "~/.claude.json" }, { harness: "codex", scope: "user", source: "~/.codex/config.toml" }], conflict: false, shared: true, env_keys: ["Authorization"], weight: { tools: 24, tokens: 3200 } },
-  ]),
+  ]), ...((window as any).__mock?.builtinMcp ? [{ name: "kabul-browser", transport: "stdio", target: "/Applications/Kabul.app/Contents/MacOS/kabul-desktop mcp browser --workspace w1", origins: [{ harness: "kabul", scope: "builtin", source: "Kabul" }], conflict: false, shared: true, env_keys: [], weight: { tools: 15, tokens: 1100 } }] : [])]),
   mcp_weigh: ({ name }) => { const m = db.mcp!.find((x: any) => x.name === name); m.weight = { tools: 6, tokens: 900 }; return m.weight; },
   mcp_set_shared: ({ name, on }) => void (db.mcp!.find((x: any) => x.name === name).shared = on),
   mcp_export_agy: () => "~/.gemini/config/mcp_config.json.bak-kabul-1",
@@ -677,6 +720,10 @@ const handlers: Record<string, (a: any) => unknown> = {
   chats_interrupt: ({ chatIds }) => { const ids = chatIds as string[]; ids.forEach((c) => handlers.chat_interrupt({ chatId: c })); ((window as any).__mock.batchStopped ??= []).push(...ids); return { stopped: ids, errors: [] }; },
 };
 
+// Navegador falso (aba Browser): em módulo à parte, carregado no primeiro comando browser_* (fora do JS inicial).
+let browserMod: Promise<import("./mockBrowser").BrowserMock> | null = null;
+const browserMock = () => (browserMod ??= import("./mockBrowser").then((m) => m.makeBrowserMock({ emit, db, now, nextId: () => ++seq })));
+
 // Ganchos para os testes montarem estados de git/PR sem backend.
 if (typeof window !== "undefined") (window as any).__mock = {
   db,
@@ -684,6 +731,10 @@ if (typeof window !== "undefined") (window as any).__mock = {
   git: (wid: string | null, g: any) => { const w = wid ?? db.workspaces[0]?.id; db.git[w] = { ...(db.git[w] ?? {}), ...g }; },
   emit: (channel: string, payload: unknown) => emit(channel, payload),
   change: (wid: string | null, path: string, body: string) => { const w = wid ?? db.workspaces[0]?.id; (db.changed[w] ??= {})[path] = body; },
+  /** Agente agindo no navegador agora (indicador "controlando" e log de ações). */
+  browserAgent: (wid: string | null, agent: string, tool?: string, detail?: string) => browserMock().then((m) => m.agent(wid ?? db.workspaces[0]?.id, agent, tool, detail)),
+  /** Pedido de aprovação de um agente (navegar fora de localhost / rodar JavaScript). */
+  browserApproval: (wid: string | null, p: { kind?: "navigate" | "evaluate"; detail?: string; agent?: string } = {}) => browserMock().then((m) => m.approval(wid ?? db.workspaces[0]?.id, p)),
 };
 
 // Ambiente de demonstração (`?mock&demo`, só no Vite dev): repos, workspaces, conversas e uso 100% fictícios
@@ -726,9 +777,10 @@ if (typeof window !== "undefined" && (window as any).__kabulSeed) seedScale((win
 export const mockTransport: Transport = {
   async call<T>(command: string, args?: Record<string, unknown>) {
     ((window as any).__calls ??= []).push(command);
+    if (command.startsWith("browser_")) ((window as any).__browserCalls ??= []).push([command, args ?? {}]);
     if (demoReady) await demoReady;
     if (command === "checkpoint_create" && (window as any).__mock?.holdModels === true) ((window as any).__mock.holdModels = false, (window as any).__mock.releaseModels?.());
-    const h = handlers[command];
+    const h = command.startsWith("browser_") ? (await browserMock()).handlers[command] : handlers[command];
     if (!h) throw new Error(`mock: comando desconhecido ${command}`);
     await new Promise((r) => setTimeout(r, 15));
     return (await h(args ?? {})) as T;

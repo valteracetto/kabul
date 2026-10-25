@@ -5,7 +5,7 @@ import type { ExternalSessions, Model, Workspace } from "../api";
 import { STATUS_LABEL as WS_STATUS } from "../api";
 import { ago, modelFor, workspaceFor } from "../components/external";
 import { AGENT_LABEL, canWrite, isOwner, k, me, ws, type LiveSession, type Ticket } from "./kabuld";
-import { refresh, setListPrefs, useKabul, useListPrefs, type ListPrefs } from "./data";
+import { archiveWorkspace, refresh, setListPrefs, useKabul, useListPrefs, type ListPrefs } from "./data";
 import { openSession, push } from "./nav";
 import { ModelSheet } from "./ModelSheet";
 import { FilesButton } from "./preview";
@@ -269,7 +269,7 @@ function WsBlock({ n, manual, narrow, onDrop, onChat, onInvite, onMore, os, mach
   const actions: SwipeAction[] = [];
   if (owner && w) {
     actions.push({ label: w.pinned ? t("mobile.home.unpin") : t("mobile.home.pin"), tone: "orange", icon: <span>📌</span>, onClick: () => void k.workspaceUpdate(w.id, { pinned: !w.pinned }).then(refresh), testid: "m-ws-pin" });
-    actions.push({ label: w.archived ? t("mobile.home.restore") : t("mobile.home.archive"), tone: w.archived ? "blue" : "gray", icon: <ArchiveIcon />, onClick: () => void k.workspaceArchive(w.id, !w.archived).then(refresh, (e) => alert(trError(e))), testid: "m-ws-archive" });
+    actions.push({ label: w.archived ? t("mobile.home.restore") : t("mobile.home.archive"), tone: w.archived ? "blue" : "gray", icon: <ArchiveIcon />, onClick: () => void archiveWorkspace(w.id, !w.archived), testid: "m-ws-archive" });
   }
   const drag = useDragHandle(n.id, onDrop, setOver);
   const status = w ? WS_STATUS[w.status] ?? w.status : null;

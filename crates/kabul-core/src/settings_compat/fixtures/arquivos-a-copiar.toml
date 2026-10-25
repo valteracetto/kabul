@@ -1,0 +1,8 @@
+# Arquivos a copiar e .worktreeinclude: file_include_globs como texto de várias linhas.
+"$schema" = "https://example.invalid/schemas/settings.repo.schema.json"
+
+file_include_globs = """
+.env.local
+config/local.json
+certs/local/**
+"""

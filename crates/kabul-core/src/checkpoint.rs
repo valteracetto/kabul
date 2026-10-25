@@ -36,19 +36,60 @@ pub struct Checkpoint {
 
 const PREFIX: &str = "refs/kabul-checkpoints/";
 
+/// Pastas pesadas que nunca entram num checkpoint quando aparecem como não rastreadas (projeto que
+/// esqueceu de ignorá-las): sem isso, um `node_modules/` fora do `.gitignore` viraria GBs de objetos.
+const HEAVY: &[&str] = &["node_modules", "target", ".next", ".nuxt", ".turbo", ".venv", "venv", "__pycache__", ".gradle", ".cache", ".parcel-cache", "Pods", "DerivedData"];
+
+/// Pastas pesadas não rastreadas e não ignoradas (relativas a `dir`).
+fn heavy_untracked(dir: &Path) -> Vec<String> {
+    let Ok(out) = git(dir, &["ls-files", "-z", "--others", "--exclude-standard", "--directory", "--no-empty-directory"], &[]) else { return vec![] };
+    out.split('\0').filter_map(|l| l.strip_suffix('/')).filter(|d| HEAVY.contains(&d.rsplit('/').next().unwrap_or(d))).map(String::from).collect()
+}
+
+/// Checkpoint com a mesma árvore, o mesmo HEAD e a mesma mensagem (nada mudou desde ele): reaproveitado.
+fn same_as_existing(dir: &Path, tree: &str, head: &str, message: &str) -> Option<String> {
+    let out = git(dir, &["for-each-ref", "--format=%(objectname) %(tree) %(parent) %(subject)", PREFIX], &[]).ok()?;
+    out.lines().find_map(|l| {
+        let mut it = l.splitn(4, ' ');
+        let (c, t, p, m) = (it.next()?, it.next()?, it.next()?, it.next().unwrap_or(""));
+        (t == tree && p == head && m == message.lines().next().unwrap_or("")).then(|| c.to_string())
+    })
+}
+
+/// Grava o checkpoint. Rápido mesmo em árvore grande: o índice temporário parte de uma cópia do índice
+/// real (o cache de stat evita reler arquivos que não mudaram), respeita o `.gitignore` e deixa de fora
+/// pastas pesadas não rastreadas; se nada mudou desde um checkpoint existente, reaproveita o commit.
 pub fn create(dir: &Path, id: &str, message: &str) -> Result<Checkpoint> {
-    if busy(dir)? != "clean" {
-        bail!("git ocupado ({}); checkpoint adiado", busy(dir)?);
+    let b = busy(dir)?;
+    if b != "clean" {
+        bail!("git ocupado ({b}); checkpoint adiado");
     }
     let head = git(dir, &["rev-parse", "HEAD"], &[])?;
-    let idx = std::env::temp_dir().join(format!("kabul-idx-{}-{id}", std::process::id()));
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let idx = std::env::temp_dir().join(format!("kabul-idx-{}-{n}-{}", std::process::id(), crate::paths::safe_file_name(id)));
     let idx_s = idx.to_string_lossy().to_string();
     let env = [("GIT_INDEX_FILE", idx_s.as_str())];
-    git(dir, &["read-tree", "HEAD"], &env)?;
-    git(dir, &["add", "-A"], &env)?;
-    let tree = git(dir, &["write-tree"], &env)?;
+    let real = git(dir, &["rev-parse", "--git-path", "index"], &[]).map(|p| if Path::new(&p).is_absolute() { std::path::PathBuf::from(p) } else { dir.join(p) });
+    let mut add: Vec<String> = ["add", "-A", "--", "."].iter().map(|s| s.to_string()).collect();
+    add.extend(heavy_untracked(dir).into_iter().map(|d| format!(":(exclude,literal){d}")));
+    let add: Vec<&str> = add.iter().map(String::as_str).collect();
+    let stage = |seed: bool| -> Result<String> {
+        std::fs::remove_file(&idx).ok();
+        if !(seed && real.as_ref().is_ok_and(|r| std::fs::copy(r, &idx).is_ok())) {
+            git(dir, &["read-tree", "HEAD"], &env)?;
+        }
+        git(dir, &add, &env)?;
+        git(dir, &["write-tree"], &env)
+    };
+    // Índice copiado no meio de uma escrita (ou corrompido): refaz a partir do HEAD.
+    let tree = stage(true).or_else(|_| stage(false));
     std::fs::remove_file(&idx).ok();
-    let commit = git(dir, &["-c", "user.name=kabul", "-c", "user.email=kabul@local", "commit-tree", &tree, "-p", &head, "-m", message], &[])?;
+    let tree = tree?;
+    let commit = match same_as_existing(dir, &tree, &head, message) {
+        Some(c) => c,
+        None => git(dir, &["-c", "user.name=kabul", "-c", "user.email=kabul@local", "commit-tree", &tree, "-p", &head, "-m", message], &[])?,
+    };
     git(dir, &["update-ref", &format!("{PREFIX}{id}"), &commit], &[])?;
     let created_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     Ok(Checkpoint { id: id.into(), commit, head, message: message.into(), created_at })
@@ -118,6 +159,18 @@ mod tests {
         assert!(!d.join("depois.txt").exists());
         assert_eq!(git(&d, &["rev-parse", "HEAD"], &[]).unwrap(), c.head);
         assert_eq!(list(&d).unwrap()[0].message, "turno 1");
+        // Pasta pesada não ignorada fica fora; sem mudança desde o último, o commit é reaproveitado.
+        std::fs::create_dir_all(d.join("node_modules/pkg")).unwrap();
+        std::fs::write(d.join("node_modules/pkg/i.js"), "x").unwrap();
+        std::fs::write(d.join("solto.txt"), "s\n").unwrap();
+        let a = create(&d, "t2", "turno 2").unwrap();
+        let files = git(&d, &["ls-tree", "-r", "--name-only", &a.commit], &[]).unwrap();
+        assert!(files.contains("solto.txt") && !files.contains("node_modules"), "{files}");
+        let b = create(&d, "t3", "turno 2").unwrap();
+        assert_eq!(a.commit, b.commit, "nada mudou: reaproveita");
+        assert_ne!(create(&d, "t4", "outro").unwrap().commit, a.commit, "mensagem diferente: commit novo");
+        std::fs::write(d.join("solto.txt"), "mudou\n").unwrap();
+        assert_ne!(create(&d, "t5", "turno 2").unwrap().commit, a.commit);
         std::fs::create_dir_all(d.join(".git/rebase-merge")).unwrap();
         assert_eq!(busy(&d).unwrap(), "busy:rebase");
         assert!(restore(&d, "t1").is_err());

@@ -33,6 +33,26 @@ e mapeia tudo para os mesmos eventos, cartões e aprovações dos outros agentes
 | `terminal/create`, `output`, `wait_for_exit`, `kill`, `release` | o Kabul roda o processo, guarda o fim da saída (`outputByteLimit`) e responde o `wait_for_exit` quando ele termina, sem travar a leitura |
 | erros | mensagem + `data` quando explica mais (o Goose manda "Internal error" e o motivo no `data`). Login (`-32000`, "API key", "provider"…) ganha a dica dos `authMethods` ("Log in with your Google account", "Run `goose configure`…"). Erro no `session/new` fecha o turno da mensagem que estava na fila |
 
+## Navegador do Kabul (`kabul-browser`)
+
+O MCP do navegador ([guia](pt-BR/guia/navegador.md)) chega aos agentes ACP como qualquer MCP do registro:
+uma entrada stdio no `mcpServers` do `session/new` e do `session/load`, com `command` = o executável do
+Kabul que iniciou a sessão (app desktop, `kabuld` ou `kabul`; `KABUL_MCP_BIN` troca) e
+`args` = `["mcp", "browser", "--workspace", <id>, "--home", <estado>]`, mais `--plan-flag <arquivo>` (só leitura enquanto a conversa estiver em plan mode) e
+`--allow-host <domínio>` para cada `browser_hosts` do repo. Exemplo do que vai no `session/new`:
+
+```json
+{ "name": "kabul-browser", "command": "<executável do Kabul>",
+  "args": ["mcp", "browser", "--workspace", "w1", "--home", "/Users/eu/Library/Application Support/kabul"], "env": [] }
+```
+
+Nos outros harnesses é o mesmo servidor: Claude por `--mcp-config` (com
+`--allowedTools=mcp__kabul-browser`, porque a aprovação é a do Kabul), Codex por
+`-c mcp_servers.kabul-browser.command=…`/`.args=[…]`, Antigravity só exportando para a config global (com
+`--workspace auto`, o workspace sai da pasta atual). Cada processo de agente conecta no mesmo Chromium do
+workspace (descoberto pelo `DevToolsActivePort` do perfil), então todos e o humano veem a mesma aba. O nome
+mostrado em "está controlando" é o `clientInfo.name` do `initialize` quando não vem `--agent`.
+
 ## Por agente
 
 Tudo abaixo foi rodado nesta máquina com o CLI instalado, pelo harness do Kabul (`harness::spawn`, o
@@ -117,6 +137,9 @@ de `--agente` se ele falar uma API do servidor.
 - De ponta a ponta com o CLI instalado e o LLM falso (não precisa de conta nem de modelo):
   `KABUL_TESTE_ACP_AGENTE=<opencode|gemini|qwen|goose|claude|codex> KABUL_TESTE_ACP_FALSO=1 cargo test -p kabul-core acp_real -- --ignored --nocapture`.
 - Plan mode: `KABUL_TESTE_PLAN_AGENTE=<claude|codex|gemini|qwen|opencode|goose> cargo test -p kabul-core plan_real -- --ignored --nocapture`.
+- Navegador do Kabul (navigate → snapshot → click numa página local servida pelo teste, MCP embutido servido pelo
+  binário `kabul`): `KABUL_TESTE_BROWSER_AGENTE=<claude|codex|gemini|qwen|opencode|goose> cargo test -p kabul-cli --test navegador agente_real -- --ignored --nocapture`
+  (`KABUL_BROWSER_BIN` escolhe o Chromium; sem ele, o Chrome/Edge instalado).
   Com modelo local: `KABUL_TESTE_ACP_LOCAL=<id>`; com a conta do agente: `KABUL_TESTE_ACP_MODELO=<modelo>`.
 
 ## Pendências

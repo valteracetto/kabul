@@ -1,13 +1,17 @@
 //! Settings em camadas (da maior para a menor precedência):
 //! `~/.kabul/settings.managed.toml` > `<repo>/.kabul/settings.local.toml` >
 //! `<repo>/.kabul/settings.toml` (lido da branch padrão no remoto, com fallback no disco) >
-//! `~/.kabul/settings.toml` > padrões. A pasta legada de `crate::compat` só é lida quando `.kabul/` não existe.
+//! `~/.kabul/settings.toml` > padrões. A pasta legada de `crate::compat` só é lida quando `.kabul/` não existe;
+//! o JSON legado, enquanto não há `settings.toml` compartilhado. A leitura é tolerante (`crate::settings_compat`):
+//! campo inválido vira aviso em `Layer::warnings` e o resto da camada vale.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct RunScript {
+    /// Vazio numa camada de cima = só ajusta os outros campos da ação de baixo (ex.: `hide = true` no local).
+    #[serde(default)]
     pub command: String,
     #[serde(default)]
     pub default: bool,
@@ -15,6 +19,67 @@ pub struct RunScript {
     pub icon: Option<String>,
     #[serde(default)]
     pub available_in: Option<Vec<String>>,
+    /// Argumentos acrescentados ao comando (com as aspas do shell).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<RunOptions>,
+    /// Esconde a ação do botão Run (no `settings.local.toml`, só nesta máquina).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hide: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct RunOptions {
+    /// Pasta de trabalho relativa ao workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+}
+
+impl RunScript {
+    /// Campos de `hi` sobre `lo` (mesma ação em camadas diferentes). Com comando, `hi` redefine a ação
+    /// (herdando só `hide`); sem comando, só os campos que ela traz valem.
+    fn merge(lo: RunScript, hi: RunScript) -> RunScript {
+        if !hi.command.trim().is_empty() {
+            return RunScript { hide: hi.hide.or(lo.hide), ..hi };
+        }
+        RunScript {
+            command: lo.command,
+            default: hi.default || lo.default,
+            icon: hi.icon.or(lo.icon),
+            available_in: hi.available_in.or(lo.available_in),
+            args: if hi.args.is_empty() { lo.args } else { hi.args },
+            options: hi.options.or(lo.options),
+            hide: hi.hide.or(lo.hide),
+        }
+    }
+
+    pub fn hidden(&self) -> bool {
+        self.hide == Some(true)
+    }
+
+    /// Comando com os `args` (cada um com as aspas do shell dos scripts).
+    pub fn command_line(&self) -> String {
+        let sh = crate::shell::Shell::for_scripts();
+        std::iter::once(self.command.clone()).chain(self.args.iter().map(|a| sh.quote(a))).collect::<Vec<_>>().join(" ")
+    }
+
+    /// Pasta onde a ação roda: `options.cwd` dentro do workspace (caminho absoluto ou com `..` é ignorado).
+    pub fn cwd_in(&self, workspace: &Path) -> PathBuf {
+        let rel = self.options.as_ref().and_then(|o| o.cwd.as_deref()).map(str::trim).filter(|c| !c.is_empty());
+        match rel {
+            Some(c) if Path::new(c).components().all(|p| matches!(p, std::path::Component::Normal(_) | std::path::Component::CurDir)) => workspace.join(c),
+            _ => workspace.to_path_buf(),
+        }
+    }
+}
+
+/// Uma URL de preview com nome (a primeira é a padrão).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PreviewUrl {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -60,6 +125,12 @@ pub struct Settings {
     /// URL de preview; aceita `$KABUL_PORT` e `$((KABUL_PORT+N))` (e o prefixo legado).
     #[serde(default)]
     pub preview_url: Option<String>,
+    /// Domínios do projeto que o navegador do Kabul abre sem pedir aprovação (além de localhost).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub browser_hosts: Vec<String>,
+    /// Várias URLs de preview com nome; sem `preview_url`, a primeira faz o papel dela.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview_urls: Vec<PreviewUrl>,
 }
 
 /// Prompts personalizáveis por ação (vazio = o padrão do Kabul).
@@ -120,14 +191,45 @@ pub fn parse_env(text: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Lê um `settings.toml` aplicando as migrações do formato (ver `crate::schema`).
+/// Lê um `settings.toml` aplicando as migrações do formato (ver `crate::schema`). Campo inválido é
+/// ignorado sozinho (os avisos saem em `settings_compat::read`); `None` só quando o TOML nem abre.
 pub fn parse_toml(text: &str) -> Option<Settings> {
-    let t: toml::Value = toml::from_str(text).ok()?;
-    let mut doc = serde_json::to_value(t).ok()?;
-    if let crate::schema::Outcome::Newer { found } = crate::schema::migrate(&mut doc, crate::schema::REPO_SETTINGS, crate::schema::REPO_SETTINGS_MIGRATIONS).ok()? {
-        eprintln!("kabul: settings.toml no formato v{found} (este Kabul entende até v{}); lido no melhor esforço", crate::schema::REPO_SETTINGS);
+    crate::settings_compat::read(text, crate::settings_compat::Format::Toml, "settings.toml").0
+}
+
+/// Uma configuração que não foi lida: arquivo, chave (com pontos) e o motivo.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SettingsWarning {
+    pub file: String,
+    /// Caminho da chave (`scripts.run.web.command`); vazio quando o arquivo inteiro não abriu.
+    pub key: String,
+    /// `syntax` (o arquivo não abre), `type` (tipo errado), `value` (valor fora dos aceitos), `unknown`
+    /// (chave desconhecida), `unsupported` (sem equivalente no Kabul), `app_setting` (no Kabul fica nas
+    /// Configurações do app; `detail` diz a página) ou `cloud` (só vale em execução na nuvem).
+    pub kind: String,
+    /// Tipos ou valores aceitos, separados por `|` (`string|list`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub found: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl SettingsWarning {
+    /// Motivo em texto (relatório do diagnóstico).
+    pub fn reason(&self) -> String {
+        let ty = |t: &Option<String>| t.as_deref().unwrap_or("?").replace('|', " ou ");
+        match self.kind.as_str() {
+            "syntax" => format!("o arquivo não pôde ser lido: {}", self.detail.as_deref().unwrap_or("")),
+            "type" => format!("tipo errado (esperado {}, encontrado {})", ty(&self.expected), ty(&self.found)),
+            "value" => format!("valor não aceito (aceitos: {})", ty(&self.expected)),
+            "unsupported" => "sem equivalente no Kabul".into(),
+            "app_setting" => format!("no Kabul fica em Configurações › {}", crate::settings_compat::page_name(self.detail.as_deref(), false)),
+            "cloud" => "só vale para execução na nuvem".into(),
+            _ => "chave desconhecida".into(),
+        }
     }
-    serde_json::from_value(doc).ok()
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -135,12 +237,20 @@ pub struct Layer {
     pub name: String,
     pub path: String,
     pub found: bool,
+    /// O que não foi lido deste arquivo (o resto da camada vale).
+    pub warnings: Vec<SettingsWarning>,
 }
 
 /// Junta `hi` sobre `lo` (campos de `hi` vencem; scripts run por id).
 pub fn merge(lo: Settings, hi: Settings) -> Settings {
     let mut run = lo.scripts.run;
-    run.extend(hi.scripts.run);
+    for (id, h) in hi.scripts.run {
+        let m = match run.remove(&id) {
+            Some(l) => RunScript::merge(l, h),
+            None => h,
+        };
+        run.insert(id, m);
+    }
     Settings {
         schema_version: hi.schema_version.max(lo.schema_version),
         scripts: Scripts { setup: hi.scripts.setup.or(lo.scripts.setup), archive: hi.scripts.archive.or(lo.scripts.archive), run_mode: hi.scripts.run_mode.or(lo.scripts.run_mode), run },
@@ -157,30 +267,27 @@ pub fn merge(lo: Settings, hi: Settings) -> Settings {
         },
         prompts: Prompts::merge(lo.prompts, hi.prompts),
         preview_url: hi.preview_url.or(lo.preview_url),
+        browser_hosts: {
+            let mut h = lo.browser_hosts;
+            h.extend(hi.browser_hosts.into_iter().filter(|x| !h.contains(x)).collect::<Vec<_>>());
+            h
+        },
+        preview_urls: if hi.preview_urls.is_empty() { lo.preview_urls } else { hi.preview_urls },
     }
 }
 
 /// Cada camada lida (nome, settings) — para mostrar herança no ambiente por escopo.
 pub fn load_layers(repo: &Path, default_branch: &str) -> Vec<(String, Settings)> {
-    let d = dir_for(repo);
-    let shared = crate::shell::command("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["show", &format!("origin/{default_branch}:{d}/settings.toml")])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .or_else(|| std::fs::read_to_string(repo.join(format!("{d}/settings.toml"))).ok());
-    let local = std::fs::read_to_string(repo.join(format!("{d}/settings.local.toml"))).ok();
-    [("repo", shared), ("repo local", local)].into_iter().map(|(n, t)| (n.to_string(), t.and_then(|t| parse_toml(&t)).unwrap_or_default())).collect()
+    let [shared, local] = repo_sources(repo, default_branch);
+    [("repo", shared), ("repo local", local)].into_iter().map(|(n, src)| (n.to_string(), src.read().0.unwrap_or_default())).collect()
 }
 
 fn home() -> PathBuf {
     crate::paths::home()
 }
 
-fn dir_for(repo: &Path) -> String {
+/// Pasta das settings do repo: `.kabul/` se existir; senão a legada, se existir.
+pub(crate) fn dir_for(repo: &Path) -> String {
     let legacy = crate::compat::legacy_dir();
     if repo.join(".kabul").is_dir() || !repo.join(&legacy).is_dir() {
         ".kabul".into()
@@ -189,26 +296,81 @@ fn dir_for(repo: &Path) -> String {
     }
 }
 
-/// Lê as camadas e devolve settings efetivos + quais arquivos foram encontrados.
-pub fn load(repo: &Path, default_branch: &str) -> (Settings, Vec<Layer>) {
+/// Um arquivo de settings: onde fica, o texto (se existe) e o formato.
+pub(crate) struct Source {
+    pub path: PathBuf,
+    pub text: Option<String>,
+    pub format: crate::settings_compat::Format,
+    /// Lido de `origin/<padrão>` (não do disco).
+    pub remote: bool,
+}
+
+impl Source {
+    pub fn file(path: PathBuf) -> Source {
+        let text = std::fs::read_to_string(&path).ok();
+        let format = if path.extension().is_some_and(|e| e == "json") { crate::settings_compat::Format::Json } else { crate::settings_compat::Format::Toml };
+        Source { path, text, format, remote: false }
+    }
+    pub fn read(&self) -> (Option<Settings>, Vec<SettingsWarning>) {
+        match &self.text {
+            Some(t) => crate::settings_compat::read(t, self.format, &self.path.display().to_string()),
+            None => (None, vec![]),
+        }
+    }
+}
+
+fn git_show(repo: &Path, spec: &str) -> Option<String> {
+    crate::shell::command("git").arg("-C").arg(repo).args(["show", spec]).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+}
+
+/// Caminhos (relativos ao repo) do JSON legado, na ordem em que são procurados.
+pub(crate) fn legacy_json_paths() -> [String; 2] {
+    let json = crate::compat::legacy_json();
+    [json.clone(), format!("{}/{json}", crate::compat::legacy_dir())]
+}
+
+/// Camadas compartilhada e local do repo. A compartilhada vem de `origin/<padrão>` (com fallback no
+/// disco); sem `settings.toml` compartilhado, vale o JSON legado (na raiz ou dentro da pasta legada). Como
+/// no app de origem, um `settings.toml` compartilhado marca o repo como migrado e o JSON deixa de ser lido.
+pub(crate) fn repo_sources(repo: &Path, default_branch: &str) -> [Source; 2] {
     let d = dir_for(repo);
     let shared_rel = format!("{d}/settings.toml");
-    let remote = crate::shell::command("git").arg("-C").arg(repo).args(["show", &format!("origin/{default_branch}:{shared_rel}")]).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
-    let layers: Vec<(String, PathBuf, Option<String>)> = vec![
-        ("usuário".into(), home().join(".kabul/settings.toml"), None),
-        (if remote.is_some() { format!("repo (origin/{default_branch})") } else { "repo".into() }, repo.join(&shared_rel), remote),
-        ("repo local".into(), repo.join(format!("{d}/settings.local.toml")), None),
-        ("gerenciado".into(), home().join(".kabul/settings.managed.toml"), None),
-    ];
+    let local = Source::file(repo.join(format!("{d}/settings.local.toml")));
+    let mut shared = Source::file(repo.join(&shared_rel));
+    if let Some(t) = git_show(repo, &format!("origin/{default_branch}:{shared_rel}")) {
+        shared.text = Some(t);
+        shared.remote = true;
+    }
+    if shared.text.is_none() {
+        for rel in legacy_json_paths() {
+            let remote = git_show(repo, &format!("origin/{default_branch}:{rel}"));
+            let mut src = Source::file(repo.join(&rel));
+            if let Some(t) = remote {
+                src.text = Some(t);
+                src.remote = true;
+            }
+            if src.text.is_some() {
+                shared = src;
+                break;
+            }
+        }
+    }
+    [shared, local]
+}
+
+/// Lê as camadas e devolve settings efetivos + quais arquivos foram encontrados (com os avisos de cada um).
+pub fn load(repo: &Path, default_branch: &str) -> (Settings, Vec<Layer>) {
+    let [shared, local] = repo_sources(repo, default_branch);
+    let shared_name = if shared.remote { format!("repo (origin/{default_branch})") } else { "repo".into() };
+    let layers: Vec<(String, Source)> =
+        vec![("usuário".into(), Source::file(home().join(".kabul/settings.toml"))), (shared_name, shared), ("repo local".into(), local), ("gerenciado".into(), Source::file(home().join(".kabul/settings.managed.toml")))];
     let mut s = Settings::default();
     let mut info = vec![];
-    for (name, path, content) in layers {
-        let text = content.or_else(|| std::fs::read_to_string(&path).ok());
-        info.push(Layer { name, path: path.display().to_string(), found: text.is_some() });
-        if let Some(t) = text {
-            if let Some(layer) = parse_toml(&t) {
-                s = merge(s, layer);
-            }
+    for (name, src) in layers {
+        let (layer, warnings) = src.read();
+        info.push(Layer { name, path: src.path.display().to_string(), found: src.text.is_some(), warnings });
+        if let Some(layer) = layer {
+            s = merge(s, layer);
         }
     }
     (s, info)
@@ -434,6 +596,25 @@ pub struct AppSettings {
     /// Canal de atualização: `stable` (padrão) ou `beta`.
     #[serde(default = "d_stable")]
     pub update_channel: String,
+
+    // ---- Navegador ----
+    /// MCP `kabul-browser` embutido em todas as conversas (o liga/desliga por sessão continua valendo).
+    #[serde(default = "d_true")]
+    pub browser_mcp: bool,
+    /// O que os agentes podem fazer sem perguntar: `ask`, `localhost` (padrão) ou `all`.
+    #[serde(default = "d_localhost")]
+    pub browser_policy: String,
+    /// Executável do navegador (vazio = o Chrome/Edge/Chromium instalado ou o baixado pelo Kabul).
+    #[serde(default)]
+    pub browser_path: Option<String>,
+    /// Claude Code com o Chrome do próprio usuário (`--chrome`, extensão Claude in Chrome). Alternativa
+    /// opcional; o padrão para todas as IAs é o navegador do Kabul.
+    #[serde(default)]
+    pub claude_chrome: bool,
+}
+
+fn d_localhost() -> String {
+    "localhost".into()
 }
 
 fn d_alert_pct() -> u32 {

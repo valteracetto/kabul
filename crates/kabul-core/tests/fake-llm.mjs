@@ -6,6 +6,7 @@
 //   [KABUL-ESCREVER <caminho> <conteúdo>]  chama a ferramenta de escrever arquivo do agente
 //   [KABUL-SHELL <comando>]                chama a ferramenta de shell do agente
 //   [KABUL-LEMBRAR]                        responde com os arquivos escritos antes na conversa
+//   [KABUL-BROWSER <url> <botão>]         navegador do Kabul: browser_navigate, browser_snapshot e browser_click no botão
 //
 // Depois de um resultado de ferramenta responde "feito". Qualquer outra coisa recebe "ok".
 // As ferramentas são achadas pelo nome e pelos parâmetros do esquema que o agente manda.
@@ -104,6 +105,44 @@ function decide(conv, ts) {
     if (direct) return { call: { name: direct.name, args: { texto: pendingMcp[2] } } };
     const found = (lastTool.toolResult ?? "").match(new RegExp(`"name"\\s*:\\s*"([^"]*${pendingMcp[1]}[^"]*)"`)) ?? (lastTool.toolResult ?? "").match(new RegExp(`\\b(mcp__[\\w-]*${pendingMcp[1]}[\\w-]*)`));
     if (found) return { call: { name: "tool_call", args: { name: found[1], arguments: { texto: pendingMcp[2] } } } };
+  }
+  // [KABUL-BROWSER <url> <texto do botão>]: navegador do Kabul em três passos: browser_navigate →
+  // browser_snapshot → browser_click na ref do botão achada no snapshot. Ferramentas adiadas (Claude
+  // `ToolSearch`, Qwen `tool_search`) são carregadas antes.
+  const bi = conv.findLastIndex((m) => m.role === "user" && /\[KABUL-BROWSER /.test(m.text ?? ""));
+  const bm = bi >= 0 && !conv.slice(bi + 1).some((m) => m.role === "user" && (m.text ?? "").replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim() && !/^\s*\[?Request interrupted/.test(m.text)) ? conv[bi].text.match(/\[KABUL-BROWSER (\S+) ([^\]]+)\]/) : null;
+  if (bm) {
+    const after = conv.slice(bi + 1);
+    // Chamada direta ou pela ponte do Qwen (`tool_call` com o nome nos argumentos); buscas não contam.
+    const called = (n) => after.findIndex((m) => (m.toolCalls ?? []).some((c) => String(c.name ?? "").includes(n) || (c.name === "tool_call" && String(c.args ?? "").includes(n))));
+    const resultAfter = (i) => after.slice(i + 1).find((m) => m.role === "tool")?.toolResult ?? "";
+    const find = (n) => ts.find((t) => t.name === n || t.sub === n || t.name.endsWith("__" + n) || t.name.endsWith("_" + n)) ?? ts.find((t) => t.name.includes(n));
+    const steps = ["browser_navigate", "browser_snapshot", "browser_click"];
+    const step = steps.findLastIndex((n) => called(n) >= 0) + 1;
+    if (step === 3) return { text: "feito: " + resultAfter(called("browser_click")).slice(0, 200) };
+    const want = steps[step];
+    let args = { url: bm[1] };
+    if (step === 1) args = {};
+    if (step === 2) {
+      // O resultado pode vir como JSON (aspas escapadas) conforme a API.
+      const re = new RegExp(`button \\\\?"${bm[2]}\\\\?"[^\\[]*(?:\\[(?!ref=)[^\\]]*\\][^\\[]*)*\\[ref=(e\\d+)\\]`);
+      const snap = resultAfter(called("browser_snapshot"));
+      const ref = snap.match(re)?.[1];
+      if (!ref) return { text: "sem ref para " + bm[2] + ": " + snap.slice(0, 300) };
+      args = { ref };
+    }
+    const t = find(want);
+    if (t) return { call: { name: t.name, ns: t.ns, sub: t.sub, args } };
+    const search = ts.find((x) => x.name === "ToolSearch" || x.name === "tool_search");
+    // Claude carrega as três de uma vez; o Qwen, uma por busca (pelo nome da ferramenta).
+    const searched = after.some((m) => (m.toolCalls ?? []).some((c) => c.name === search?.name && (search.name === "ToolSearch" || String(c.args ?? "").includes(want))));
+    if (search && !searched) return { call: { name: search.name, args: search.name === "ToolSearch" ? { query: "select:" + steps.map((n) => "mcp__kabul-browser__" + n).join(","), max_results: 5 } : { query: want } } };
+    // Qwen: depois do tool_search, chama pelo `tool_call` com o nome achado.
+    const callTool = ts.find((x) => x.name === "tool_call");
+    const lastRes = [...after].reverse().find((m) => m.role === "tool")?.toolResult ?? "";
+    const named = lastRes.match(new RegExp(`"name"\\s*:\\s*"([^"]*${want}[^"]*)"`)) ?? lastRes.match(new RegExp(`\\b(mcp__[\\w-]*${want})`));
+    if (callTool && (named || searched)) return { call: { name: "tool_call", args: { name: named?.[1] ?? `mcp__kabul-browser__${want}`, arguments: args } } };
+    return { text: "sem ferramenta " + want + ": " + ts.map((x) => x.name).join(",") };
   }
   if (last.role === "tool") return { text: "feito" };
   // Pedido = última mensagem do usuário com marcador; se a ferramenta já respondeu depois dele, acabou

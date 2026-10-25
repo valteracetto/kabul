@@ -397,3 +397,64 @@ async fn handshake_de_versao() {
     srv.stop();
     let _ = std::fs::remove_dir_all(home);
 }
+
+/// Arquivar pelo kabuld (celular): responde na hora com `archiving`, desfazer na janela não toca no
+/// disco, e o trabalho pesado termina em segundo plano (worktree fora, checkpoint para desarquivar).
+#[tokio::test(flavor = "multi_thread")]
+async fn arquivar_em_segundo_plano() {
+    std::env::set_var("KABUL_ARCHIVE_GRACE_MS", "1500");
+    let tok = kabuld::auth::random_token(4).to_lowercase();
+    let home = std::env::temp_dir().join(format!("kabuld-arq-it-{}-{tok}", std::process::id()));
+    let repo = home.join("repo");
+    // Nome único: o arquivamento mata as sessões `kabul-<nome>` do tmux do usuário.
+    let name = format!("arqit{}", tok.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>());
+    let wt = home.join("workspaces/repo").join(&name);
+    std::fs::create_dir_all(&repo).unwrap();
+    let g = |dir: &std::path::Path, a: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(dir).args(["-c", "user.name=t", "-c", "user.email=t@t"]).args(a).output().unwrap().status.success(), "{a:?}");
+    g(&repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("a.txt"), "um\n").unwrap();
+    g(&repo, &["add", "."]);
+    g(&repo, &["commit", "-qm", "i"]);
+    g(&repo, &["worktree", "add", "-q", "-b", &format!("t/{name}"), wt.to_str().unwrap()]);
+    std::fs::write(wt.join("a.txt"), "mudou\n").unwrap();
+    let state = json!({
+        "repos": [{"id": "r1", "name": "repo", "path": repo, "default_branch": "main"}],
+        "workspaces": [{"id": "w1", "repo_id": "r1", "name": name, "branch": format!("t/{name}"), "path": wt, "archived": false, "created_at": 0, "status": "in-progress", "state": "ready", "pinned": false, "notes": "", "port": 41000}]
+    });
+    std::fs::write(home.join("state.json"), state.to_string()).unwrap();
+    let cfg = kabuld::Config { port: free_port(), home: home.clone(), web_dir: None, tailscale: false, secrets: Arc::new(kabuld::secrets::MemStore::default()), monitor_ms: 300, assets: None };
+    let srv = kabuld::start(cfg).unwrap();
+    let (mut ws, _) = connect(srv.addrs[0].port(), None, None).await;
+    let list = |v: Value| v["value"][0].clone();
+
+    let t = std::time::Instant::now();
+    let r = call(&mut ws, 1, "workspace_archive", json!({"id": "w1"})).await;
+    assert!(t.elapsed() < Duration::from_millis(1000), "responde na hora: {:?}", t.elapsed());
+    assert_eq!((r["value"]["archived"].clone(), r["value"]["state"].clone()), (json!(true), json!("archiving")), "{r}");
+    assert_eq!(list(call(&mut ws, 2, "workspaces_list", json!({})).await)["archived"], true);
+    // Desfazer na janela: volta como estava, nada apagado.
+    let r = call(&mut ws, 3, "workspace_unarchive", json!({"id": "w1"})).await;
+    assert_eq!((r["value"]["archived"].clone(), r["value"]["state"].clone()), (json!(false), json!("ready")), "{r}");
+    assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap(), "mudou\n");
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+    assert!(wt.exists(), "o arquivamento desfeito não roda depois");
+
+    // De novo, até o fim: o worktree sai em segundo plano e o checkpoint fica para desarquivar.
+    call(&mut ws, 4, "workspace_archive", json!({"id": "w1"})).await;
+    let mut n = 5;
+    let done = loop {
+        let w = list(call(&mut ws, n, "workspaces_list", json!({})).await);
+        n += 1;
+        if w["state"] == "archived" || n > 200 {
+            break w;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    assert_eq!(done["state"], "archived", "{done}");
+    assert!(!wt.exists());
+    let r = call(&mut ws, 999, "workspace_unarchive", json!({"id": "w1"})).await;
+    assert_eq!(r["value"]["state"], "ready", "{r}");
+    assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap(), "mudou\n");
+    drop(srv);
+    let _ = std::fs::remove_dir_all(&home);
+}

@@ -1,5 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { addRepo } from "./helpers";
+import { test, expect, type Page } from "../playwright-silencio";
+import { addRepo, navTo } from "./helpers";
 
 // Avisos do React que indicam loop de setState ou setState durante o render. Qualquer um reprova.
 const RUIM = /Maximum update depth exceeded|Cannot update a component .* while rendering|Too many re-renders/;
@@ -30,7 +30,7 @@ test("console sem loop de render: workspace, aba nova, configurações, Painel e
   await page.waitForTimeout(500);
   await page.getByTestId("settings").click();
   await page.waitForTimeout(300);
-  await page.getByRole("button", { name: "Painel" }).click();
+  await navTo(page, "sessions");
   await page.waitForTimeout(300);
   await page.getByTestId("create-ws").click();
   await page.waitForTimeout(300);

@@ -1,4 +1,4 @@
-import { test } from "@playwright/test";
+import { test } from "../playwright-silencio";
 import { writeFileSync } from "node:fs";
 // Renderiza palavras em Geist em vários tamanhos/pesos (2x) para medir a largura da tinta e calibrar contra a referência.
 const WORDS = (process.env.CAL_WORDS ?? "Thinking").split("|");

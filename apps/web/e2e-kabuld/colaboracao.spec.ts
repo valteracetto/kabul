@@ -1,4 +1,4 @@
-import { test, expect, devices, type Browser, type Page } from "@playwright/test";
+import { test, expect, devices, type Browser, type Page } from "../playwright-silencio";
 import { startKabuld, wsAction, wsMenu, type Kabuld } from "./helpers";
 
 // Colaboração em tempo real: Ana (dona, pareada pelo QR), Bia (editora, por convite) e Caio

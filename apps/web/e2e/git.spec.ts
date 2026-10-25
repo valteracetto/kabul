@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
 import { addRepo } from "./helpers";
 
 const host = (page: Page) => page.locator(".ws-host:not([hidden])");
@@ -102,5 +102,6 @@ test("arquivar com agente rodando: parar e arquivar; fechar o PR junto", async (
   await page.getByTestId("confirm-check").check();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("ws-row")).toHaveCount(0);
-  expect(await page.evaluate(() => (window as any).__mock.db.pr[(window as any).__mock.db.workspaces[0].id].state)).toBe("CLOSED");
+  // O PR fecha no segundo plano, junto com o resto do arquivamento.
+  await expect.poll(() => page.evaluate(() => (window as any).__mock.db.pr[(window as any).__mock.db.workspaces[0].id].state)).toBe("CLOSED");
 });

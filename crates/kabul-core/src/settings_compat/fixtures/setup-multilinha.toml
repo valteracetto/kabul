@@ -1,0 +1,7 @@
+# Scripts › "Setup scripts": setup em várias linhas.
+[scripts]
+setup = """
+pnpm install
+cp "$LEGACY_ROOT_PATH/.env" .env
+pnpm run build
+"""

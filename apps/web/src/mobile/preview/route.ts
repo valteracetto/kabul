@@ -1,9 +1,9 @@
 /**
  * Rotas do preview na hash da PWA (o resto do app usa `#s=<sessão>`):
- * `#f=<workspace>&t=files|changes|app` (lista), `&p=<arquivo>&l=<linha>` (preview), `&d=<arquivo>`
+ * `#f=<workspace>&t=files|changes|app|browser` (lista), `&p=<arquivo>&l=<linha>` (preview), `&d=<arquivo>`
  * (diff). `from=<sessão>` lembra de onde veio (voltar e "perguntar sobre isto" no mesmo chat).
  */
-export type Tab = "files" | "changes" | "app";
+export type Tab = "files" | "changes" | "app" | "browser";
 export interface FilesRoute { ws: string; tab: Tab; path: string | null; diff: string | null; line: number | null; from: string | null }
 
 export function filesRoute(hash = location.hash): FilesRoute | null {
@@ -12,7 +12,7 @@ export function filesRoute(hash = location.hash): FilesRoute | null {
   if (!ws) return null;
   const t = q.get("t");
   const line = Number(q.get("l"));
-  return { ws, tab: t === "changes" || t === "app" ? t : "files", path: q.get("p"), diff: q.get("d"), line: Number.isFinite(line) && line > 0 ? line : null, from: q.get("from") };
+  return { ws, tab: t === "changes" || t === "app" || t === "browser" ? t : "files", path: q.get("p"), diff: q.get("d"), line: Number.isFinite(line) && line > 0 ? line : null, from: q.get("from") };
 }
 
 export function filesHash(r: Partial<FilesRoute> & { ws: string }): string {

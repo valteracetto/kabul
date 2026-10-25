@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
+import { navTo } from "./helpers";
 
 test("atalhos personalizados: gravar, conflito, a tecla nova abre e a antiga não; restaurar; fixos não editam", async ({ page }) => {
   // O gravador (keymap.ts) lê "⌘" como Ctrl fora do macOS, mas os handlers do app ainda ouvem só o
@@ -27,7 +28,7 @@ test("atalhos personalizados: gravar, conflito, a tecla nova abre e a antiga nã
   await expect(side.getByTestId("sc-conflict")).toContainText("Já usado por");
   await page.keyboard.press("Meta+Alt+y");
   await expect(side.getByTestId("sc-record")).toHaveText("⌥⌘Y");
-  await page.locator(".side-nav button", { hasText: "Painel" }).click();
+  await navTo(page, "sessions");
   await page.keyboard.press("Meta+b");
   await expect(page.getByTestId("sidebar")).toBeVisible();
   await page.keyboard.press("Meta+Alt+y");
@@ -44,7 +45,7 @@ test("atalhos personalizados: gravar, conflito, a tecla nova abre e a antiga nã
   await page.getByTestId("sc-palette").getByTestId("sc-reset").click();
   await expect(page.getByTestId("sc-palette").getByTestId("sc-record")).toHaveText("⌘K");
   await page.getByTestId("sc-sidebar").getByTestId("sc-reset").click();
-  await page.locator(".side-nav button", { hasText: "Painel" }).click();
+  await navTo(page, "sessions");
   await page.keyboard.press("Meta+k");
   await expect(page.getByTestId("palette")).toBeVisible();
   await page.keyboard.press("Escape");

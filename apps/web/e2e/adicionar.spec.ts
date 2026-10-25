@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 
 test("Adicionar projeto: abrir do GitHub (lista da conta, URL, progresso, erro legível), início rápido; o repo fica selecionado", async ({ page }) => {
   await page.goto("/?mock");

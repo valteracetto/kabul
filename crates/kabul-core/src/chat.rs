@@ -28,6 +28,19 @@ pub struct Prepared {
     pub kind: HarnessKind,
     pub opts: SessionOptions,
     pub note: Option<String>,
+    /// Navegador do Kabul: arquivo que, enquanto existir, deixa o navegador só leitura (modo plano).
+    /// Quem troca o modo ao vivo cria/apaga ([`set_plan_flag`]).
+    pub plan_flag: Option<std::path::PathBuf>,
+}
+
+/// Modo plano do navegador desta conversa (ao trocar de modo sem reiniciar o agente).
+pub fn set_plan_flag(flag: &Path, plan: bool) {
+    if plan {
+        let _ = std::fs::create_dir_all(flag.parent().unwrap_or(Path::new(".")));
+        let _ = std::fs::write(flag, b"plan");
+    } else {
+        let _ = std::fs::remove_file(flag);
+    }
 }
 
 /// Monta as opções da sessão para o workspace. `home` é a pasta de estado do Kabul.
@@ -45,6 +58,9 @@ pub fn prepare(home: &Path, w: &Workspace, r: &Repo, model: &Model, req: &ChatRe
         endpoint = Some(local::prepare(&src, &lm, key)?);
     }
     let set = AppSettings::load(&home.join("app-settings.json"));
+    let plan = req.plan.unwrap_or(false);
+    // Preferências do repo (Claude: prompt geral; navegador: domínios do projeto).
+    let (rs, _) = crate::settings::load(Path::new(&r.path), &r.default_branch);
     let mut env = w.full_env(r);
     env.extend(set.env_for(k.binary()));
     // Conta escolhida para esta conversa (perfil com config isolada); sem escolha, a padrão do provedor.
@@ -56,7 +72,14 @@ pub fn prepare(home: &Path, w: &Workspace, r: &Repo, model: &Model, req: &ChatRe
     // MCP: registro único (todas as configs nativas) menos o que a sessão/repo desligou. A mesma lista vale
     // em qualquer harness, inclusive ao trocar de LLM na conversa (cada início passa por aqui).
     let off = req.disabled_mcp.clone().unwrap_or_default();
-    let all = crate::mcp_share::shared(Path::new(&w.path), Path::new(&r.path));
+    let mut all = crate::mcp_share::shared(Path::new(&w.path), Path::new(&r.path));
+    // Navegador do Kabul: embutido para todas as IAs (some se o usuário desligar em Configurações).
+    let plan_flag = set.browser_mcp.then(|| home.join("browser").join("plan").join(crate::store::now_nanos().to_string()));
+    if let Some(f) = &plan_flag {
+        set_plan_flag(f, plan);
+        all.extend(crate::mcp_share::builtin(home, &w.id, Some(f), &rs.browser_hosts));
+    }
+    let browser_on = set.browser_mcp && !off.iter().any(|n| n == crate::browser::mcp::NAME);
     let mcp = crate::mcp_share::plan(k, &all, &off, &crate::mcp_share::Prefs::load(home));
     let (mcp_config, mcp_strict) = match k {
         HarnessKind::Claude => match crate::mcp_share::claude_config(&mcp, &home.join("mcp"))? {
@@ -75,9 +98,7 @@ pub fn prepare(home: &Path, w: &Workspace, r: &Repo, model: &Model, req: &ChatRe
     }
     let disabled_mcp = mcp.disable_native.clone();
     let h = k.harness();
-    let plan = req.plan.unwrap_or(false);
     // Claude: estilo de saída (Configurações › Modelos) e preferências gerais do repo (› Ações).
-    let (rs, _) = crate::settings::load(Path::new(&r.path), &r.default_branch);
     let settings_json = (k == HarnessKind::Claude && set.claude_output_style != "default" && !set.claude_output_style.is_empty()).then(|| serde_json::json!({ "outputStyle": set.claude_output_style }).to_string());
     let system_prompt = if k == HarnessKind::Claude { rs.prompts.general.clone().filter(|g| !g.trim().is_empty()) } else { None };
     let opts = SessionOptions {
@@ -107,9 +128,13 @@ pub fn prepare(home: &Path, w: &Workspace, r: &Repo, model: &Model, req: &ChatRe
         env,
         settings_json,
         system_prompt,
+        // As ferramentas do navegador têm aprovação própria no Kabul (política em Configurações ›
+        // Navegador): o Claude não pergunta de novo a cada clique.
+        allowed_tools: if k == HarnessKind::Claude && browser_on { vec![format!("mcp__{}", crate::browser::mcp::NAME)] } else { vec![] },
+        chrome: k == HarnessKind::Claude && set.claude_chrome,
         ..Default::default()
     };
-    Ok(Prepared { kind: k, opts, note })
+    Ok(Prepared { kind: k, opts, note, plan_flag })
 }
 
 /// Prepara e inicia a sessão.

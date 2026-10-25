@@ -307,6 +307,11 @@ pub struct SessionOptions {
     pub settings_json: Option<String>,
     /// Claude: `--append-system-prompt` (preferências gerais do repo).
     pub system_prompt: Option<String>,
+    /// Claude: ferramentas liberadas sem perguntar (`--allowedTools`), ex. as do `kabul-browser`, que
+    /// têm aprovação própria no Kabul.
+    pub allowed_tools: Vec<String>,
+    /// Claude: `--chrome` (Claude in Chrome, com o Chrome do próprio usuário).
+    pub chrome: bool,
 }
 
 /// Variável que aponta o executável de um agente (Configurações › Avançado): `KABUL_BIN_CLAUDE` etc.

@@ -21,6 +21,9 @@ request comparam.
 (lado a lado com `⌘D`). Cada conversa tem modelo, conta, modo (padrão, plano, aceitar edições, aprovar tudo) e
 uma fila para as mensagens mandadas enquanto o agente trabalha.
 
+**Navegador.** Cada workspace tem o seu Chromium isolado, mostrado ao vivo na aba Browser (`⌘⇧B`) e
+controlado por todos os agentes pelo MCP embutido `kabul-browser`. Veja [Navegador](./navegador.md).
+
 **Harness.** O agente de linha de comando que roda um modelo: Claude Code, Codex, Antigravity, Gemini CLI, Qwen
 Code, OpenCode, Goose ou outro agente [ACP](../../acp.md). O Kabul conduz o CLI de verdade, então você mantém o
 comportamento, as atualizações e as configurações dele. Modelos locais vão para o harness escolhido pelo

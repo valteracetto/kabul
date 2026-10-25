@@ -14,6 +14,11 @@ pub fn legacy_dir() -> String {
     format!(".{}", legacy())
 }
 
+/// Arquivo JSON legado de configuração do repo (ex.: `<nome>.json`, na raiz ou dentro da pasta legada).
+pub fn legacy_json() -> String {
+    format!("{}.json", legacy())
+}
+
 /// Prefixo legado das variáveis (`<NOME>_`), exportado junto com `KABUL_`.
 pub fn legacy_env_prefix() -> String {
     format!("{}_", legacy().to_uppercase())

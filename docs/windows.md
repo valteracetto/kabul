@@ -80,6 +80,36 @@ destacada.
 | CodexBar CLI (fonte opcional de limites) | lido quando instalado (PATH, `/Applications` ou `~/Applications`); link quebrado do Homebrew aparece em "Fontes" | só existe no macOS: a fonte não aparece (limites vêm do stream dos agentes, do app-server do Codex e da assinatura do Claude) | `usage/limits.rs` |
 | Limites da assinatura do Claude | credencial do Claude Code no Keychain (`Claude Code-credentials`, com sufixo do sha256 da pasta em contas com `CLAUDE_CONFIG_DIR`) via `/usr/bin/security` | arquivo `.credentials.json` da pasta de config (`%USERPROFILE%\.claude` ou o `CLAUDE_CONFIG_DIR` da conta). A testar no Windows real: se o Claude Code ainda grava o arquivo ali | `usage/claude_oauth.rs` |
 
+## Navegador do Kabul
+
+O navegador por workspace (`kabul_core::browser`, ver [guia](pt-BR/guia/navegador.md)) foi escrito para os
+dois sistemas, mas **só foi rodado no macOS**:
+
+| | macOS | Windows | Onde |
+|---|---|---|---|
+| Achar o navegador | Chrome, Chromium, Edge, Brave, Chrome for Testing em `/Applications` e `~/Applications` | `Google\Chrome\Application\chrome.exe`, depois `Microsoft\Edge\Application\msedge.exe`, depois Chromium e Brave, em `%ProgramFiles%`, `%ProgramFiles(x86)%` e `%LOCALAPPDATA%` | `browser::candidates` (testado com caminhos falsos dos dois sistemas) |
+| Perfil isolado | `~/Library/Application Support/kabul/browser/<ws>/profile` | `%APPDATA%\kabul\browser\<ws>\profile` | `browser::Dirs` |
+| Processo do Chromium | grupo próprio (`process_group(0)`): sobrevive ao agente que o abriu | `CREATE_NO_WINDOW \| CREATE_NEW_PROCESS_GROUP \| DETACHED_PROCESS` | `browser::launch` |
+| Descoberta entre processos | `DevToolsActivePort` no perfil + `launch.lock` | o mesmo | `browser::{running, ensure}` |
+| Gravação dos arquivos de estado | arquivo temporário + `rename` | se o `rename` falhar (destino aberto), apaga e tenta de novo | `browser::write_atomic` |
+| Baixar o navegador | `unzip` do sistema, tira a quarentena (`xattr`) | `tar -xf` do sistema (bsdtar, Windows 10 1803+), pacote `win64`/`win32` | `browser::install` |
+| Extensão Claude in Chrome | `NativeMessagingHosts/com.anthropic.claude_code_browser_extension.json` do Chrome/Edge | `reg query HKCU\Software\{Google\Chrome,Microsoft\Edge}\NativeMessagingHosts\com.anthropic.claude_code_browser_extension` | `browser::claude_chrome_available` |
+| Servidor MCP | o executável do app/kabuld/CLI com `mcp browser …` | o mesmo (`.exe`); caminho com espaços vai como um item de `args`/`command`, sem shell | `mcp_share::builtin` |
+
+A conferir numa máquina Windows de verdade:
+
+- abrir o Chrome/Edge headless com `--user-data-dir` em `%APPDATA%` (caminho com espaço no nome do usuário) e
+  ler o `DevToolsActivePort`;
+- Edge ou Chrome com políticas corporativas (`RemoteDebuggingAllowed=false`) bloqueiam a porta do DevTools: o
+  erro "o navegador não abriu o DevTools em 20 s" deveria apontar isso, e a saída é o `chrome-headless-shell`
+  baixado ou um caminho em Configurações › Navegador;
+- antivírus segurando o executável baixado em `%APPDATA%\kabul\browser\bin` (primeira execução lenta ou
+  bloqueada);
+- o processo destacado continuar vivo depois que o agente (Codex, Gemini CLI…) que o abriu sai, e o
+  `Browser.close` do "Fechar navegador" encerrar a árvore inteira;
+- a consulta ao registro (`reg.exe`) para a extensão do Claude;
+- o screencast e a entrada de teclado com layout ABNT2 (teclas mortas e `AltGr` chegam como `text`?).
+
 ## O que falta
 
 - **Sessões do PTY sobrevivendo ao app.** Hoje morrem com o processo. Falta um servidor de sessões

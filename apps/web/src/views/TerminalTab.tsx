@@ -7,6 +7,15 @@ import type { WebglAddon } from "@xterm/addon-webgl";
 import { api, type TermInfo, type Workspace } from "../api";
 import { cssVar, effectiveTheme } from "../theme";
 import { noSuggest } from "../noSuggest";
+import { lastLocalUrl, openBrowser } from "../components/browser";
+
+/** Últimas `n` linhas do buffer do terminal, em texto. */
+function tail(term: Terminal, n: number): string {
+  const b = term.buffer.active;
+  const out: string[] = [];
+  for (let i = Math.max(0, b.length - n); i < b.length; i++) out.push(b.getLine(i)?.translateToString(true) ?? "");
+  return out.join("\n");
+}
 
 /** Paleta ANSI medida (normal/bright) para o tema escuro e o claro. */
 const ANSI = {
@@ -94,7 +103,9 @@ function create(key: string, info: TermInfo, ws: Workspace, el: HTMLDivElement, 
     if (e.code === "KeyF" && !e.shiftKey) return (e.preventDefault(), l.onFind(), false);
     if (e.code === "KeyK" && !e.shiftKey) return (e.preventDefault(), term.clear(), api.termInput(info.session, info.pane, "\x0c").catch(() => {}), false);
     if (e.code === "KeyR" && !e.shiftKey) return (e.preventDefault(), void api.runScript(ws.id, "run").catch((x) => onError(String(x))), false);
-    if (e.code === "KeyB" && e.shiftKey) return (e.preventDefault(), void api.openExternal(`http://localhost:${ws.port}`).catch(() => {}), false);
+    // ⌘⇧B: a última URL local que apareceu no terminal (ex. "Local: http://localhost:5173/") na aba Browser do
+    // Kabul; sem nenhuma, a porta do workspace.
+    if (e.code === "KeyB" && e.shiftKey) return (e.preventDefault(), openBrowser(ws.id, lastLocalUrl(tail(term, 400)) ?? `http://localhost:${ws.port}`), false);
     return true;
   });
   const retheme = () => (term.options.theme = termTheme());
@@ -141,7 +152,7 @@ function webgl(l: Live) {
 /**
  * Terminal ligado a uma sessão tmux por stream (cliente `tmux -C` no backend): a tela inicial vem
  * de um snapshot e o resto chega como eventos `term-output`. Digitação vai por send-keys -H.
- * Com o foco no terminal: ⌘F busca, ⌘K limpa, ⌘R roda o run script, ⌘⇧B abre o localhost da porta.
+ * Com o foco no terminal: ⌘F busca, ⌘K limpa, ⌘R roda o run script, ⌘⇧B abre o último localhost na aba Browser.
  */
 export function TerminalTab({ ws, session, visible, initialCommand, gpu = false, onError }: { ws: Workspace; session?: string | null; visible: boolean; initialCommand?: string; gpu?: boolean; onError: (e: string) => void }) {
   const host = useRef<HTMLDivElement>(null);

@@ -1,0 +1,8 @@
+# Scripts › topo da página e "Legacy single action": scripts.run como texto.
+"$schema" = "https://example.invalid/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "pnpm install"
+run = "pnpm dev --port $LEGACY_PORT"
+archive = "./script/workspace-archive.sh"
+run_mode = "concurrent"

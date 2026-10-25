@@ -6,6 +6,26 @@ and [Conventional Commits](https://www.conventionalcommits.org); this file is ge
 
 Todas as mudanças relevantes do Kabul ficam aqui (SemVer + Conventional Commits, gerado pelo git-cliff).
 
+## [0.10.0] - 2026-10-25
+
+### Features · Novidades
+
+- **browser:** Kabul's own browser per workspace, shared by every AI: a Chromium with an isolated profile per workspace (cookies and logins never cross workspaces), driven over the DevTools Protocol and exposed as the `kabul-browser` MCP to Claude, Codex, Gemini, OpenCode, Qwen, Goose and the ACP agents (accessibility snapshot with refs, click, type, keys, tabs, screenshot, console, network, viewport). A **Browser** tab shows the page live with mouse and keyboard, the agent that is controlling it and **Take control**; approvals for sites outside localhost/project domains and for JavaScript; Settings › Browser; plan mode keeps it read only; the phone shows a live, read-only capture. `kabul browser` and `kabul mcp browser` in the CLI.
+- **workspaces:** archiving is instant: the workspace leaves the list right away with **Undo**, and the checkpoint, worktree removal (moved to a trash folder on the same volume and deleted in the background) and archive script run in the background on desktop, phone, `kabul serve` and the CLI; a failure brings the workspace back with **Try again**. From ~5 s with the list frozen to under 1 ms (`docs/perf/arquivar.json`).
+- **desktop:** leaner sidebar: one row with **New workspace** (⌘N) and **Search** (⌘K), an **Overview** entry (Agents · Board · Dashboard) with the active-agent count, and a footer with the tightest usage limit and a **More** menu (Home, Routines, Local models, Usage); the command palette reaches every destination.
+- **settings:** tolerant reading of `.kabul/settings.toml`: a field with the wrong type becomes a warning (file, key and reason) in Settings › Scripts and Diagnostics while the rest of the layer still applies; the legacy settings dialect is understood (text globs, single run script, `[environment_variables]`, `[[preview_urls]]`, `[git]`, old prompt names, legacy JSON), with **Import legacy settings** (preview first, never overwrites). Files to copy follow `.env*`, `file_include_globs`, `.worktreeinclude` in that order, so `!` negation works.
+- **cli:** `kabul repo add <path>...` adds several repositories at once (skips folders that aren't git repositories or are already in Kabul; a subfolder adds the whole repository) and `kabul repo ls` lists them (`--json`); both honor `KABUL_HOME`/`--home`. An open desktop app shows the new repositories without restarting.
+
+### Fixes · Correções
+
+- **desktop:** the app re-reads `state.json` when another writer (the embedded kabuld serving the phone, a standalone kabuld, the CLI) changes it: the list updates by itself and the app never overwrites a workspace archived or renamed elsewhere with its stale copy. Desktop and kabuld use the same `SharedStore` (mtime, size and inode of the file).
+- **browser:** links clicked inside the page, form submissions, key presses, server redirects and links that open another tab now go through the approval policy too (the navigation is paused in the browser with CDP `Fetch` before the request leaves; denied, the page stays where it was and a popup is closed). Before, only direct navigation asked.
+- **browser:** a single **Take control** button in the Browser tab while an agent is controlling it (it showed twice).
+- **tests:** no test speaks or plays sound on the machine running it: speech synthesis and media are stubbed in every Playwright suite and Chromium runs with `--mute-audio` (the controls audit clicked "Read aloud" and macOS read the mock reply out loud).
+
+O app relê o `state.json` quando o celular/kabuld muda algo (sem sobrescrever com estado velho); links clicados
+dentro da página do navegador passam pela política de aprovação; um só botão "Assumir controle".
+
 ## [0.9.0] - 2026-10-25
 
 First public release. It summarizes everything built before the project adopted Conventional Commits; from

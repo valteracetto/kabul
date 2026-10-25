@@ -1,5 +1,5 @@
-import { addRepo } from "./helpers";
-import { test, expect, type Page } from "@playwright/test";
+import { addRepo, navTo } from "./helpers";
+import { test, expect, type Page } from "../playwright-silencio";
 
 const shot = (page: Page, name: string) => page.screenshot({ path: `../../.context/e2e/${name}.png` });
 
@@ -187,14 +187,14 @@ test("roteiro completo de um usuário (backend mock)", async ({ page }) => {
   });
 
   await test.step("17 modelos locais", async () => {
-    await page.locator(".side-nav button", { hasText: "Modelos locais" }).click();
+    await navTo(page, "local");
     await expect(page.getByTestId("source")).toHaveCount(2);
     await expect(page.getByTestId("local-page")).toContainText("Qwen3 8B");
     await shot(page, "17-locais");
   });
 
   await test.step("18 painel de sessões", async () => {
-    await page.locator(".side-nav button", { hasText: "Painel" }).click();
+    await navTo(page, "sessions");
     await expect(page.locator(".page table").first()).toContainText("kabul-kabul");
     await shot(page, "18-painel");
   });

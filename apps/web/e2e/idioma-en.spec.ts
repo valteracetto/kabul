@@ -1,5 +1,5 @@
-import { addRepo } from "./helpers";
-import { test, expect, type Page } from "@playwright/test";
+import { addRepo, navTo, type NavDest } from "./helpers";
+import { test, expect, type Page } from "../playwright-silencio";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -99,11 +99,12 @@ test("desktop em inglês: início, workspace, configurações, uso, sessões, ag
     await expectEnglish(page, `configurações › ${await tab.getAttribute("data-testid")}`, errors);
   }
 
-  for (const nav of ["nav-usage", "nav-agents", "nav-dashboard", "nav-routines"]) {
-    const b = page.getByTestId(nav);
-    if (!(await b.count())) continue;
-    await b.click();
-    await expectEnglish(page, nav, errors);
+  // Painel (sessões) fica de fora: o mock traz dados de CLIs em português.
+  const screens: [NavDest, string][] = [["usage", "[data-testid=usage-view]"], ["agents", "[data-testid=agents-view]"], ["dashboard", "[data-testid=dashboard]"], ["routines", "[data-testid=routines]"], ["local", "[data-testid=local-page]"], ["home", ".home"]];
+  for (const [nav, sel] of screens) {
+    await navTo(page, nav);
+    await expect(page.locator(sel)).toBeVisible();
+    await expectEnglish(page, `nav ${nav}`, errors);
   }
 
   await page.keyboard.press("Meta+k");

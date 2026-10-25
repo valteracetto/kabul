@@ -1,5 +1,5 @@
-import { addRepo } from "./helpers";
-import { test, expect, type Page } from "@playwright/test";
+import { addRepo, navTo } from "./helpers";
+import { test, expect, type Page } from "../playwright-silencio";
 
 /**
  * Auditoria de controles: clica em cada botão visível das telas principais e exige efeito
@@ -52,7 +52,7 @@ test("nenhum botão sem efeito nas telas principais", async ({ page }) => {
     await page.getByTestId(`set-tab-${tab}`).click();
     dead.push(...(await audit(page, `config/${tab}`, ".page", /Remover|Desconectar|Instalar|Entrar/i)));
   }
-  await page.locator(".side-nav button", { hasText: "Modelos locais" }).click();
+  await navTo(page, "local");
   dead.push(...(await audit(page, "modelos-locais", ".page", /Baixar|Instalar|Remover|Restaurar padrão/i)));
   console.log(dead.join("\n") || "todos os botões têm efeito");
   expect(dead, dead.join("\n")).toEqual([]);

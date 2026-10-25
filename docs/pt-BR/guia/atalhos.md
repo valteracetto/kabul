@@ -63,6 +63,7 @@ No Windows, `⌘` será `Ctrl`. A mesma lista está em **Configurações › Ata
 | `⌘⇧T` | Reabrir a aba fechada (ou novo terminal) |
 | `⌃Tab / ⌃⇧Tab` | Próxima / anterior aba (também ⌘⇧] / ⌘⇧[) |
 | `⌘D` | Dividir com a próxima aba / desfazer a divisão |
+| `⌘⇧B` | Aba Browser (navegador do workspace, compartilhado com os agentes) |
 
 ### Chat
 
@@ -113,6 +114,6 @@ No Windows, `⌘` será `Ctrl`. A mesma lista está em **Configurações › Ata
 | `⌘F` | Buscar no terminal (com o foco nele) |
 | `⌘K` | Limpar o terminal |
 | `⌘R` | Rodar o run script |
-| `⌘⇧B` | Abrir o localhost da porta do workspace |
+| `⌘⇧B` | Abrir o último localhost do terminal na aba Browser |
 
 <!-- shortcuts:end -->

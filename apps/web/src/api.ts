@@ -37,9 +37,13 @@ export interface FileChange { path: string; added: number | null; removed: numbe
 export interface Diff { base: string; base_ref: string; stat: string; patch: string }
 export interface DiffComment { id: string; workspace_id: string; path: string; line: number; end_line: number | null; body: string; resolved: boolean; created_at: number }
 export interface Checkpoint { id: string; commit: string; head: string; message: string; created_at: number }
-export interface RunScript { command: string; default: boolean; icon: string | null; available_in: string[] | null }
-export interface RepoSettingsT { scripts: { setup: string | null; archive: string | null; run_mode: string | null; run: Record<string, RunScript> }; file_include_globs: string[]; target_branch: string | null; base_branch?: string | null; remote?: string | null; delete_branch_on_archive?: boolean | null; archive_on_merge?: boolean | null; env?: Record<string, string>; prompts?: Prompts; preview_url?: string | null }
-export interface Layer { name: string; path: string; found: boolean }
+export interface RunScript { command: string; default: boolean; icon: string | null; available_in: string[] | null; args?: string[]; options?: { cwd?: string | null } | null; hide?: boolean | null }
+export interface RepoSettingsT { scripts: { setup: string | null; archive: string | null; run_mode: string | null; run: Record<string, RunScript> }; file_include_globs: string[]; target_branch: string | null; base_branch?: string | null; remote?: string | null; delete_branch_on_archive?: boolean | null; archive_on_merge?: boolean | null; env?: Record<string, string>; prompts?: Prompts; preview_url?: string | null; preview_urls?: { name?: string | null; url: string }[]; browser_hosts?: string[] }
+/** Configuração que não foi lida (o resto do arquivo vale). `kind`: syntax, type, value, unknown, unsupported, app_setting, cloud. */
+export interface SettingsWarning { file: string; key: string; kind: string; expected?: string | null; found?: string | null; detail?: string | null }
+export interface Layer { name: string; path: string; found: boolean; warnings?: SettingsWarning[] }
+/** Prévia de "Importar configurações": nada é gravado até `repoSettingsImport` receber o mesmo `digest`. */
+export interface ImportPreview { available: boolean; source: string; files: { source: string; target: string; content: string }[]; warnings: SettingsWarning[]; digest: string }
 export interface PrOptions { title: string; body: string; draft: boolean; labels: string[]; stack_on: number | null; dry_run: boolean }
 export interface PrResult { url: string | null; commands: string[]; dry_run: boolean }
 export interface LocalModel { id: string; name: string; source: string; size_bytes: number | null; quant: string | null; params: string | null; context: number | null; loaded: boolean }
@@ -60,7 +64,25 @@ export interface AppSettings {
   tray?: boolean; tray_icon?: TrayIconPrefs; usage_alert_pct?: number; usage_daily_budget?: number | null; usage_monthly_budget?: number | null; usage_codexbar?: boolean;
   /** Configurações › Avançado › Atualizações. */
   auto_update?: boolean; update_channel?: string; schema_version?: number;
+  /** Configurações › Navegador. */
+  browser_mcp?: boolean; browser_policy?: BrowserPolicy; browser_path?: string | null; claude_chrome?: boolean;
 }
+/** Navegador do Kabul (um Chromium por workspace, compartilhado entre o humano e os agentes). */
+export type BrowserPolicy = "ask" | "localhost" | "all";
+export interface BrowserBinary { path: string; kind: string; shell: boolean }
+export interface BrowserTabInfo { id: string; url: string; title: string; active: boolean }
+export interface BrowserViewport { width: number; height: number; mobile: boolean; scale: number }
+export interface BrowserAction { at: number; agent: string; tool: string; detail: string; ok: boolean }
+export interface BrowserApproval { id: string; kind: "navigate" | "evaluate"; detail: string; agent: string; at: number; workspaceId?: string }
+export interface BrowserStatus {
+  running: boolean; binary: BrowserBinary | null; profile: string; tabs: BrowserTabInfo[]; url: string | null; title: string | null;
+  viewport: BrowserViewport; paused: boolean; agent: BrowserAction | null; actions: BrowserAction[]; approvals: BrowserApproval[]; policy: BrowserPolicy;
+}
+export interface BrowserFrame { workspace: string; data: string | null; width?: number; height?: number; url?: string }
+export type BrowserInput =
+  | { type: "mouse"; kind: "down" | "up" | "move" | "wheel"; x: number; y: number; button?: "left" | "right" | "middle"; clicks?: number; dx?: number; dy?: number; modifiers?: number }
+  | { type: "key"; kind: "down" | "up"; key: string; code?: string; text?: string; modifiers?: number; keyCode?: number }
+  | { type: "text"; text: string };
 /** Versão do app instalado e se o updater roda (só no app empacotado). */
 export interface AppVersion { version: string; protocol: number; channel: string; updater: boolean; releases_url?: string }
 /** `size` em bytes; `release_url` é a página da release (notas completas). */
@@ -156,6 +178,8 @@ export const api = {
   removeRepo: (id: string) => c<void>("repo_remove", { id }),
   repoSettings: (repoId: string) => c<{ settings: RepoSettingsT; layers: Layer[] }>("repo_settings", { repoId }),
   saveRepoSettings: (repoId: string, settings: RepoSettingsT) => c<string>("repo_settings_save", { repoId, settings }),
+  repoSettingsImportPreview: (repoId: string) => c<ImportPreview>("repo_settings_import_preview", { repoId }),
+  repoSettingsImport: (repoId: string, digest: string) => c<string[]>("repo_settings_import", { repoId, digest }),
 
   workspaces: () => c<Workspace[]>("workspaces_list"),
   createWorkspace: (repoId: string) => c<Workspace>("workspace_create", { repoId }),
@@ -164,7 +188,8 @@ export const api = {
   autoBranch: (workspaceId: string, text: string) => c<Workspace | null>("workspace_auto_branch", { workspaceId, text }),
   archiveWorkspace: (id: string, closePr = false) => c<void>("workspace_archive", { id, closePr }),
   unarchiveWorkspace: (id: string) => c<Workspace>("workspace_unarchive", { id }),
-  onWorkspaceState: (h: (p: { id: string; state: string }) => void) => transport.subscribe("workspace-state", h),
+  /** Mudança de estado do workspace (setup, arquivar). `error` + `action: "archive"`: o arquivamento em segundo plano falhou e o workspace voltou. */
+  onWorkspaceState: (h: (p: { id: string; state: string; error?: string; action?: string }) => void) => transport.subscribe("workspace-state", h),
 
   diff: (workspaceId: string) => c<Diff>("workspace_diff", { workspaceId }),
   changes: (workspaceId: string, scope: DiffScope = "all") => c<FileChange[]>("workspace_changes", { workspaceId, scope }),
@@ -328,6 +353,24 @@ export const api = {
   onUpdateProgress: (h: (p: UpdateProgress) => void) => transport.subscribe("update-progress", h),
   openExternal: (target: string) => c<void>("open_external", { target }),
   transcribe: (audio: number[], ext: string) => c<string>("transcribe", { audio, ext }),
+
+  browserStatus: (workspaceId: string) => c<BrowserStatus>("browser_status", { workspaceId }),
+  browserOpen: (workspaceId: string, url: string | null = null) => c<BrowserStatus>("browser_open", { workspaceId, url }),
+  browserNav: (workspaceId: string, action: "goto" | "back" | "forward" | "reload" | "stop", url: string | null = null) => c<string>("browser_nav", { workspaceId, action, url }),
+  browserInput: (workspaceId: string, event: BrowserInput) => c<void>("browser_input", { workspaceId, event }),
+  browserTab: (workspaceId: string, action: "new" | "close" | "select", id: string | null = null, url: string | null = null) => c<BrowserStatus>("browser_tab", { workspaceId, action, id, url }),
+  browserResize: (workspaceId: string, preset: "desktop" | "laptop" | "tablet" | "mobile") => c<BrowserViewport>("browser_resize", { workspaceId, preset }),
+  browserScreenshot: (workspaceId: string, quality = 60) => c<BrowserFrame | null>("browser_screenshot", { workspaceId, quality }),
+  /** Só no app desktop: quadros ao vivo no evento `browser-frame`. Sem o comando (kabuld/web), o chamador cai para o polling. */
+  browserScreencast: (workspaceId: string, on: boolean, maxWidth = 1600, maxHeight = 1200) => c<void>("browser_screencast", { workspaceId, on, maxWidth, maxHeight }),
+  onBrowserFrame: (h: (f: BrowserFrame) => void) => transport.subscribe("browser-frame", h),
+  browserControl: (workspaceId: string, paused: boolean) => c<{ paused: boolean; at: number }>("browser_control", { workspaceId, paused }),
+  browserApprove: (workspaceId: string, id: string, allow: boolean, always = false) => c<void>("browser_approve", { workspaceId, id, allow, always }),
+  browserPending: () => c<BrowserApproval[]>("browser_pending", {}),
+  browserStop: (workspaceId: string) => c<boolean>("browser_stop", { workspaceId }),
+  browserClear: (workspaceId: string) => c<void>("browser_clear", { workspaceId }),
+  browserInstall: () => c<string>("browser_install", {}),
+  browserInfo: () => c<{ claudeChrome: boolean; binary: BrowserBinary | null }>("browser_info", {}),
 
   usageOverview: (days = 30) => c<UsageOverview>("usage_overview", { days }),
   usageRefresh: () => c<LimitsSnapshot>("usage_refresh"),

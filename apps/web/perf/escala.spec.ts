@@ -1,4 +1,4 @@
-import { test, expect, type Page, type CDPSession } from "@playwright/test";
+import { test, expect, type Page, type CDPSession } from "../playwright-silencio";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { dirname, join } from "node:path";

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { canWrite, k } from "../kabuld";
 import { base, dir, files, type Scope } from "./api";
 import { AppTab } from "./AppTab";
+import { BrowserView } from "./BrowserView";
 import { AskSheet } from "./Ask";
 import { ChangesList, DiffView } from "./Diff";
 import { fileList, useFileSet } from "./hooks";
@@ -15,7 +16,7 @@ import { trError } from "../../i18n/errors";
 export { filesRoute, openFile, openFiles } from "./route";
 export { ChangedChips, chatFileOpener, FilesButton, useFileTaps } from "./ChatLinks";
 
-const tabs = (): [Tab, string][] => [["files", t("mobile.pv.files")], ["changes", t("mobile.pv.changes")], ["app", t("mobile.pv.appTab")]];
+const tabs = (): [Tab, string][] => [["files", t("mobile.pv.files")], ["changes", t("mobile.pv.changes")], ["app", t("mobile.pv.appTab")], ["browser", t("mobile.pv.browserTab")]];
 
 /**
  * Arquivos de um workspace no celular: árvore com busca, alterações com diff, preview de cada tipo,
@@ -83,6 +84,8 @@ export function FilesScreen({ route }: { route: FilesRoute }) {
           <ChangesList ws={ws} scope={scope} onScope={(s) => (setScope(s), sessionStorage.setItem("kabul.pv.scope", s))} onOpen={(c) => go({ ws, diff: c.path, from })} />
         ) : tab === "app" ? (
           <AppTab ws={ws} />
+        ) : tab === "browser" ? (
+          <BrowserView ws={ws} />
         ) : list ? (
           <Tree ws={ws} list={list} changed={changed} onOpen={(p) => open(p)} />
         ) : (

@@ -1,5 +1,5 @@
 /* i18n-ignore-file: capturas da demonstração. */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../playwright-silencio";
 import { BASE, composeCollab, frame, prepare, shot } from "./frame";
 
 // iPhone 15 Pro (WebKit), PWA em tela cheia, inglês, tema escuro. Cru em .context/demo/raw/iphone-*.png;

@@ -63,6 +63,7 @@ On Windows, `⌘` will be `Ctrl`. The same list is in **Settings › Shortcuts**
 | `⌘⇧T` | Reopen closed tab (or new terminal) |
 | `⌃Tab / ⌃⇧Tab` | Next / previous tab (also ⌘⇧] / ⌘⇧[) |
 | `⌘D` | Split with the next tab / unsplit |
+| `⌘⇧B` | Browser tab (the workspace's browser, shared with the agents) |
 
 ### Chat
 
@@ -113,6 +114,6 @@ On Windows, `⌘` will be `Ctrl`. The same list is in **Settings › Shortcuts**
 | `⌘F` | Find in terminal (when focused) |
 | `⌘K` | Clear terminal |
 | `⌘R` | Run the run script |
-| `⌘⇧B` | Open the workspace's localhost port |
+| `⌘⇧B` | Open the terminal's last localhost URL in the Browser tab |
 
 <!-- shortcuts:end -->

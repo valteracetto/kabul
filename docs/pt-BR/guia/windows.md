@@ -49,6 +49,10 @@ Os processos de fundo (git, gh, agentes) abrem sem janela de console.
   Cursor) precisam do Git Bash; faltam os equivalentes em PowerShell / winget.
 - **Ditado** precisa do `ffmpeg` e do `whisper-cli.exe` instalados à mão.
 - **Ícones** do "Abrir em" não aparecem (o menu mostra as iniciais).
+- **Navegador do Kabul:** acha o Chrome ou o Edge em `Program Files` / `%LOCALAPPDATA%`, guarda o perfil em
+  `%APPDATA%\kabul\browser\<workspace>\profile` e roda destacado, sem janela de console, mas ainda não foi
+  testado numa máquina Windows de verdade. Políticas corporativas que desligam a depuração remota bloqueiam
+  o navegador; use o navegador baixado (Configurações › Navegador) ou aponte outro executável.
 - A fonte opcional de uso **CodexBar** só existe no macOS; os limites continuam vindo dos próprios agentes.
 - Ainda não conferido em máquina real: caminhos longos e CRLF nos worktrees, e algumas pastas dos CLIs.
 

@@ -1,5 +1,5 @@
 /* i18n-ignore-file: clipes da landing page (não é interface do app). */
-import { test, expect, type Page, type Locator } from "@playwright/test";
+import { test, expect, type Page, type Locator } from "../playwright-silencio";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -198,7 +198,8 @@ test.describe(() => {
     await twoTurns(p, "Push notification settings", "Sketch the settings screen.", "Looks right, wire up the toggles.");
     await twoTurns(p, "Rate limiting for /v2", "Is the middleware ready?", "Run the migration and wire it in.");
     await expect(chat(p).locator(".approval")).toBeVisible();
-    await p.getByTestId("nav-agents").click();
+    await p.getByTestId("nav-overview").click();
+    await p.getByTestId("ov-agents").click();
     await expect(p.getByTestId("agent-row").first()).toBeVisible();
     // Sem a barra lateral: a tabela inteira (até a coluna de custo) cabe no quadro.
     await p.getByRole("button", { name: /^Hide sidebar/ }).click();

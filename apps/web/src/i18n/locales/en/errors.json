@@ -113,5 +113,13 @@
   "errors.ctxKeychain": "system keychain",
   "errors.ctxLoadingModel": "loading the model",
   "errors.noResponseCodexbar": "unexpected output from claude auth status",
-  "errors.ghNoAccess": "Missing GitHub access: the active account can't access {slug}"
+  "errors.ghNoAccess": "Missing GitHub access: the active account can't access {slug}",
+  "errors.browserNoBinary": "No Chrome, Edge or Chromium found. Install one or download Kabul's browser in Settings › Browser (kabul browser install).",
+  "errors.browserApprovalGone": "approval request not found (expired?)",
+  "errors.browserUnknownCmd": "unknown browser command",
+  "errors.browserExited": "the browser exited on startup",
+  "errors.browserNoDevtools": "the browser did not open DevTools within 20 s",
+  "errors.browserUnzip": "could not unpack the downloaded browser",
+  "errors.browserNoBack": "there is no previous page",
+  "errors.browserNoForward": "there is no next page"
 }

@@ -1,5 +1,5 @@
 import { addRepo } from "./helpers";
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
 
 // Rodapé do turno no formato do Val, igual em pt-BR e em inglês: "2m, 21s · 23:36" e "45s" abaixo de 1 min
 // (nunca "2 min 21 s" nem "11:36 PM"). A árvore de subagentes mostra "2m 21s" nos dois idiomas.

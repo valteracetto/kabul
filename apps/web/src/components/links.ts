@@ -2,7 +2,8 @@
 export type KabulLink =
   | { kind: "workspace"; id: string; session: string | null }
   | { kind: "create"; repo: string | null; path: string | null; branch: string | null; prompt: string | null; linear: string | null }
-  | { kind: "settings"; tab: string | null };
+  | { kind: "settings"; tab: string | null }
+  | { kind: "browser"; url: string | null; workspace: string | null };
 
 export function parseKabulLink(url: string): KabulLink | null {
   const m = /^kabul:\/\/([a-z-]+)\/?(?:\?(.*))?$/i.exec(url.trim());
@@ -13,6 +14,8 @@ export function parseKabulLink(url: string): KabulLink | null {
     case "workspace": return g("id") ? { kind: "workspace", id: g("id")!, session: g("session") } : null;
     case "create": case "new": return { kind: "create", repo: g("repo"), path: g("path"), branch: g("branch"), prompt: g("prompt"), linear: g("linear_id") };
     case "settings": return { kind: "settings", tab: g("tab") };
+    // kabul://browser?url=<url>[&workspace=<id>]: aba Browser do workspace (o aberto, se não disser qual).
+    case "browser": return { kind: "browser", url: g("url"), workspace: g("workspace") ?? g("ws") ?? g("id") };
     default: return null;
   }
 }

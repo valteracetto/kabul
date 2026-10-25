@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Locator } from "@playwright/test";
+import { test, expect, type Page, type Locator } from "../playwright-silencio";
 import { mkdirSync } from "node:fs";
 
 /**
@@ -93,7 +93,8 @@ test("hero: workspaces em paralelo, aprovação e diff", async ({ page: p }) => 
   await shot(p, "hero");
 
   // Painel Agentes: todos os ativos, com a árvore de subagentes da fila offline aberta.
-  await p.getByTestId("nav-agents").click();
+  await p.getByTestId("nav-overview").click();
+  await p.getByTestId("ov-agents").click();
   await expect(p.getByTestId("agent-row").first()).toBeVisible();
   await p.waitForTimeout(2500);
   for (const row of await p.getByTestId("agent-row").all()) {
@@ -105,7 +106,8 @@ test("hero: workspaces em paralelo, aprovação e diff", async ({ page: p }) => 
   await shot(p, "agents");
 
   // Board: workspaces por status.
-  await p.getByTestId("nav-dashboard").click();
+  await p.getByTestId("nav-overview").click();
+  await p.getByTestId("ov-dashboard").click();
   await p.waitForTimeout(1500);
   await shot(p, "workspaces");
 });

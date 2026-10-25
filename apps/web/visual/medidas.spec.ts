@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
 import { addRepo } from "../e2e/helpers";
 
 // Medidas do Kabul (px CSS) para comparar com os valores medidos na referência. Imprime JSON.
@@ -6,7 +6,7 @@ const SEL: Record<string, string> = {
   topbar: ".ws-host:not([hidden]) .topbar",
   sideTop: ".side-top",
   machine: ".machine-btn",
-  navBtn: ".side-nav button",
+  navBtn: ".side-entry",
   groupLabel: ".side-group-head, .group-head",
   repoRow: ".repo-row",
   wsRow: ".ws-row",

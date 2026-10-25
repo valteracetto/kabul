@@ -99,3 +99,5 @@
 .pv-app .m-tabs { flex: none; display: flex; gap: 8px; padding: 10px 16px; }
 .pv-app .m-tabs button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; padding: 7px 14px; background: var(--m-fill-2); color: var(--m-label); font-size: 15px; }
 .pv-app .m-tabs button.on { background: var(--m-label); color: var(--m-bg); font-weight: 600; }
+.pv-browser { display: flex; flex-direction: column; gap: 6px; }
+.pv-browser-img { display: block; width: 100%; height: auto; }

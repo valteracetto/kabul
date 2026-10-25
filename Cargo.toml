@@ -4,7 +4,7 @@ members = ["crates/kabul-core", "crates/kabul-cli", "crates/kabuld", "apps/deskt
 
 [workspace.package]
 edition = "2021"
-version = "0.9.0"
+version = "0.10.0"
 
 [workspace.dependencies]
 anyhow = "1"

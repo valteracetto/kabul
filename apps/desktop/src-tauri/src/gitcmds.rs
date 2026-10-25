@@ -66,7 +66,7 @@ pub async fn pr_view(app: State<'_, App>, workspace_id: String) -> R<Option<PrIn
 }
 
 #[tauri::command]
-pub async fn pr_merge(app: State<'_, App>, workspace_id: String, dry_run: Option<bool>) -> R<Outcome> {
+pub async fn pr_merge(handle: tauri::AppHandle, app: State<'_, App>, workspace_id: String, dry_run: Option<bool>) -> R<Outcome> {
     let (w, r) = ws_repo(&app, &workspace_id)?;
     let set = app.app_settings();
     let out = gitops::pr_merge(&w, &set.merge_method, false, dry(&app, dry_run)).map_err(e)?;
@@ -75,7 +75,19 @@ pub async fn pr_merge(app: State<'_, App>, workspace_id: String, dry_run: Option
         let (rs, _) = settings::load(Path::new(&r.path), &r.default_branch);
         let archive = rs.archive_on_merge.unwrap_or(set.archive_on_merge);
         let delete = rs.delete_branch_on_archive.unwrap_or(set.delete_branch_on_archive);
-        app.store.lock().unwrap().after_merge(&workspace_id, archive, delete).map_err(e)?;
+        // Arquivar depois do merge: o mesmo caminho em segundo plano do botão Arquivar.
+        let plan = {
+            let mut st = app.store.lock().unwrap();
+            let w = st.update_workspace(&workspace_id, |x| x.status = "done".into()).map_err(e)?;
+            if archive && !w.archived {
+                Some(st.begin_archive(&workspace_id, delete).map_err(e)?)
+            } else {
+                None
+            }
+        };
+        if let Some(p) = plan {
+            crate::start_archive(&handle, p, kabul_core::archive::Options::app());
+        }
     }
     Ok(out)
 }

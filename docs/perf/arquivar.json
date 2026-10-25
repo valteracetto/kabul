@@ -1,0 +1,25 @@
+{
+  "bench": "cargo run -p kabul-core --example archive_bench (KABUL_BENCH_FASES=1 para as fases)",
+  "data": "2026-10-25",
+  "maquina": "MacBook (12 núcleos, APFS), com outros builds rodando ao mesmo tempo",
+  "workspace": { "tamanho_mb": 1508, "rastreados": 15000, "ignorados": 80120, "ignorados_pastas": ["node_modules/ (~1,0 GB, 80 mil arquivos)", "target/ (~0,2 GB)"], "mudancas": "50 rastreados alterados, 20 novos, .context/" },
+  "antes": {
+    "usuario_espera_s": [5.15, 4.96, 5.04],
+    "lista_travada_ate_s": [5.15, 4.96, 5.04],
+    "fases_s": { "checkpoint": 0.67, "git_worktree_remove": 4.72 },
+    "obs": "tudo síncrono, com o mutex do estado preso do começo ao fim; no app ainda somavam gh pr close e o script de archive"
+  },
+  "depois": {
+    "some_da_lista_ms": [0.33, 0.37, 0.41, 0.47],
+    "lista_travada_ate_ms": [0.33, 0.36, 0.39, 0.45],
+    "segundo_plano": {
+      "janela_desfazer_s": 5,
+      "pasta_fora_do_lugar_s_apos_janela": [0.34, 0.49, 0.58, 0.62],
+      "lixeira_apagada_s_apos_janela": [4.47, 4.67],
+      "obs": "rename para <workspaces>/.kabul-trash (mesmo volume) e rm -rf com QoS utility + nice 10; o lixo que sobrar é apagado na próxima abertura"
+    },
+    "fases_s": { "checkpoint": [0.36, 0.42, 0.47], "worktree_para_a_lixeira": [0.0008, 0.0009] },
+    "chamada_sincrona_s": [0.31, 0.34, 0.47, 0.58],
+    "obs": "chamada síncrona = Store::archive_workspace_opts (CLI/testes); o app, o kabuld e o kabul serve usam begin_archive + archive::spawn"
+  }
+}

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
 import { addRepo } from "./helpers";
 
 // "Procurar atualizações…": botão no rodapé da barra lateral, ⌘K, menu nativo (Kabul › / Ajuda ›) e barra

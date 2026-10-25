@@ -1,5 +1,5 @@
-import { addRepo } from "./helpers";
-import { test, expect, type Page } from "@playwright/test";
+import { addRepo, navTo } from "./helpers";
+import { test, expect, type Page } from "../playwright-silencio";
 
 const chat = (page: Page) => page.locator(".ws-host:not([hidden]) .center-body:not([hidden])");
 
@@ -13,7 +13,7 @@ test("recursos: chip com a memória, popover com CPU/Memória, árvore ordenáve
   await chat(page).getByTestId("composer").fill("oi");
   await chat(page).getByTestId("composer").press("Enter");
   await expect(chat(page).locator(".turn-meta")).toHaveCount(1);
-  await page.locator(".side-nav button", { hasText: "Início" }).click();
+  await navTo(page, "home");
 
   const chip = page.getByTestId("res-chip");
   await expect(chip).toContainText(/\d\.\d\d GB/);

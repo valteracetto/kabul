@@ -31,6 +31,7 @@
   { "id": "reopen", "keys": "⌘⇧T", "cat": "tabs", "pt": "Reabrir a aba fechada (ou novo terminal)", "en": "Reopen closed tab (or new terminal)" },
   { "id": "tab-next", "keys": "⌃Tab / ⌃⇧Tab", "cat": "tabs", "pt": "Próxima / anterior aba (também ⌘⇧] / ⌘⇧[)", "en": "Next / previous tab (also ⌘⇧] / ⌘⇧[)" },
   { "id": "split", "keys": "⌘D", "cat": "tabs", "pt": "Dividir com a próxima aba / desfazer a divisão", "en": "Split with the next tab / unsplit" },
+  { "id": "browser", "keys": "⌘⇧B", "cat": "tabs", "pt": "Aba Browser (navegador do workspace, compartilhado com os agentes)", "en": "Browser tab (the workspace's browser, shared with the agents)" },
   { "id": "send", "keys": "↵ / ⇧↵", "cat": "chat", "pt": "Enviar / nova linha (ou ⌘↵, nas configurações)", "en": "Send / new line (or ⌘↵, in settings)" },
   { "id": "focus", "keys": "⌘L", "cat": "chat", "pt": "Focar o campo de mensagem", "en": "Focus the composer" },
   { "id": "attach", "keys": "⌘U", "cat": "chat", "pt": "Anexar arquivo", "en": "Attach file" },
@@ -61,5 +62,5 @@
   { "id": "term-find", "keys": "⌘F", "cat": "terminal", "pt": "Buscar no terminal (com o foco nele)", "en": "Find in terminal (when focused)" },
   { "id": "term-clear", "keys": "⌘K", "cat": "terminal", "pt": "Limpar o terminal", "en": "Clear terminal" },
   { "id": "term-run", "keys": "⌘R", "cat": "terminal", "pt": "Rodar o run script", "en": "Run the run script" },
-  { "id": "term-local", "keys": "⌘⇧B", "cat": "terminal", "pt": "Abrir o localhost da porta do workspace", "en": "Open the workspace's localhost port" }
+  { "id": "term-local", "keys": "⌘⇧B", "cat": "terminal", "pt": "Abrir o último localhost do terminal na aba Browser", "en": "Open the terminal's last localhost URL in the Browser tab" }
 ]

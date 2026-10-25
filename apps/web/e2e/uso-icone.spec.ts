@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
 
 // Uso: bloco por provedor/conta mesmo sem dados (Claude), fonte do CodexBar com link quebrado, e a escolha do
 // que vai no ícone da barra de menus (automático, manual até 3, alfinete, estilo, gasto do dia).

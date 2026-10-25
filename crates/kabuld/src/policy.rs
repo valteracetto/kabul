@@ -24,6 +24,9 @@ const GUEST_READ: &[&str] = &[
     "file_list",
     "file_url",
     "proxy_ports",
+    // Navegador do workspace só para ver (captura atualizada).
+    "browser_status",
+    "browser_screenshot",
 ];
 
 /// Escrita liberada ao editor convidado.

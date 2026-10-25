@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "../playwright-silencio";
 
 const settings = (page: Page) => page.evaluate(() => (window as any).__mock.db.settings);
 

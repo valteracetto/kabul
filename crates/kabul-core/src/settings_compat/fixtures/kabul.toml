@@ -1,0 +1,22 @@
+# O exemplo de docs/guide/scripts.md (formato do Kabul): nenhum aviso.
+target_branch = "main"
+base_branch = "develop"
+remote = "origin"
+file_include_globs = ["config/*.local.json"]
+preview_url = "http://localhost:$KABUL_PORT"
+
+[scripts]
+setup = "npm install"
+archive = "docker compose down"
+run_mode = "concurrent"
+
+[scripts.run.web]
+command = "npm run dev -- --port $KABUL_PORT"
+default = true
+
+[env]
+API_URL = "http://localhost:$((KABUL_PORT+1))"
+
+[prompts]
+review = "Focus on security."
+general = "Answer in English and run the tests before saying you are done."

@@ -23,6 +23,7 @@
   "mobile.home.pin": "Pin",
   "mobile.home.restore": "Restore",
   "mobile.home.archive": "Archive",
+  "mobile.home.archiveFailed": "Couldn't archive {name}: {error}\n\nTry again?",
   "mobile.home.new": "New activity",
   "mobile.home.archived": "archived",
   "mobile.home.invite": "Invite",
@@ -295,5 +296,8 @@
   },
   "mobile.pv.showMore": "Show more ({n} remaining)",
   "mobile.pv.badJson": "Invalid JSON ({error}): showing the text.",
-  "mobile.pv.more": "{n} more"
+  "mobile.pv.more": "{n} more",
+  "mobile.pv.browserTab": "Browser",
+  "mobile.pv.browser.closed": "This workspace's browser is closed on the computer.",
+  "mobile.pv.browser.readOnly": "Read only: the page you and the agents are using on the computer, refreshed every second and a half."
 }

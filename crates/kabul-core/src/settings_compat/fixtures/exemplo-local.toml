@@ -1,0 +1,13 @@
+# Exemplo de settings › settings.local.toml.
+"$schema" = "https://example.invalid/schemas/settings.repo.schema.json"
+
+[scripts]
+run_mode = "concurrent"
+
+[scripts.run.dev]
+command = "pnpm dev --host 127.0.0.1 --port $LEGACY_PORT"
+default = true
+icon = "play"
+
+[environment_variables]
+ANTHROPIC_BASE_URL = "http://127.0.0.1:4000"
