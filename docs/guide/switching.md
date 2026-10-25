@@ -13,6 +13,9 @@ Typical reasons:
 
 ## What happens when you switch
 
+![One conversation that went from Claude Code to Codex to Antigravity, with a divider at each switch](../assets/switch-llm.png)
+![Model picker with Claude, GPT and Gemini in the same chat](../assets/model-picker.png)
+
 - **Same harness, same account:** the agent's own session resumes (`--resume` or equivalent). Nothing is lost.
 - **Different harness:** Kabul closes the current segment of the [transcript](./concepts.md), shows a divider
   in the chat ("Switched to Gemini · Antigravity") and starts the new agent with a **handoff**. It is plain

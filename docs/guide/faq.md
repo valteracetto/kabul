@@ -58,11 +58,11 @@ after installing a CLI. You can also point to a specific binary in **Settings �
 records each session (command, arguments and environment variable names, never values). **Help › Diagnostics**
 checks your tools and copies a report without personal data.
 
-**macOS says Kabul can't be opened.** A build that is not notarized yet: right-click › **Open** once, or allow
-it in System Settings › Privacy & Security.
+**macOS says Kabul can't be opened.** A build that is not notarized yet: try to open it once, then go to
+System Settings › Privacy & Security › **Open Anyway**.
 
 **The phone can't install the app or get notifications.** It needs HTTPS: turn on **HTTPS** in **Settings ›
-Phone and remote** and enable MagicDNS and HTTPS certificates in your tailnet.
+Phone & remote** and enable MagicDNS and HTTPS certificates in your tailnet.
 
 **Can I use my existing settings files?** Yes. Kabul reads `.kabul/settings.toml` and also understands the
 common layout used by other worktree tools.

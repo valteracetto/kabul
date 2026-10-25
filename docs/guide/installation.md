@@ -33,8 +33,8 @@ in **Settings › Advanced**.
 
 ### First launch and updates
 
-If a build is not notarized by Apple yet, macOS blocks the first launch. Right-click Kabul in Applications ›
-**Open**, or go to System Settings › Privacy & Security › **Open Anyway**. You only need to do this once.
+If a build is not notarized by Apple yet, macOS blocks the first launch. Try to open Kabul once, then go to
+System Settings › Privacy & Security › **Open Anyway**. You only need to do this once.
 
 Kabul checks for updates by itself and installs signed updates. Pick the **stable** or **beta** channel in
 the settings.

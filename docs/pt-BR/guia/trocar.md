@@ -13,6 +13,9 @@ Motivos comuns:
 
 ## O que acontece na troca
 
+![Uma conversa que passou do Claude Code para o Codex e para o Antigravity, com um divisor em cada troca](../../assets/switch-llm.png)
+![Seletor de modelo com Claude, GPT e Gemini na mesma conversa](../../assets/model-picker.png)
+
 - **Mesmo harness, mesma conta:** a sessão do próprio agente é retomada (`--resume` ou equivalente). Nada se perde.
 - **Outro harness:** o Kabul fecha o trecho atual do [transcript](./conceitos.md), mostra um divisor na conversa
   ("Trocou para Gemini · Antigravity") e inicia o agente novo com um **handoff**. É só texto, então funciona em

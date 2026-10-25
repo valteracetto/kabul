@@ -15,20 +15,6 @@ English · [Português](README.pt-BR.md)
   <a href="https://valteracetto.github.io/kabul/"><img alt="Docs" src="https://img.shields.io/badge/docs-English%20%C2%B7%20Portugu%C3%AAs-8A2BE2"></a>
 </p>
 
-<!--
-TODO(screenshots): these images are placeholders. Replace them with captures taken from a demo
-environment (sample repositories, `dev` user, no real accounts, tokens, e-mails or paths):
-  1. docs/assets/hero.png  (2880×1800, dark theme): three workspaces running in the sidebar (Claude Code,
-     Codex, Gemini), the chat with a tool approval card open, the diff panel with a line comment, and the
-     model picker showing Claude, GPT and Gemini side by side.
-  2. docs/assets/mobile.png (two iPhone captures side by side, 1179×2556 each): the session list grouped by
-     workspace with "Waiting for you", and a chat with the approval sheet (Deny / Approve).
-  3. docs/assets/demo.gif (≤ 8 MB, ~20 s, 1280 px wide): create a workspace from a prompt → agent works →
-     switch from Claude to Gemini in the same chat (the "Switched to" divider) → review the diff → Create PR.
-  Also useful for the docs site: the "Switched to …" divider, the invite dialog (editor/observer) with two
-  avatars, the Usage tab with limit bars, the menu bar popover, the MCP panel, the Agents panel with 30
-  agents, and the Android (Material) version of the phone app.
--->
 <p align="center">
   <img src="docs/assets/hero.png" alt="Kabul: parallel workspaces, chat with approvals and the diff side by side" width="900">
 </p>
@@ -52,6 +38,10 @@ transcript, independent of any harness, and hands off to the new agent: the late
 them, the tools used, the diff of the branch and your `.context/` notes. Same worktree, same
 branch, checkpoints keep going. A divider in the chat shows exactly where it happened.
 
+<p align="center">
+  <img src="docs/assets/switch-llm.png" alt="One conversation that went from Claude Code to Codex to Antigravity, with a divider at each switch and the PR checks green" width="900">
+</p>
+
 ### 3. Work with a friend at the same time, and from your phone
 
 Invite someone into a workspace as **editor** or **observer**. You both see the agent stream live, send
@@ -62,6 +52,10 @@ the files, and pings you when an agent needs a decision.
 
 <p align="center">
   <img src="docs/assets/mobile.png" alt="Kabul on the phone: sessions waiting for you and an approval sheet" width="600">
+</p>
+<p align="center">
+  <img src="docs/assets/collab.png" alt="Paired devices for two people and an editor invite with a QR code" width="440">
+  <img src="docs/assets/collab-mobile.png" alt="Two people in the same chat on iPhone and Android, with presence avatars and an approval made by the other person" width="440">
 </p>
 
 ## Why Kabul
@@ -79,8 +73,9 @@ Kabul is local-first and open source. Your code stays on your machine; the agent
 already pay for, with the logins you already have. Kabul never reads your tokens.
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="Create a workspace, switch from Claude to Gemini in the same chat, review and open the PR" width="900">
+  <img src="docs/assets/demo.gif" alt="Create a workspace from a prompt, let Claude work, switch to Codex in the same chat, approve a command and open the PR" width="900">
 </p>
+<p align="center"><sub>Create a workspace → Claude works → switch to Codex in the same chat → approve → open the PR (<a href="docs/assets/demo.mp4">MP4</a>).</sub></p>
 
 ## Features
 
@@ -145,6 +140,18 @@ the focused workspace first. Measured budgets run in CI.
 codes and per-device keys stored in the system keychain, scopes guests to one workspace, and serves previews
 in a sandbox. Secrets never go on a command line. [Threat model](docs/security.md).
 
+### Screenshots
+
+| | |
+|---|---|
+| <img src="docs/assets/agents.png" alt="Agents panel: every running chat across workspaces, with subagent trees, tokens and cost" width="440"><br><sub>**Agents**: every chat in every workspace, with its subagents</sub> | <img src="docs/assets/usage.png" alt="Usage tab: spend today and this month, limit bars per account and a cost-per-day chart" width="440"><br><sub>**Usage**: cost per day, limits per account, a nudge before you hit one</sub> |
+| <img src="docs/assets/model-picker.png" alt="Model picker with Claude, GPT and Gemini side by side in the same chat" width="440"><br><sub>**Model picker**: Claude, GPT and Gemini in the same chat</sub> | <img src="docs/assets/mcp.png" alt="Session MCP panel: servers from Claude Code and Codex, tools and tokens per turn, and the tokens saved" width="440"><br><sub>**MCP**: one registry for every AI, and the tokens you save per turn</sub> |
+| <img src="docs/assets/workspaces.png" alt="Board with workspaces by status: backlog, in progress, in review, done" width="440"><br><sub>**Board**: workspaces by status</sub> | <img src="docs/assets/menubar.png" alt="Menu bar popover with spend, limits and the agents running now" width="300"><br><sub>**Menu bar**: limits and running agents at a glance</sub> |
+| <img src="docs/assets/mobile-preview.png" alt="Phone: file preview with syntax highlight and the model picker" width="440"><br><sub>**Phone**: files with preview, model picker</sub> | <img src="docs/assets/mobile-android.png" alt="Android (Material 3): session list and a chat that switched models" width="440"><br><sub>**Android**: Material 3, same app</sub> |
+| <img src="docs/assets/switch-llm-light.png" alt="Light theme: the same conversation across three models" width="440"><br><sub>**Light theme**</sub> | <img src="docs/assets/usage-light.png" alt="Light theme: Usage tab" width="440"><br><sub>**Light theme**: Usage</sub> |
+
+<sub>All screenshots come from a demo environment with made-up data (`npm run demo:capture` in `apps/web`).</sub>
+
 ## Supported agents
 
 ✅ confirmed by running the installed CLI through Kabul · ◐ partial · ❔ not confirmed yet · — not available
@@ -183,8 +190,8 @@ brew install git tmux gh
 3. Open Kabul and sign in to your agents and GitHub in **Settings › Accounts**. Kabul runs each CLI's own
    login; it never sees your password or reads your tokens.
 
-If a build is not notarized yet, macOS blocks the first launch: right-click Kabul › **Open**, or allow it in
-System Settings › Privacy & Security. The app updates itself (stable and beta channels).
+If a build is not notarized yet, macOS blocks the first launch: try to open Kabul once, then go to
+System Settings › Privacy & Security and click **Open Anyway** (needed only once). The app updates itself (stable and beta channels).
 
 ### Windows (beta)
 
@@ -216,7 +223,7 @@ cd ../desktop && npx tauri build
    and send the comments back to the agent.
 5. **Ship.** **Create PR** (`⌘⇧P`), watch the checks, let the agent fix failures, merge and archive.
 
-Then turn on **Settings › Phone and remote** to pair your phone with a QR code. Full walkthrough in the
+Then turn on **Settings › Phone & remote** to pair your phone with a QR code. Full walkthrough in the
 [quick start](docs/guide/quick-start.md).
 
 ## FAQ

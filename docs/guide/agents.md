@@ -27,6 +27,8 @@ You pick the model; Kabul picks the harness. For local models, the [family regis
 
 ## Compatibility
 
+![Agents panel: every running chat across workspaces, with subagent trees, tokens and cost](../assets/agents.png)
+
 ✔ confirmed by running the installed CLI through Kabul · ◐ partly · ? not confirmed yet. Details in [ACP](../acp.md).
 
 | Agent | Chat | Tools | Approvals | Plan mode | Stop | Resume | Accounts | Phone | Local model |

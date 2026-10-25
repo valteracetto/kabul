@@ -15,11 +15,6 @@
   <a href="https://valteracetto.github.io/kabul/pt-BR/"><img alt="Documentação" src="https://img.shields.io/badge/docs-Portugu%C3%AAs%20%C2%B7%20English-8A2BE2"></a>
 </p>
 
-<!--
-TODO(capturas): as imagens abaixo são provisórias. Trocar por capturas de um ambiente de demonstração
-(repositórios de exemplo, usuário `dev`, sem contas, tokens, e-mails ou caminhos reais). A lista completa
-está no README.md (inglês): hero.png, mobile.png e demo.gif.
--->
 <p align="center">
   <img src="docs/assets/hero.png" alt="Kabul: workspaces em paralelo, chat com aprovações e o diff lado a lado" width="900">
 </p>
@@ -43,6 +38,10 @@ depende de harness, e passa o bastão para o agente novo: as últimas mensagens 
 ferramentas usadas, o diff da branch e as suas notas em `.context/`. Mesmo worktree, mesma branch, os
 checkpoints continuam. Um divisor no chat mostra onde a troca aconteceu.
 
+<p align="center">
+  <img src="docs/assets/switch-llm.png" alt="Uma conversa que passou do Claude Code para o Codex e depois para o Antigravity, com um divisor em cada troca e os checks do PR verdes" width="900">
+</p>
+
 ### 3. Trabalhar com um amigo ao mesmo tempo, e pelo celular
 
 Convide alguém para um workspace como **editor** ou **observador**. Os dois veem o agente ao vivo, mandam
@@ -53,6 +52,10 @@ os arquivos, e avisa quando um agente precisa de uma decisão.
 
 <p align="center">
   <img src="docs/assets/mobile.png" alt="Kabul no celular: sessões esperando você e a folha de aprovação" width="600">
+</p>
+<p align="center">
+  <img src="docs/assets/collab.png" alt="Aparelhos pareados de duas pessoas e um convite de editor com QR" width="440">
+  <img src="docs/assets/collab-mobile.png" alt="Duas pessoas na mesma conversa no iPhone e no Android, com avatares de presença e uma aprovação feita pela outra pessoa" width="440">
 </p>
 
 ## Por que o Kabul
@@ -69,8 +72,9 @@ O Kabul é local e de código aberto. O seu código fica na sua máquina; os age
 você já paga, com os logins que você já tem. O Kabul nunca lê os seus tokens.
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="Criar um workspace, trocar de Claude para Gemini na mesma conversa, revisar e abrir o PR" width="900">
+  <img src="docs/assets/demo.gif" alt="Criar um workspace a partir de um pedido, o Claude trabalha, trocar para o Codex na mesma conversa, aprovar um comando e abrir o PR" width="900">
 </p>
+<p align="center"><sub>Criar workspace → o Claude trabalha → trocar para o Codex na mesma conversa → aprovar → abrir o PR (<a href="docs/assets/demo.mp4">MP4</a>).</sub></p>
 
 ## Recursos
 
@@ -135,6 +139,18 @@ simultâneos põe os outros numa fila, com o workspace em foco na frente. Orçam
 único e chaves por aparelho guardadas no cofre do sistema, prende convidados a um workspace e serve os
 previews em sandbox. Segredos nunca vão para a linha de comando. [Modelo de ameaças](docs/security.md).
 
+### Capturas
+
+| | |
+|---|---|
+| <img src="docs/assets/agents.png" alt="Painel Agentes: todas as conversas rodando em todos os workspaces, com a árvore de subagentes, tokens e custo" width="440"><br><sub>**Agentes**: todas as conversas de todos os workspaces, com os subagentes</sub> | <img src="docs/assets/usage.png" alt="Aba Uso: gasto de hoje e do mês, barras de limite por conta e gráfico de custo por dia" width="440"><br><sub>**Uso**: custo por dia, limites por conta e um aviso antes de bater em um</sub> |
+| <img src="docs/assets/model-picker.png" alt="Seletor de modelo com Claude, GPT e Gemini lado a lado na mesma conversa" width="440"><br><sub>**Seletor de modelo**: Claude, GPT e Gemini na mesma conversa</sub> | <img src="docs/assets/mcp.png" alt="Painel MCP da sessão: servidores do Claude Code e do Codex, ferramentas e tokens por turno, e a economia" width="440"><br><sub>**MCP**: um registro para todas as IAs e os tokens economizados por turno</sub> |
+| <img src="docs/assets/workspaces.png" alt="Quadro com os workspaces por status: backlog, em andamento, em revisão, concluído" width="440"><br><sub>**Quadro**: workspaces por status</sub> | <img src="docs/assets/menubar.png" alt="Popover da barra de menus com gasto, limites e os agentes rodando agora" width="300"><br><sub>**Barra de menus**: limites e agentes rodando num relance</sub> |
+| <img src="docs/assets/mobile-preview.png" alt="Celular: prévia de arquivo com realce e o seletor de modelo" width="440"><br><sub>**Celular**: arquivos com prévia, seletor de modelo</sub> | <img src="docs/assets/mobile-android.png" alt="Android (Material 3): lista de sessões e uma conversa que trocou de modelo" width="440"><br><sub>**Android**: Material 3, o mesmo app</sub> |
+| <img src="docs/assets/switch-llm-light.png" alt="Tema claro: a mesma conversa passando por três modelos" width="440"><br><sub>**Tema claro**</sub> | <img src="docs/assets/usage-light.png" alt="Tema claro: aba Uso" width="440"><br><sub>**Tema claro**: Uso</sub> |
+
+<sub>As capturas são de um ambiente de demonstração com dados inventados, em inglês (`npm run demo:capture` em `apps/web`).</sub>
+
 ## Agentes suportados
 
 ✅ confirmado rodando o CLI instalado pelo Kabul · ◐ parcial · ❔ ainda não confirmado · — não disponível
@@ -173,8 +189,8 @@ brew install git tmux gh
 3. Abra o Kabul e entre nos agentes e no GitHub em **Configurações › Contas**. O Kabul roda o login do próprio
    CLI; ele nunca vê a sua senha nem lê os seus tokens.
 
-Se uma versão ainda não estiver notarizada, o macOS bloqueia a primeira abertura: clique com o botão direito no
-Kabul › **Abrir**, ou libere em Ajustes do Sistema › Privacidade e Segurança. O app se atualiza sozinho
+Se uma versão ainda não estiver notarizada, o macOS bloqueia a primeira abertura: tente abrir o Kabul uma vez e depois
+vá em Ajustes do Sistema › Privacidade e Segurança › **Abrir Mesmo Assim** (só na primeira vez). O app se atualiza sozinho
 (canais estável e beta).
 
 ### Windows (beta)

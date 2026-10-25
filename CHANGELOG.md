@@ -8,28 +8,52 @@ Todas as mudanças relevantes do Kabul ficam aqui (SemVer + Conventional Commits
 
 ## [0.9.0] - 2026-10-24
 
-First versioned release. It summarizes everything built before the project adopted Conventional
-Commits (about 90 commits); from here on each release lists its commits by type.
+First public release. It summarizes everything built before the project adopted Conventional Commits; from
+here on each release lists its commits by type.
 
-Primeira versão numerada: resume tudo o que foi feito antes da adoção dos Conventional Commits
-(cerca de 90 commits). Daqui em diante cada versão lista os commits por tipo.
+Primeira versão pública: resume tudo o que foi feito antes da adoção dos Conventional Commits. Daqui em
+diante cada versão lista os commits por tipo.
 
 ### Features · Novidades
 
 - **core:** tmux sessions with exact targets, git worktrees per workspace (city names), diff by merge-base, checkpoints in private refs with restore, layered TOML settings and app settings.
-- **core:** harnesses for Claude Code, Codex, Antigravity, OpenCode, Qwen Code and Gemini CLI, plus a generic ACP harness (Goose, Cursor and other Agent Client Protocol agents); canonical transcript with authors, segments per harness and handoff between models.
-- **core:** several accounts per provider with isolated config dirs; local models (Ollama, LM Studio, llama.cpp, MLX, vLLM and custom endpoints); offline dictation via whisper; MCP per session; Linear and GitHub integrations; cloud sessions, teleport and mirroring.
-- **core:** process tree of what agents leave running, with keep/kill per workspace; Stop interrupts only the agent through its own protocol and keeps the session resumable.
+- **core:** harnesses for Claude Code, Codex, Antigravity, OpenCode, Qwen Code and Gemini CLI, plus a generic ACP harness (Gemini CLI, Qwen Code, OpenCode, Goose and Cursor over the Agent Client Protocol); canonical transcript with authors, segments per harness and handoff between models.
+- **core:** several accounts per provider with isolated config dirs; local models (Ollama, LM Studio, llama.cpp, MLX, vLLM and custom endpoints) routed by family to the best harness; offline dictation via whisper; Linear and GitHub integrations; cloud sessions, teleport and mirroring.
+- **core:** process tree of what agents leave running, with keep/kill per workspace; Stop interrupts only the agent through its own protocol (Claude interrupt, Codex `turn/interrupt`, ACP `session/cancel`) and keeps the session resumable.
+- **agents:** plan mode in every harness through each one's own mechanism (native or emulated), with live output; approving the plan switches the running session.
+- **mcp:** one registry of MCP servers shared by every AI (read from Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code and Antigravity, written in each CLI's format), turned on or off per session, with the token weight of their definitions per turn and secrets kept off the command line.
+- **usage:** tokens, cost and duration of every turn per session, workspace, model, account and provider (`usage.jsonl`), with daily/monthly totals and CSV export; rate-limit windows and resets from the agent streams, the Codex app-server and CodexBar; alerts by window percentage or budget and a one-click suggestion to switch account or model; a Usage tab on desktop and phone; a menu bar (tray) icon with the tightest limits, running agents and quick actions.
 - **desktop:** Tauri 2 app with thin commands over the core: repos, workspaces, chat, terminal by stream, diff and PR (create, merge, checks, re-run), scripts, history, native menu, "Open in" with installed apps.
+- **desktop:** board view (kanban by status) and local routines (a prompt on a cron schedule or on a PR event); `kabul://` deep links; native notifications that open the chat that called; custom keyboard shortcuts with conflict warnings; split tabs (`⌘D`); full-tab terminals with a preset agent (`⌘⇧T`); workspace preview card; Mermaid and KaTeX in chat; errors with retry; read aloud.
 - **web:** React frontend with an abstract transport (Tauri, WebSocket, HTTP, mock): chat with per-tool cards and live steps, terminal, full diff viewer (unified/split, syntax highlight), git panel, command palette, resizable panels, light/dark themes, settings pages.
-- **kabuld:** axum server with RPC over WebSocket, live mirror of every tmux session, QR pairing with per-device credentials, roles (owner/editor/observer), Web Push and real-time collaboration (presence, single queue); embedded in the desktop app.
-- **mobile:** PWA at `/m/`: pairing, sessions grouped by repo and workspace, live terminal, approvals and messages from the phone over Tailscale.
-- **docs:** bilingual public documentation (English and pt-BR).
+- **kabuld:** axum server with RPC over WebSocket, live mirror of every tmux session, QR pairing with per-device credentials, roles (owner/editor/observer), Web Push and real-time collaboration (presence, single queue); embedded in the desktop app; one-click HTTPS through `tailscale serve`.
+- **mobile:** installable app (PWA at `/m/`) for iOS and Android from one codebase (iOS look on iPhone, Material 3 on Android): pairing, sessions grouped by repo and workspace, live terminal, structured chat with approvals, new workspaces and model picker over Tailscale.
+- **mobile:** workspace files and changes with preview by type (code, Markdown, images and SVG, PDF, video/audio, CSV, JSON), "Ask in chat" with the selected lines, and the app you are running through an authenticated proxy limited to the workspace ports.
+- **i18n:** the whole interface in English and Portuguese (Brazil): desktop, phone, native menus, tray and notifications. Follows the system language, with a selector in Settings › General › Language; only the dictionary in use is downloaded.
+- **windows (beta):** builds and runs on Windows 10 1809+ and 11: a `TerminalBackend` with Kabul's own multiplexer over ConPTY, Credential Manager for secrets, Git Bash for scripts, portable paths, accounts, dictation and diagnostics, background processes without console windows, `.msi` and NSIS installers. Terminal sessions don't survive closing the app yet.
+- **docs:** bilingual public documentation (English and pt-BR) on a VitePress site, with a threat model, Windows, performance and collaboration pages.
+
+### Performance · Desempenho
+
+- Built and measured for 100 workspaces and 30 agents at once: only the visible workspace and tab are mounted, agent events are applied once per frame, long lists are windowed, the terminal writes in batches with WebGL on demand. Switching workspace went from 1,098 to 48 ms (p95), CPU with 30 agents from 100% to 8%, the 2,000-message chat opens in 68 ms.
+- Concurrency limit with a "waiting for a slot" queue (focused workspace first), lower priority for agents out of focus, suspension of idle agents with resume; Agents panel with subagent trees and stop in bulk.
+- Server: one tmux listing, one `ps` and one batched capture per scan (CPU with 30 sessions 17.2% → 6.3%), event frames serialized once and shared, bounded per-client queues, optional deflate, file watchers and caches instead of polling.
+- `kabul loadtest`, criterion benchmarks and `npm run perf`, with budgets in `perf-budgets.json` enforced in CI.
+
+### Security · Segurança
+
+- Desktop: strict CSP in the WebView, minimal capabilities, external links restricted to http/https/mailto, "Open in" only with real absolute paths.
+- `kabul serve`: answers only the local computer (Host and Origin checks against DNS rebinding and CSRF, JSON-only POST, local CORS, 32 MB body limit).
+- `kabuld`: guests scoped to one workspace on every target, credentials checked on every command and revocation never lost, Host allow-list, CSP and frame protection on the PWA, push only to known services (SSRF), message and concurrency limits; file links that expire, stay inside the workspace and hide secret files from guests; sandboxed previews.
+- Core: tmux targets validated, git URLs and branch names can't become options, GitHub and Linear tokens kept off the command line, private files created with mode 0600.
+- `SECURITY.md` (private reporting) and `docs/security.md` (threat model, accepted risks and the test behind each rule); KaTeX updated for GHSA-238p-pmpm-9mq7.
 
 ### Tests · Testes
 
-- Rust unit and integration tests (real kabuld server, fake agents) and Playwright E2E against the mock backend, the real `kabul serve` backend and a real kabuld with iPhone (WebKit) projects.
+- Rust unit and integration tests (real kabuld server, fake agents) and Playwright E2E against the mock backend, the real `kabul serve` backend and a real kabuld with iPhone (WebKit) projects; CI on macOS and Windows.
+- A demo environment with made-up data and reproducible screenshots and video (`npm run demo:capture`).
 
 ### Build & CI
 
-- Single version across the workspace (`scripts/version.mjs`), Conventional Commits, git-cliff changelog, GitHub Actions for CI and releases (macOS and Windows), signed auto-updates with stable and beta channels, `schema_version` with migrations for `state.json`, settings, `accounts.json` and transcripts, and a version handshake between kabuld and its clients.
+- Single version across the workspace (`scripts/version.mjs`), Conventional Commits, git-cliff changelog, GitHub Actions for CI, docs and releases (macOS Apple Silicon and Intel, Windows), signed auto-updates with stable and beta channels, `schema_version` with migrations for `state.json`, settings, `accounts.json` and transcripts, and a version handshake between kabuld and its clients.
+- Release profile with fat LTO, one codegen unit and stripped symbols.

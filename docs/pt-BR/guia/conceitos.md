@@ -2,6 +2,8 @@
 
 # Conceitos
 
+![Quadro com os workspaces por status](../../assets/workspaces.png)
+
 **Projeto (repositório).** Um repositório git que você adicionou. O Kabul nunca mexe no checkout principal; ele
 cria worktrees ao lado.
 

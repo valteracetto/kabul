@@ -14,6 +14,8 @@ Turns live in `usage.jsonl` and limits in `usage-limits.json`, both in Kabul's s
 
 ## The Usage tab
 
+![Usage tab: spend, limit bars per account and cost per day](../assets/usage.png)
+
 Sidebar › **Usage** (also on the phone, from the session list):
 
 - spend and tokens today and this month;
@@ -29,5 +31,7 @@ Settings › General: warn at a percentage of any window (80% by default) and se
 When a window passes the threshold, the Usage tab suggests another account of the same provider (if one has room) or another provider. **Use** applies it to the open conversations of that provider on the next message, through the same path as [switching model or account](./switching.md): same conversation, same branch, with a handoff.
 
 ## Menu bar (tray)
+
+![Menu bar popover with spend, limits and running agents](../assets/menubar.png)
 
 An icon in the macOS menu bar (system tray on Windows) draws the two tightest limits as bars; on macOS the highest percentage shows next to it. Click it for a popover with the same blocks, today's and this month's spend, agents running now (click to open the workspace) and quick actions: new workspace, open Kabul, pause all, usage. Right click opens a menu with the same actions. Turn it off in Settings › General › Menu bar icon.

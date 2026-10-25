@@ -38,6 +38,8 @@ por padrão.
 
 ## Painel da sessão
 
+![Painel MCP da sessão com ferramentas e tokens por servidor e a economia por turno](../../assets/mcp.png)
+
 O botão de MCP no composer lista o registro inteiro:
 
 - **Origem** ("do Claude", "do Codex"…) e **conflito** quando o mesmo nome tem configurações diferentes

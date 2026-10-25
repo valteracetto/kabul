@@ -8,9 +8,11 @@ coordinates everything (see [Cloud and mobile](./cloud-and-mobile.md)).
 
 ## Invite someone
 
+![Paired devices for two people and an editor invite with a QR code](../assets/collab.png)
+
 1. Share the machine with the person on Tailscale: `kabuld` is only reachable inside your tailnet.
 2. Open the invite:
-   - **on the desktop:** Settings › Phone and remote › **Invite someone to a workspace**;
+   - **on the desktop:** Settings › Phone & remote › **Invite someone to a workspace**;
    - **on the phone:** the **Invite** button in the workspace row.
 3. Pick the role and generate the link or QR code:
    - **Editor:** sees the whole workspace, sends messages, approves, types in the terminal and opens chats.
@@ -26,6 +28,8 @@ invite limits what the person can see and reach through Kabul, not what a comman
 :::
 
 ## What everyone sees
+
+![Two people in the same chat on iPhone and Android, with presence avatars](../assets/collab-mobile.png)
 
 - **Presence:** avatars of who is in the workspace (highlighted for who is in the same chat) and
   "Name is typing…" while someone writes.

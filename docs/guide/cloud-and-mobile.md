@@ -10,6 +10,10 @@ Your agents don't need you at the desk. Kabul gives you three ways to work away 
 
 ## The phone app (iOS and Android)
 
+![Kabul on the iPhone: sessions waiting for you and the approval sheet](../assets/mobile.png)
+![Kabul on Android (Material 3)](../assets/mobile-android.png)
+![Phone: file preview and model picker](../assets/mobile-preview.png)
+
 The phone app is a PWA (an app you install from the browser) served by your own computer. There is no Kabul
 account and no Kabul server in between: the phone talks to your computer over your
 [Tailscale](https://tailscale.com) network.
@@ -17,15 +21,15 @@ account and no Kabul server in between: the phone talks to your computer over yo
 ### Pair your phone
 
 1. Install Tailscale on the computer and on the phone, signed in to the same account.
-2. In Kabul: **Settings › Phone and remote › Turn on**. The server starts with the app from then on.
-3. Click **Turn on HTTPS**. It runs `tailscale serve` for Kabul only, visible only inside your tailnet. The
+2. In Kabul: **Settings › Phone & remote › Turn on**. The server starts with the app from then on.
+3. Click **Enable HTTPS**. It runs `tailscale serve` for Kabul only, visible only inside your tailnet. The
    phone needs HTTPS to install the app, receive notifications and use the microphone.
    - Your tailnet must issue certificates: in the Tailscale admin console, turn on **MagicDNS** and
      **HTTPS Certificates**. Kabul checks this first and shows the steps if they are missing; it never changes
      your tailnet settings.
 4. Scan the QR code with the phone's camera, type your name and tap **Pair**. The phone gets its own key.
 5. Install it: on iPhone, Safari › Share › **Add to Home Screen**; on Android, Chrome › **Install app**.
-6. In the app's Settings › Notifications, turn on **Notify me when an agent waits for me**.
+6. In the app's Settings › Notifications, turn on **Notify me when an agent is waiting on me**.
 
 Without HTTPS (`http://100.x.y.z:7777/m/`) the list, the terminal and the chat still work, but the phone won't
 install the app, send notifications or allow dictation.
@@ -65,7 +69,7 @@ resuming that same session.
 
 ## Other machines
 
-Run `kabuld` on another computer and drive it from your desktop app: **Settings › Phone and remote › Other
+Run `kabuld` on another computer and drive it from your desktop app: **Settings › Phone & remote › Other
 machines**, paste the pairing link of that machine (the same link as its QR) or use **Search the tailnet**.
 The machine joins the picker at the top of the sidebar (`⌃1` … `⌃9`), and the whole app then talks to it.
 

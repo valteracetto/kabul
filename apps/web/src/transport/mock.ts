@@ -652,6 +652,13 @@ if (typeof window !== "undefined") (window as any).__mock = {
   change: (wid: string | null, path: string, body: string) => { const w = wid ?? db.workspaces[0]?.id; (db.changed[w] ??= {})[path] = body; },
 };
 
+// Ambiente de demonstração (`?mock&demo`, só no Vite dev): repos, workspaces, conversas e uso 100% fictícios
+// para as capturas do README e do site (apps/web/demo/, `npm run demo:capture`). Fica fora do build de produção.
+const demoReady: Promise<unknown> | null =
+  import.meta.env.DEV && typeof location !== "undefined" && new URLSearchParams(location.search).has("demo")
+    ? import("../../demo/scenario").then((m) => m.install({ db, handlers, emit, models, usage }), (e) => console.error("demo:", e))
+    : null;
+
 /**
  * Cenário de escala (`window.__kabulSeed`, usado por `npm run perf`): N repositórios, M workspaces prontos e,
  * opcionalmente, uma conversa salva com `longChat` mensagens (metade sua, metade do agente) no workspace 0.
@@ -685,6 +692,7 @@ if (typeof window !== "undefined" && (window as any).__kabulSeed) seedScale((win
 export const mockTransport: Transport = {
   async call<T>(command: string, args?: Record<string, unknown>) {
     ((window as any).__calls ??= []).push(command);
+    if (demoReady) await demoReady;
     if (command === "checkpoint_create" && (window as any).__mock?.holdModels === true) ((window as any).__mock.holdModels = false, (window as any).__mock.releaseModels?.());
     const h = handlers[command];
     if (!h) throw new Error(`mock: comando desconhecido ${command}`);

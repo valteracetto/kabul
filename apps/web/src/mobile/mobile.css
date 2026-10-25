@@ -518,6 +518,9 @@
   .m-app *, .m-app *::before, .m-app *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
+/* Conversa com avatares de presença + botão de arquivos à direita: o título não passa por baixo deles. */
+.m-nav:has(.m-presence) .m-nav-title { right: 120px; }
+
 /* iPad / tela larga: coluna central. */
 @media (min-width: 760px) {
   .m-app { max-width: 720px; margin: 0 auto; box-shadow: 0 0 0 .5px var(--m-sep); }

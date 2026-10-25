@@ -15,7 +15,7 @@ Language. Shortcuts are the same in both.
 Press `⌘N` and open the project picker:
 
 - **Open project**: a local folder that is a git repository;
-- **Open GitHub project**: pick a repository from your account or paste a URL; Kabul clones it with your
+- **Open project from GitHub**: pick a repository from your account or paste a URL; Kabul clones it with your
   GitHub CLI login;
 - **Quick start**: a new folder with `git init`, a README and a first commit.
 
@@ -58,6 +58,6 @@ The git button follows the state of the branch: **Create PR** (`⌘⇧P`), **Com
 ## Next
 
 - Run several workspaces at once: each one is independent, with its own ports and terminal.
-- Pair your phone: **Settings › Phone and remote** (see [Cloud and mobile](./cloud-and-mobile.md)).
+- Pair your phone: **Settings › Phone & remote** (see [Cloud and mobile](./cloud-and-mobile.md)).
 - Invite a friend into a workspace (see [Collaboration](./collaboration.md)).
 - Learn the vocabulary: [Concepts](./concepts.md).

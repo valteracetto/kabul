@@ -8,6 +8,8 @@ aprovam ferramentas e usam o mesmo terminal. Quem coordena tudo é o `kabuld` da
 
 ## Convidar alguém
 
+![Aparelhos pareados de duas pessoas e um convite de editor com QR](../../assets/collab.png)
+
 1. Compartilhe a máquina com a pessoa pelo Tailscale: o `kabuld` só é acessível dentro da sua tailnet.
 2. Abra o convite:
    - **no desktop:** Configurações › Celular e remoto › **Convidar alguém para um workspace**;
@@ -26,6 +28,8 @@ você deixaria usar o seu computador; para os demais, **observador**.
 :::
 
 ## O que cada um vê
+
+![Duas pessoas na mesma conversa no iPhone e no Android, com avatares de presença](../../assets/collab-mobile.png)
 
 - **Presença:** os avatares de quem está no workspace (em destaque para quem está na mesma conversa) e
   "Fulano digitando…" enquanto alguém escreve.

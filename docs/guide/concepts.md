@@ -2,6 +2,8 @@ English · [Português](../pt-BR/guia/conceitos.md)
 
 # Concepts
 
+![Board with workspaces by status](../assets/workspaces.png)
+
 **Project (repository).** A git repository you added. Kabul never changes the main checkout; it creates
 worktrees next to it.
 

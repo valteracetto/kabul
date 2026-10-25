@@ -41,6 +41,6 @@ features:
     link: /pt-BR/guia/desempenho
 ---
 
-<!--
-TODO(capturas): pôr aqui docs/assets/hero.png quando as capturas do ambiente de demonstração existirem (lista no README.md).
--->
+![Kabul: workspaces em paralelo, um diff com comentário de linha e a conversa esperando uma aprovação](../assets/hero.png)
+
+![Criar um workspace, o Claude trabalha, trocar para o Codex na mesma conversa, aprovar e abrir o PR](../assets/demo.gif)

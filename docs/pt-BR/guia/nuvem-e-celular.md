@@ -10,6 +10,10 @@ Os seus agentes não precisam de você na mesa. O Kabul oferece três jeitos de 
 
 ## O app do celular (iOS e Android)
 
+![Kabul no iPhone: sessões esperando você e a folha de aprovação](../../assets/mobile.png)
+![Kabul no Android (Material 3)](../../assets/mobile-android.png)
+![Celular: prévia de arquivo e seletor de modelo](../../assets/mobile-preview.png)
+
 O app do celular é uma PWA (um app que você instala pelo navegador) servida pelo seu próprio computador. Não há
 conta do Kabul nem servidor do Kabul no meio: o celular fala com o computador pela sua rede do
 [Tailscale](https://tailscale.com).

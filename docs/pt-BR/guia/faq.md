@@ -59,8 +59,8 @@ depois de instalar um CLI. Também dá para apontar um executável em **Configur
 `logs/agents.log` registra cada sessão (comando, argumentos e nomes das variáveis de ambiente, nunca os
 valores). **Ajuda › Diagnóstico** confere as ferramentas e copia um relatório sem dados pessoais.
 
-**O macOS diz que o Kabul não pode ser aberto.** É uma versão ainda não notarizada: clique com o botão direito ›
-**Abrir** uma vez, ou libere em Ajustes do Sistema › Privacidade e Segurança.
+**O macOS diz que o Kabul não pode ser aberto.** É uma versão ainda não notarizada: tente abrir uma vez e depois vá em
+Ajustes do Sistema › Privacidade e Segurança › **Abrir Mesmo Assim**.
 
 **O celular não instala o app nem recebe notificações.** Ele precisa de HTTPS: ative o **HTTPS** em
 **Configurações › Celular e remoto** e ligue o MagicDNS e os certificados HTTPS na sua tailnet.

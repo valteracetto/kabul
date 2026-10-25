@@ -38,6 +38,8 @@ are shared by default.
 
 ## Session panel
 
+![Session MCP panel with tools and tokens per server and the tokens saved per turn](../assets/mcp.png)
+
 The MCP button in the composer lists the whole registry:
 
 - **Source** ("from Claude", "from Codex"…) and **conflict** when the same name has different settings in

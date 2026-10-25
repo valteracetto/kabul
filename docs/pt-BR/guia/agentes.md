@@ -29,6 +29,8 @@ Você escolhe o modelo; o Kabul escolhe o harness. Para modelos locais, quem dec
 
 ## Compatibilidade
 
+![Painel Agentes: todas as conversas rodando, com a árvore de subagentes, tokens e custo](../../assets/agents.png)
+
 ✔ confirmado rodando o CLI instalado pelo Kabul · ◐ em parte · ? ainda a confirmar. Detalhes em [ACP](../../acp.md).
 
 | Agente | Chat | Ferramentas | Aprovações | Plan mode | Parar | Retomar | Contas | Celular | Modelo local |

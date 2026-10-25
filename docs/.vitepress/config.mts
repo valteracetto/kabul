@@ -183,6 +183,10 @@ export default defineConfig({
     },
   },
   themeConfig: {
+    // As páginas têm nomes diferentes em cada idioma (guide/agents × pt-BR/guia/agentes) e as técnicas só
+    // existem na raiz: trocar para o mesmo caminho daria 404. O menu de idioma leva ao início do outro
+    // idioma; o seletor no topo de cada página leva à página equivalente.
+    i18nRouting: false,
     socialLinks: [{ icon: "github", link: REPO }],
     search: {
       provider: "local",

@@ -14,6 +14,8 @@ Os turnos ficam em `usage.jsonl` e os limites em `usage-limits.json`, na pasta d
 
 ## A aba Uso
 
+![Aba Uso: gasto, barras de limite por conta e custo por dia](../../assets/usage.png)
+
 Barra lateral › **Uso** (também no celular, pela lista de sessões):
 
 - gasto e tokens de hoje e do mês;
@@ -29,5 +31,7 @@ Configurações › Geral: avisar numa porcentagem de qualquer janela (80% por p
 Quando uma janela passa do limite, a aba Uso sugere outra conta do mesmo provedor (se alguma tiver folga) ou outro provedor. **Usar** aplica nas conversas abertas daquele provedor no próximo envio, pelo mesmo caminho de [trocar de modelo ou conta](./trocar.md): mesma conversa, mesma branch, com handoff.
 
 ## Barra de menus (bandeja)
+
+![Popover da barra de menus com gasto, limites e agentes rodando](../../assets/menubar.png)
 
 Um ícone na barra de menus do macOS (bandeja no Windows) desenha os dois limites mais apertados como barras; no macOS, a maior porcentagem aparece ao lado. O clique abre um popover com os mesmos blocos, o gasto do dia e do mês, os agentes rodando agora (clique para abrir o workspace) e ações rápidas: novo workspace, abrir o Kabul, pausar todos, uso. O botão direito abre um menu com as mesmas ações. Desliga em Configurações › Geral › Ícone na barra de menus.

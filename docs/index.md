@@ -41,6 +41,6 @@ features:
     link: /guide/performance
 ---
 
-<!--
-TODO(screenshots): add docs/assets/hero.png here once the demo captures exist (see the list in README.md).
--->
+![Kabul: parallel workspaces, a diff with a line comment and the chat waiting for an approval](./assets/hero.png)
+
+![Create a workspace, let Claude work, switch to Codex in the same chat, approve and open the PR](./assets/demo.gif)
