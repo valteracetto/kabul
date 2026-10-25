@@ -75,7 +75,8 @@ Voltar para um modelo de um segmento anterior do mesmo harness usa `--resume` da
 `crates/kabul-core/src/accounts.rs`: `AccountProfile { provedor, apelido, email, plano, dir, padrão }`. Cada perfil
 tem config isolada em `<estado>/accounts/<provedor>/<id>`, e o CLI roda com a variável dele:
 - **confirmadas:** `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GH_CONFIG_DIR`;
-- **a confirmar:** `ANTIGRAVITY_GEMINI_DIR` (agy, achada nas strings do binário), `XDG_DATA_HOME` (OpenCode) e `HOME` (Qwen Code e Gemini CLI).
+- **agy:** `HOME=<perfil>` (confirmado; `ANTIGRAVITY_GEMINI_DIR` não isola o token). O login roda `agy -p` num PTY: link do Google + código colado, 60 s de espera; o app reinicia o fluxo quando expira e confirma pela existência de `<perfil>/.gemini/antigravity-cli/antigravity-oauth-token`.
+- **a confirmar:** `XDG_DATA_HOME` (OpenCode) e `HOME` (Qwen Code e Gemini CLI).
 
 O "padrão do sistema" é a config normal do CLI. O login de cada perfil usa o mesmo fluxo de PTY,
 com o ambiente do perfil.

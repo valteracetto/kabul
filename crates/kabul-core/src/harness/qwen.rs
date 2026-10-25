@@ -1,9 +1,8 @@
 //! Qwen Code (`qwen`, fork do Gemini CLI). A CONFIRMAR: o CLI não está instalado nesta máquina.
 //! Pela documentação do projeto, `--input-format stream-json --output-format stream-json` segue o
 //! mesmo esquema do Claude Code (system/init, assistant, user/tool_result, result, control_request),
-//! então reaproveitamos o parser do Claude. Endpoint local: `OPENAI_BASE_URL`/`OPENAI_API_KEY`/`OPENAI_MODEL`.
+//! mas o Kabul usa o ACP (`--experimental-acp`), com aprovações no app. Endpoint local: `OPENAI_BASE_URL`/`OPENAI_API_KEY`/`OPENAI_MODEL`.
 //! Aprovações: `--approval-mode default|plan|auto-edit|yolo`.
-use super::claude::ClaudeProtocol;
 use super::*;
 
 pub struct QwenCode;
@@ -36,9 +35,11 @@ impl Harness for QwenCode {
     fn kind(&self) -> HarnessKind {
         HarnessKind::QwenCode
     }
+    /// Modo estruturado pelo ACP (`qwen --experimental-acp`; a confirmar). A retomada é pelo
+    /// `session/load` do ACP, não por `--resume`.
     fn command(&self, opts: &SessionOptions) -> CmdSpec {
-        let mut a: Vec<String> = ["--input-format", "stream-json", "--output-format", "stream-json"].map(String::from).to_vec();
-        let env = Self::common(opts, &mut a);
+        let mut a: Vec<String> = vec!["--experimental-acp".into()];
+        let env = Self::common(&SessionOptions { resume: None, ..opts.clone() }, &mut a);
         CmdSpec::new("qwen", a).with_cwd(opts.cwd.clone()).with_env(&env)
     }
     fn interactive_command(&self, opts: &SessionOptions) -> CmdSpec {
@@ -46,8 +47,8 @@ impl Harness for QwenCode {
         let env = Self::common(opts, &mut a);
         CmdSpec::new("qwen", a).with_cwd(opts.cwd.clone()).with_env(&env)
     }
-    fn protocol(&self, _opts: &SessionOptions) -> Box<dyn Protocol> {
-        Box::new(ClaudeProtocol::default())
+    fn protocol(&self, opts: &SessionOptions) -> Box<dyn Protocol> {
+        Box::new(super::acp::AcpProtocol::new(super::acp::options(opts, None)))
     }
     fn capabilities(&self) -> Capabilities {
         Capabilities { remote_control: Support::TmuxMirror, cloud: Support::TmuxMirror, teleport: Support::TmuxMirror, background: Support::TmuxMirror }

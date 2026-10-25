@@ -50,6 +50,21 @@ pub fn list(root: &Path, ws: &str) -> Vec<SessionSummary> {
     v
 }
 
+/// Ids de sessão dos agentes que já estão em conversas do Kabul (para separar o que é "de fora").
+pub fn agent_sessions(root: &Path) -> std::collections::HashSet<String> {
+    #[derive(Deserialize)]
+    struct Only {
+        agent_session: Option<String>,
+    }
+    std::fs::read_dir(root.join("sessions"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .flat_map(|d| std::fs::read_dir(d.path()).into_iter().flatten().flatten())
+        .filter_map(|e| serde_json::from_slice::<Only>(&std::fs::read(e.path()).ok()?).ok()?.agent_session)
+        .collect()
+}
+
 pub fn delete(root: &Path, ws: &str, id: &str) -> Result<()> {
     std::fs::remove_file(dir(root, ws).join(format!("{}.json", id.replace(['/', '.'], "_")))).context("apagando sessão")
 }

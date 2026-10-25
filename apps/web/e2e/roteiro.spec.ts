@@ -52,9 +52,11 @@ test("roteiro completo de um usuário (backend mock)", async ({ page }) => {
   await test.step("05 prompt curto: resposta e card de ferramenta", async () => {
     await page.getByTestId("composer").fill("Liste os arquivos do projeto");
     await page.getByTestId("composer").press("Enter");
-    await expect(page.getByTestId("tool-card").first()).toBeVisible();
     await expect(page.locator(".msg-assistant")).toContainText("Recebi");
     await expect(page.locator(".turn-meta")).toBeVisible();
+    // Passos recolhidos numa linha; um clique mostra os cartões das ferramentas.
+    await page.getByTestId("expand-steps").click();
+    await expect(page.getByTestId("tool-card").first()).toBeVisible();
     await shot(page, "05-resposta");
   });
 

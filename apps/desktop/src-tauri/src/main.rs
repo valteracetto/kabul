@@ -273,6 +273,25 @@ async fn workspace_busy(app: State<'_, App>, workspace_id: String) -> R<String> 
     checkpoint::busy(Path::new(&w.path)).map_err(e)
 }
 
+/// Agentes rodando fora do Kabul e o histórico recente dos CLIs (só metadados).
+#[tauri::command]
+async fn external_sessions(app: State<'_, App>) -> R<kabul_core::external::ExternalSessions> {
+    let home = app.home.clone();
+    tauri::async_runtime::spawn_blocking(move || kabul_core::external::collect(&home, 40)).await.map_err(e)
+}
+
+/// Uso de recursos do app e dos filhos (agentes ligados ao workspace e à conversa).
+#[tauri::command]
+async fn resources_get(app: State<'_, App>) -> R<kabul_core::resources::Snapshot> {
+    let mut hints: Vec<kabul_core::resources::Hint> = app.store.lock().unwrap().state.workspaces.iter().map(|w| kabul_core::resources::Hint { pid: None, path: Some(w.path.clone()), workspace_id: w.id.clone(), chat_id: None }).collect();
+    for (id, r) in app.chats.lock().unwrap().iter() {
+        if let Some(pid) = r.try_lock().ok().and_then(|r| r.pid()) {
+            hints.push(kabul_core::resources::Hint { pid: Some(pid), path: None, workspace_id: String::new(), chat_id: Some(id.clone()) });
+        }
+    }
+    tauri::async_runtime::spawn_blocking(move || kabul_core::resources::snapshot(&hints)).await.map_err(e)
+}
+
 #[tauri::command]
 async fn workspaces_stats(app: State<'_, App>) -> R<HashMap<String, (u32, u32)>> {
     let pairs: Vec<(Workspace, Repo)> = {
@@ -931,7 +950,10 @@ fn account_login(handle: AppHandle, app: State<App>, id: String) -> R<()> {
     let a = kabul_core::accounts::Accounts::open(&app.home);
     let p = a.get(&id).ok_or("conta não encontrada")?;
     let (argv, kick) = kabul_core::accounts::login_argv(&p.provider).ok_or("este provedor não tem login pelo CLI")?;
-    let mut s = auth::login_argv(&argv, HarnessKind::parse(&p.provider), kick, &kabul_core::accounts::env_for(&p)).map_err(e)?;
+    if let Some(mut old) = app.account_logins.lock().unwrap().remove(&id) {
+        let _ = old.cancelar();
+    }
+    let mut s = auth::login_argv(&argv, kick, &kabul_core::accounts::env_for(&p), kabul_core::accounts::login_check(&p)).map_err(e)?;
     let (_tx, dummy) = std::sync::mpsc::channel();
     let rx = std::mem::replace(&mut s.events, dummy);
     app.account_logins.lock().unwrap().insert(id.clone(), s);
@@ -964,7 +986,8 @@ async fn github_status() -> Vec<kabul_core::github::GhAccount> {
 
 #[tauri::command]
 fn github_login(handle: AppHandle, app: State<App>) -> R<()> {
-    let mut s = auth::login_argv(&["gh", "auth", "login", "--web", "-h", "github.com", "-p", "https", "--skip-ssh-key"], None, b"\n", &[]).map_err(e)?;
+    let gh_ok = auth::LoginCheck { done: std::sync::Arc::new(|| kabul_core::github::status().iter().any(|a| a.active && a.ok)), poll: false };
+    let mut s = auth::login_argv(&["gh", "auth", "login", "--web", "-h", "github.com", "-p", "https", "--skip-ssh-key"], b"\n", &[], gh_ok).map_err(e)?;
     let (_tx, dummy) = std::sync::mpsc::channel();
     let rx = std::mem::replace(&mut s.events, dummy);
     *app.gh_login.lock().unwrap() = Some(s);
@@ -1352,7 +1375,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             repos_list, repo_add, repo_clone, repo_remove, repo_settings, repo_settings_save,
             workspaces_list, workspace_create, workspace_update, workspace_rename_branch, workspace_archive, workspace_unarchive,
-            workspace_diff, workspace_changes, workspace_file_diff, workspace_files, workspace_read_file, workspace_busy, workspaces_stats, workspace_pr, workspace_auto_branch,
+            resources_get, external_sessions, workspace_diff, workspace_changes, workspace_file_diff, workspace_files, workspace_read_file, workspace_busy, workspaces_stats, workspace_pr, workspace_auto_branch,
             comments_list, comment_add, comment_update, checkpoints_list, checkpoint_create, checkpoint_restore, attach_file, attach_bytes,
             script_run, script_stop, term_open, term_input, term_resize, term_close, term_capture,
             models_list, local_overview, local_endpoint_save, local_endpoint_remove, local_pull, local_start, harness_install, registry_get, registry_save, registry_reset,

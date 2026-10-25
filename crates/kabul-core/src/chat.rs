@@ -77,7 +77,16 @@ pub fn prepare(home: &Path, w: &Workspace, r: &Repo, model: &Model, req: &ChatRe
         resume: req.resume.clone(),
         approvals_via_app: h.app_approvals(),
         // Claude em `default` (aprovações vêm para o app) ou `plan`; os outros no modo deles.
-        permission_mode: if plan { Some("plan".into()) } else if k == HarnessKind::Claude { Some("default".into()) } else { None },
+        // agy: "aprovar tudo" (Configurações › Modelos) vira --dangerously-skip-permissions.
+        permission_mode: if plan {
+            Some("plan".into())
+        } else if k == HarnessKind::Claude {
+            Some("default".into())
+        } else if k == HarnessKind::Antigravity && set.agy_skip_permissions {
+            Some("bypassPermissions".into())
+        } else {
+            None
+        },
         endpoint,
         env,
         settings_json,
@@ -199,6 +208,14 @@ mod prep_tests {
         assert!(args.contains(r#"--settings {"outputStyle":"Explanatory"}"#), "{args}");
         assert!(args.contains("--append-system-prompt Responda em português."), "{args}");
         assert!(log_header(&p).contains("env: KABUL_"));
+        // Gemini (agy): projeto por workspace; "aprovar tudo" só quando ligado.
+        let agy = models::catalog().into_iter().find(|m| m.harness == HarnessKind::Antigravity).unwrap();
+        let args = |home: &Path| prepare(home, &w, &r, &agy, &ChatRequest::default(), &[], &Registry::load(&home.join("nao-existe.json"))).map(|p| p.kind.harness().command(&p.opts).args).unwrap();
+        let a = args(&home);
+        assert!(a.contains(&"--project".to_string()) && !a.contains(&"--dangerously-skip-permissions".to_string()), "{a:?}");
+        set.agy_skip_permissions = true;
+        set.save(&home.join("app-settings.json")).unwrap();
+        assert!(args(&home).contains(&"--dangerously-skip-permissions".to_string()));
         std::env::set_var(crate::harness::bin_override_var("kabul-teste"), "/bin/sh");
         assert_eq!(crate::harness::which("kabul-teste").unwrap(), std::path::PathBuf::from("/bin/sh"));
         std::fs::remove_dir_all(&tmp).ok();

@@ -1,0 +1,4 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-24T10:00:00.000Z","sessionId":"aaaa-1111","content":"sintético"}
+{"type":"user","cwd":"/w/repo","gitBranch":"feat/fila","sessionId":"aaaa-1111","timestamp":"2026-10-24T10:00:01.000Z","message":{"role":"user","content":"olhe a fila de mensagens e veja se dá para editar"}}
+{"type":"assistant","cwd":"/w/repo","sessionId":"aaaa-1111","message":{"role":"assistant","content":[{"type":"text","text":"Vou olhar."}]}}
+{"type":"ai-title","aiTitle":"Revisar a fila de mensagens","sessionId":"aaaa-1111"}

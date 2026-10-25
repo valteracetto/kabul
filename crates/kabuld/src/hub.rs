@@ -279,6 +279,9 @@ impl Hub {
                 json!({"tmux": tmux, "imported_workspaces": [], "imported_sessions": [], "imported_error": null})
             }
 
+            // Agentes e sessões de fora do Kabul (só o dono: o policy não libera a convidados).
+            "external_sessions" => json!(kabul_core::external::collect(&self.home, 40)),
+
             // ---------- terminal ----------
             "term_attach" => {
                 let session = s(a, "session")?;

@@ -9,6 +9,6 @@
     { "family": "glm", "match": ["glm", "chatglm"], "harnesses": ["claude", "opencode"] },
     { "family": "minimax", "match": ["minimax"], "harnesses": ["claude", "opencode"] },
     { "family": "gemma", "match": ["gemma"], "harnesses": ["gemini", "opencode"] },
-    { "family": "outros", "match": [], "harnesses": ["opencode"] }
+    { "family": "outros", "match": [], "harnesses": ["opencode", "goose"] }
   ]
 }

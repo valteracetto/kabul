@@ -58,6 +58,22 @@ Já portáteis:
 | Barra de título `Overlay` com área para os semáforos | `tauri.conf.json`, CSS `.lights` / `.side-top` | No Windows a moldura é outra: botões à direita e padding condicional por plataforma |
 | Atalhos com ⌘ | frontend | ⌘ vira Ctrl no Windows; o registro de atalhos precisa de uma tecla "Mod" |
 
+## Painel de recursos
+
+A coleta usa a crate `sysinfo` (`kabul-core::resources`), portátil para Windows; nada específico do
+macOS. No Windows conferir: nomes com `.exe` (já removidos na árvore), shells (`pwsh`, `cmd`) e se o
+`cwd` dos processos filhos vem preenchido (o Windows não expõe o cwd de outros processos sem
+privilégio; sem ele, a ligação com o workspace fica só pelo pid da conversa).
+
+## Sessões de fora do Kabul (Painel)
+
+`kabul-core::external` acha agentes rodando em outros terminais pelo `sysinfo` e lê o histórico de
+cada CLI em `~/.claude/projects`, `~/.codex/sessions`, `~/.local/share/opencode/opencode.db` e
+`~/.gemini/antigravity-cli/conversation_summaries.db`. No Windows conferir: as pastas equivalentes
+em `%USERPROFILE%`/`%APPDATA%` (o OpenCode usa `%LOCALAPPDATA%`?), os nomes dos apps de terminal
+(`WindowsTerminal`, `Code`, `Cursor` já estão na lista) e o `cwd` de processos de outros apps (sem
+ele não dá para ligar ao workspace).
+
 ## Caminhos e git
 
 | Hoje | Onde | No Windows |
@@ -66,6 +82,8 @@ Já portáteis:
 | Pasta de projeto do Claude derivada trocando `/` e `.` por `-` | `harness::claude::project_dir_name` | Conferir a regra do Claude no Windows (`C:\` → `C--`) |
 | `git -C`, `git worktree` | `store.rs`, `worktree.rs`, `checkpoint.rs` | Funciona; atenção a CRLF e a caminhos longos (`core.longpaths`) |
 | `.context/` em `info/exclude` | `store::exclude_context` | Funciona |
+| Conta do agy (e Qwen/Gemini CLI) isolada por `HOME=<perfil>`, com links para `.gitconfig`, `.ssh` e `.config/gh` do usuário | `accounts::{env_for, link_home_basics}` | No Windows o equivalente é `USERPROFILE`; os links (`symlink`) só existem em `cfg(unix)` — usar junções ou copiar a identidade do git |
+| Projeto do agy por workspace em `~/.gemini/config/projects/kabul-<hash>.json` (regras aprovadas no cartão) | `harness::antigravity::{gemini_dir, project_file}` | Já cai para `USERPROFILE` sem `HOME`; conferir se o agy no Windows usa `%USERPROFILE%\.gemini` e se o hash do caminho (com `\`) bate entre app e CLI |
 
 ## Ditado
 

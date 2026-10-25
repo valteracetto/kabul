@@ -3,7 +3,8 @@ import { transport } from "../transport";
 import type { ConnState } from "../transport/websocket";
 import { clearCred, deviceName, pairWith, parsePairLink, saveCred } from "../transport/credentials";
 import { RepoMark } from "../icons";
-import type { Model } from "../api";
+import type { ExternalSessions, Model, Workspace } from "../api";
+import { ago, modelFor, workspaceFor } from "../components/external";
 import { AGENT_LABEL, canWrite, isOwner, k, me, ws, type Device, type LiveSession, type Ticket } from "./kabuld";
 import { AgentIcon, RunsOnLabel, Sheet, StatusPill, TicketCard, useCountdown } from "./ui";
 import { SessionView } from "./SessionView";
@@ -165,6 +166,7 @@ function SessionList({ conn, onOpen }: { conn: ConnState; onOpen: (id: string) =
             ))}
           </section>
         ))}
+        {isOwner() && filter === "all" && <ExternalSection onOpen={onOpen} />}
       </main>
       {sheet?.kind === "menu" && (
         <Sheet title={who ? `${who.user} · ${who.device}` : "Este computador"} onClose={() => setSheet(null)} testid="m-menu-sheet">
@@ -260,5 +262,48 @@ function NewChatSheet({ ws: wsId, name, onClose, onOpen }: { ws: string; name: s
       </div>
       {err && <div className="m-error">{err}</div>}
     </Sheet>
+  );
+}
+
+/** Agentes e sessões de fora do Kabul (só o dono vê): mesma lista do Painel do desktop. */
+function ExternalSection({ onOpen }: { onOpen: (id: string) => void }) {
+  const [ext, setExt] = useState<ExternalSessions | null>(null);
+  const [wss, setWss] = useState<Workspace[]>([]);
+  const [models, setModels] = useState<Model[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    const load = () => k.external().then(setExt, () => {});
+    load();
+    k.workspaces().then(setWss, () => {});
+    k.models().then(setModels, () => {});
+    const t = setInterval(load, 15000);
+    return () => clearInterval(t);
+  }, []);
+  if (!ext || (!ext.running.length && !ext.recent.length)) return null;
+  const now = Date.now() / 1000;
+  const cont = async (agent: string, id: string | null, cwd: string | null) => {
+    const w = workspaceFor(cwd, wss);
+    // A lista de modelos pode demorar (o Codex lista pelo app-server): espera aqui se ainda não chegou.
+    const m = modelFor(agent, models.length ? models : await k.models().catch(() => []));
+    if (!w || !id || !m) return setErr(!w ? "Nenhum workspace do Kabul nesta pasta." : !id ? "Id da sessão ainda desconhecido." : `Sem modelo do ${agent}.`);
+    k.chatStart(w.id, m, id).then((c) => onOpen(`chat:${c.id}`), (e) => setErr(String(e)));
+  };
+  const row = (key: string, agent: string, title: string, sub: string, id: string | null, cwd: string | null, testid: string) => (
+    <div key={key} className="m-session m-external" data-testid={testid}>
+      <AgentIcon agent={agent} />
+      <span className="m-session-main">
+        <b className="m-session-name">{title}</b>
+        <span className="m-session-sub dim">{sub}</span>
+      </span>
+      <button className="m-btn small" disabled={!id || !workspaceFor(cwd, wss)} onClick={() => cont(agent, id, cwd)} data-testid="m-external-continue">Continuar</button>
+    </div>
+  );
+  return (
+    <section className="m-group" data-testid="m-external">
+      <div className="m-group-head"><span className="m-group-name">Fora do Kabul</span></div>
+      {err && <div className="m-error">{err}</div>}
+      {ext.running.map((r) => row(`r${r.pid}`, r.agent, `${AGENT_LABEL[r.agent] ?? r.agent} · ${r.repo ?? "?"}`, `${r.terminal ?? "outro terminal"} · ${ago(r.running_secs)}${r.branch ? ` · ${r.branch}` : ""}`, r.session_id, r.cwd, "m-external-running"))}
+      {ext.recent.slice(0, 10).map((r) => row(`h${r.agent}${r.id}`, r.agent, r.title, `${AGENT_LABEL[r.agent] ?? r.agent} · ${r.repo ?? "?"} · há ${ago(now - r.updated)}`, r.id, r.cwd, "m-external-recent"))}
+    </section>
   );
 }

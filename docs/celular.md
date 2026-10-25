@@ -148,3 +148,10 @@ O Claude é trocado por um agente falso que fala o mesmo stream-json (`e2e-kabul
 - iPhone (WebKit): pareamento, lista, terminal e barra de teclas;
 - colaboração com três aparelhos;
 - desktop (Chromium): o painel e operar outra máquina.
+
+## Sessões de fora do Kabul
+
+Para o dono, a lista também mostra **Fora do Kabul**: agentes rodando em outros terminais (Terminal,
+iTerm2, VS Code…) e as sessões recentes dos CLIs (Claude Code, Codex, OpenCode, Antigravity), só com
+título, pasta e data. **Continuar** abre uma conversa no workspace da mesma pasta retomando a mesma
+sessão (`--resume`, `codex resume`, `--session`, `--conversation`). Convidados não veem essa lista.

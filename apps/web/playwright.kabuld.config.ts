@@ -11,7 +11,7 @@ export default defineConfig({
   reporter: [["list"]],
   use: { screenshot: "only-on-failure", trace: "retain-on-failure" },
   projects: [
-    { name: "iphone", testMatch: /celular|colaboracao/, use: { ...devices["iPhone 15"] } },
+    { name: "iphone", testMatch: /celular|colaboracao|fora/, use: { ...devices["iPhone 15"] } },
     { name: "desktop", testMatch: /painel/, use: { browserName: "chromium", viewport: { width: 1440, height: 900 }, colorScheme: "dark" } },
   ],
 });

@@ -1,4 +1,4 @@
-//! Gemini CLI (`gemini`). A CONFIRMAR: não instalado nesta máquina. Um processo por turno:
+//! Gemini CLI (`gemini`). A CONFIRMAR: não instalado nesta máquina. Estruturado pelo ACP; o modo por turno antigo:
 //! `gemini -p <prompt> --output-format stream-json [-m modelo] [--resume id] [--approval-mode ...]`.
 //! Eventos documentados: `init` (session_id, model), `message` (role, content, delta),
 //! `tool_use` (tool_name, tool_id, parameters), `tool_result` (tool_id, status, output), `error`, `result` (stats).
@@ -11,10 +11,35 @@ impl Harness for GeminiCli {
     fn kind(&self) -> HarnessKind {
         HarnessKind::GeminiCli
     }
+    /// Modo estruturado pelo ACP (`gemini --experimental-acp`; a confirmar). O modo por turno
+    /// (`-p --output-format stream-json`) continua em [`GeminiCli::print_command`].
     fn command(&self, opts: &SessionOptions) -> CmdSpec {
-        self.turn_command("", opts).unwrap()
+        let mut c = super::acp::command(HarnessKind::GeminiCli, opts);
+        if let Some(m) = &opts.model {
+            c.args.extend(["-m".into(), m.clone()]);
+        }
+        c
     }
-    fn turn_command(&self, prompt: &str, opts: &SessionOptions) -> Option<CmdSpec> {
+    fn protocol(&self, opts: &SessionOptions) -> Box<dyn Protocol> {
+        Box::new(super::acp::AcpProtocol::new(super::acp::options(opts, None)))
+    }
+    fn interactive_command(&self, opts: &SessionOptions) -> CmdSpec {
+        let mut a = vec![];
+        if let Some(m) = &opts.model {
+            a.extend(["-m".to_string(), m.clone()]);
+        }
+        CmdSpec::new("gemini", a).with_cwd(opts.cwd.clone()).with_env(&opts.env)
+    }
+    fn capabilities(&self) -> Capabilities {
+        Capabilities { remote_control: Support::TmuxMirror, cloud: Support::TmuxMirror, teleport: Support::TmuxMirror, background: Support::TmuxMirror }
+    }
+    fn endpoint_apis(&self) -> &'static [Api] {
+        &[Api::Gemini]
+    }
+}
+
+impl GeminiCli {
+    pub fn print_command(&self, prompt: &str, opts: &SessionOptions) -> Option<CmdSpec> {
         let mut a: Vec<String> = vec!["--output-format".into(), "stream-json".into()];
         if let Some(m) = &opts.model {
             a.extend(["-m".into(), m.clone()]);
@@ -30,25 +55,6 @@ impl Harness for GeminiCli {
         };
         a.extend(["--approval-mode".into(), mode.into(), "-p".into(), prompt.into()]);
         Some(CmdSpec::new("gemini", a).with_cwd(opts.cwd.clone()).with_env(&opts.env))
-    }
-    fn interactive_command(&self, opts: &SessionOptions) -> CmdSpec {
-        let mut a = vec![];
-        if let Some(m) = &opts.model {
-            a.extend(["-m".to_string(), m.clone()]);
-        }
-        CmdSpec::new("gemini", a).with_cwd(opts.cwd.clone()).with_env(&opts.env)
-    }
-    fn protocol(&self, _opts: &SessionOptions) -> Box<dyn Protocol> {
-        Box::new(GeminiProtocol::default())
-    }
-    fn capabilities(&self) -> Capabilities {
-        Capabilities { remote_control: Support::TmuxMirror, cloud: Support::TmuxMirror, teleport: Support::TmuxMirror, background: Support::TmuxMirror }
-    }
-    fn endpoint_apis(&self) -> &'static [Api] {
-        &[Api::Gemini]
-    }
-    fn app_approvals(&self) -> bool {
-        false
     }
 }
 
@@ -104,7 +110,10 @@ mod tests {
         assert_eq!(ev.len(), 5);
         assert!(matches!(&ev[1], Event::TextDelta { text } if text == "Ol"));
         assert!(matches!(&ev[4], Event::TurnCompleted { input_tokens: Some(10), .. }));
-        let c = GeminiCli.turn_command("faz", &SessionOptions { resume: Some("g1".into()), ..Default::default() }).unwrap();
+        let c = GeminiCli.print_command("faz", &SessionOptions { resume: Some("g1".into()), ..Default::default() }).unwrap();
         assert_eq!(c.args.last().unwrap(), "faz");
+        let acp = GeminiCli.command(&SessionOptions { model: Some("gemini-x".into()), ..Default::default() });
+        assert_eq!(acp.args, vec!["--experimental-acp", "-m", "gemini-x"]);
+        assert!(GeminiCli.turn_command("x", &SessionOptions::default()).is_none() && GeminiCli.app_approvals());
     }
 }

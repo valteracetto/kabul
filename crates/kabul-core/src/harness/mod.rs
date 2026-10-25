@@ -11,6 +11,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
+pub mod acp;
 pub mod antigravity;
 pub mod claude;
 pub mod codex;
@@ -37,6 +38,10 @@ pub enum HarnessKind {
     QwenCode,
     #[serde(rename = "gemini")]
     GeminiCli,
+    /// Só pelo ACP (`goose acp`); a confirmar.
+    Goose,
+    /// Cursor CLI pelo ACP (`cursor-agent acp`); a confirmar.
+    Cursor,
 }
 
 impl HarnessKind {
@@ -48,6 +53,8 @@ impl HarnessKind {
             "opencode" => Some(Self::OpenCode),
             "qwen" | "qwen-code" => Some(Self::QwenCode),
             "gemini" | "gemini-cli" => Some(Self::GeminiCli),
+            "goose" => Some(Self::Goose),
+            "cursor" | "cursor-agent" => Some(Self::Cursor),
             _ => None,
         }
     }
@@ -59,9 +66,11 @@ impl HarnessKind {
             Self::OpenCode => "opencode",
             Self::QwenCode => "qwen",
             Self::GeminiCli => "gemini",
+            Self::Goose => "goose",
+            Self::Cursor => "cursor-agent",
         }
     }
-    pub const ALL: [HarnessKind; 6] = [Self::Claude, Self::Codex, Self::Antigravity, Self::OpenCode, Self::QwenCode, Self::GeminiCli];
+    pub const ALL: [HarnessKind; 8] = [Self::Claude, Self::Codex, Self::Antigravity, Self::OpenCode, Self::QwenCode, Self::GeminiCli, Self::Goose, Self::Cursor];
     pub fn label(self) -> &'static str {
         match self {
             Self::Claude => "Claude Code",
@@ -70,6 +79,8 @@ impl HarnessKind {
             Self::OpenCode => "OpenCode",
             Self::QwenCode => "Qwen Code",
             Self::GeminiCli => "Gemini CLI",
+            Self::Goose => "Goose",
+            Self::Cursor => "Cursor",
         }
     }
     /// Binário no PATH (ou em instalações conhecidas, como `~/.opencode/bin`).
@@ -85,6 +96,8 @@ impl HarnessKind {
             Self::OpenCode => "curl -fsSL https://opencode.ai/install | bash",
             Self::QwenCode => "npm install -g @qwen-code/qwen-code",
             Self::GeminiCli => "npm install -g @google/gemini-cli",
+            Self::Goose => "curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash",
+            Self::Cursor => "curl https://cursor.com/install -fsS | bash",
         }
     }
     pub fn harness(self) -> Box<dyn Harness> {
@@ -95,6 +108,7 @@ impl HarnessKind {
             Self::OpenCode => Box::new(OpenCode),
             Self::QwenCode => Box::new(QwenCode),
             Self::GeminiCli => Box::new(GeminiCli),
+            Self::Goose | Self::Cursor => Box::new(acp::AcpHarness(self)),
         }
     }
 }
@@ -346,6 +360,8 @@ pub trait Protocol: Send {
     fn startup(&mut self) -> Vec<String> {
         vec![]
     }
+    /// Escritor para respostas fora do fluxo de `on_line` (ex.: ACP `terminal/wait_for_exit`).
+    fn attach_writer(&mut self, _w: acp::Writer) {}
     /// Processa uma linha de stdout: eventos + linhas de resposta para stdin.
     fn on_line(&mut self, line: &str) -> (Vec<Event>, Vec<String>);
     /// Codifica uma mensagem do usuário.
@@ -536,6 +552,13 @@ impl Running {
             Mode::PerTurn { .. } => None,
         }
     }
+    /// Processo do agente (sessão persistente ou turno em andamento), para o painel de recursos.
+    pub fn pid(&self) -> Option<u32> {
+        match &self.mode {
+            Mode::Stdio { child, .. } => Some(child.id()),
+            Mode::PerTurn { child, .. } => child.lock().unwrap().as_ref().map(|c| c.id()),
+        }
+    }
     /// Id da sessão do agente (para retomar), quando o modo guarda.
     pub fn session_id(&self) -> Option<String> {
         match &self.mode {
@@ -566,6 +589,12 @@ pub fn spawn(h: &dyn Harness, opts: &SessionOptions) -> Result<Running> {
     let protocol = Arc::new(Mutex::new(h.protocol(opts)));
     let (tx, rx) = channel();
 
+    {
+        let w = stdin.clone();
+        protocol.lock().unwrap().attach_writer(Arc::new(move |lines: Vec<String>| {
+            let _ = write_lines(&w, &lines);
+        }));
+    }
     write_lines(&stdin, &protocol.lock().unwrap().startup())?;
 
     {

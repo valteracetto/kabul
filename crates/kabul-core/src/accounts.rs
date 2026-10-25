@@ -29,8 +29,9 @@ pub fn isolation(provider: &str) -> Option<(&'static str, bool)> {
         "claude" => Some(("CLAUDE_CONFIG_DIR", true)),
         "codex" => Some(("CODEX_HOME", true)),
         "gh" => Some(("GH_CONFIG_DIR", true)),
-        // Achada nas strings do binário do agy; a confirmar.
-        "agy" => Some(("ANTIGRAVITY_GEMINI_DIR", false)),
+        // Confirmado (agy 1.4.7): ANTIGRAVITY_GEMINI_DIR não isola o token; com HOME=<perfil> o agy
+        // cria <perfil>/.gemini/antigravity-cli e pede login.
+        "agy" => Some(("HOME", true)),
         // XDG_DATA_HOME guarda o auth.json do OpenCode; a confirmar.
         "opencode" => Some(("XDG_DATA_HOME", false)),
         // Qwen Code e Gemini CLI leem de ~/.qwen e ~/.gemini: isolar o HOME; a confirmar.
@@ -47,15 +48,46 @@ pub fn provider_of(k: HarnessKind) -> &'static str {
         HarnessKind::OpenCode => "opencode",
         HarnessKind::QwenCode => "qwen",
         HarnessKind::GeminiCli => "gemini",
+        HarnessKind::Goose => "goose",
+        HarnessKind::Cursor => "cursor",
     }
 }
 
-/// Variáveis para rodar o CLI com este perfil.
+/// Variáveis para rodar o CLI com este perfil. Só a variável de isolamento muda; PATH, LANG e o
+/// resto continuam vindo do ambiente do app (shell de login).
 pub fn env_for(p: &AccountProfile) -> Vec<(String, String)> {
     match (&p.dir, isolation(&p.provider)) {
-        (Some(d), Some((var, _))) => vec![(var.to_string(), d.display().to_string())],
+        (Some(d), Some((var, _))) => {
+            if var == "HOME" {
+                link_home_basics(d);
+            }
+            vec![(var.to_string(), d.display().to_string())]
+        }
         _ => vec![],
     }
+}
+
+/// Perfil isolado pelo HOME: o agente roda git/gh/ssh com esse HOME, então a identidade do git,
+/// as chaves SSH e o login do gh do usuário entram como links (só se ainda não existirem no perfil).
+pub fn link_home_basics(dir: &Path) {
+    #[cfg(unix)]
+    {
+        let Some(real) = std::env::var_os("HOME").map(PathBuf::from) else { return };
+        if real == dir {
+            return;
+        }
+        for rel in [".gitconfig", ".config/git", ".ssh", ".config/gh"] {
+            let (src, dst) = (real.join(rel), dir.join(rel));
+            if src.exists() && std::fs::symlink_metadata(&dst).is_err() {
+                if let Some(parent) = dst.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::os::unix::fs::symlink(&src, &dst);
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
 }
 
 pub struct Accounts {
@@ -176,12 +208,28 @@ pub fn logged_in(p: &AccountProfile) -> Option<bool> {
             crate::auth::parse_claude_status(&String::from_utf8_lossy(&o.stdout)).map(|s| s.logged_in)
         }
         "codex" => Some(dir.map(|d| d.join("auth.json")).unwrap_or_else(crate::auth::codex_auth_path).is_file()),
-        "agy" => Some(dir.map(|d| d.join("antigravity-cli/antigravity-oauth-token")).unwrap_or_else(crate::auth::agy_token_path).is_file()),
+        "agy" => Some(agy_token(p).is_file()),
         "gh" => {
             let o = crate::harness::CmdSpec::new("gh", ["auth", "status", "--json", "hosts"]).with_env(&env).command().output().ok()?;
             Some(crate::github::parse_status(&String::from_utf8_lossy(&o.stdout)).iter().any(|a| a.active && a.ok))
         }
         _ => None,
+    }
+}
+
+/// Credencial do agy do perfil (o perfil isola pelo HOME). Só a existência é conferida.
+pub fn agy_token(p: &AccountProfile) -> PathBuf {
+    p.dir.as_ref().map(|d| d.join(".gemini/antigravity-cli/antigravity-oauth-token")).unwrap_or_else(crate::auth::agy_token_path)
+}
+
+/// Como o app confirma o login deste perfil.
+pub fn login_check(p: &AccountProfile) -> crate::auth::LoginCheck {
+    match p.provider.as_str() {
+        "agy" => crate::auth::LoginCheck::file(agy_token(p)),
+        _ => {
+            let p = p.clone();
+            crate::auth::LoginCheck { done: std::sync::Arc::new(move || logged_in(&p) == Some(true)), poll: false }
+        }
     }
 }
 

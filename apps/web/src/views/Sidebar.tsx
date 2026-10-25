@@ -4,6 +4,7 @@ import { api, STATUS_LABEL, STATUS_ORDER, wsTitle, type Repo, type Section, type
 import type { AgentState, Route } from "../App";
 import { RunsOnBadge, cloudList, cloudRunsOn } from "../components/RunsOn";
 import { MachinePicker } from "../components/MachinePicker";
+import { ResourcesChip } from "../components/Resources";
 import { confirmDialog } from "../components/Confirm";
 import { useDismiss, usePopover } from "../components/useDismiss";
 import { noSuggest } from "../noSuggest";
@@ -179,6 +180,7 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
       <div className="side-top" data-tauri-drag-region>
         <button className="icon-btn" title="Ocultar barra lateral (⌘B)" onClick={onCollapse}><ISidebar /></button>
         <div className="grow" data-tauri-drag-region />
+        <ResourcesChip workspaces={workspaces} onOpen={(id, chat) => (onRoute({ kind: "workspace", id }), chat && setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:focus-chat", { detail: chat })), 50))} />
         <button className="icon-btn" title="Voltar (⌘[)" disabled={!onBack} onClick={onBack}><IBack /></button>
         <button className="icon-btn" title="Avançar (⌘])" disabled={!onFwd} onClick={onFwd}><IFwd /></button>
       </div>

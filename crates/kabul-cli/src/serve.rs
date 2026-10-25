@@ -136,6 +136,11 @@ fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
             json!({"checks": checks, "report": report, "redacted": redacted})
         }
         "machine_info" => json!(kabul_core::machine::info()),
+        "external_sessions" => json!(kabul_core::external::collect(home, 40)),
+        "resources_get" => {
+            let hints: Vec<_> = st.state.workspaces.iter().map(|w| kabul_core::resources::Hint { pid: None, path: Some(w.path.clone()), workspace_id: w.id.clone(), chat_id: None }).collect();
+            json!(kabul_core::resources::snapshot(&hints))
+        }
         "sections_list" => json!(st.state.sections),
         "section_save" => json!(st.save_section(serde_json::from_value(a["section"].clone())?)?),
         "section_delete" => { st.delete_section(&s(a, "id")?)?; Value::Null }

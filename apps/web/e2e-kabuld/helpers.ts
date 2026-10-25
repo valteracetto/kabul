@@ -39,7 +39,7 @@ export function killTestSessions(prefix = "kabul-test-kd-") {
   } catch {}
 }
 
-export async function startKabuld(opts: { trustLocalBrowser?: boolean; repoName?: string } = {}): Promise<Kabuld> {
+export async function startKabuld(opts: { trustLocalBrowser?: boolean; repoName?: string; fakeHome?: boolean } = {}): Promise<Kabuld> {
   const dir = mkdtempSync(join(tmpdir(), "kabul-e2e-kd-"));
   const id = Math.random().toString(36).slice(2, 7);
   // Repo git e um worktree sintéticos.
@@ -67,8 +67,18 @@ export async function startKabuld(opts: { trustLocalBrowser?: boolean; repoName?
   symlinkSync("/bin/cat", join(tui, "claude"));
   symlinkSync("/bin/cat", join(tui, "codex"));
 
+  // HOME falso com uma sessão sintética do Claude Code feita fora do Kabul (no worktree do workspace).
+  const fakeHome = join(dir, "userhome");
+  if (opts.fakeHome) {
+    const proj = join(fakeHome, ".claude", "projects", "exemplo");
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, "aaaa-1111-fora.jsonl"), [
+      JSON.stringify({ type: "user", cwd: wsPath, gitBranch: "dev/lisboa", sessionId: "aaaa-1111-fora", message: { role: "user", content: "arrumar o login" } }),
+      JSON.stringify({ type: "ai-title", aiTitle: "Arrumar o login (de fora)", sessionId: "aaaa-1111-fora" }),
+    ].join("\n") + "\n");
+  }
   const port = await freePort();
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, KABULD_TRUST_LOCAL_BROWSER: opts.trustLocalBrowser === false ? "0" : "1", KABULD_VAPID_SUBJECT: "mailto:e2e@example.com" };
+  const env = { ...process.env, ...(opts.fakeHome ? { HOME: fakeHome } : {}), PATH: `${bin}:${process.env.PATH}`, KABULD_TRUST_LOCAL_BROWSER: opts.trustLocalBrowser === false ? "0" : "1", KABULD_VAPID_SUBJECT: "mailto:e2e@example.com" };
   const proc: ChildProcess = spawn(KABULD, ["--port", String(port), "--home", home, "--web", DIST, "--no-tailscale", "--secrets", "file", "--pair"], { env, stdio: ["ignore", "ignore", "pipe"] });
   let err = "";
   const pairLink = await new Promise<string>((ok, fail) => {

@@ -13,6 +13,7 @@ import type { LinearIssue } from "../api";
 import { ToolCard, ThinkingCard, ApprovalCard, PlanCard, QuestionCard } from "../components/ToolCards";
 import { chatPrefs, pendingFork, pendingModel, type PendingFork } from "../components/chatPrefs";
 import { ChatFind } from "../components/ChatFind";
+import { WorkingLine, activity } from "../components/WorkingLine";
 import { stripAbsolutelyRight, useSettings } from "../components/useSettings";
 import { IApps, IArrowUp, ICopy, IMic, IPlan, IPlus, IRestore, IStop } from "../icons";
 
@@ -47,10 +48,14 @@ function apply(items: Item[], ev: AgentEvent, started: number): Item[] {
     case "approval_request":
       return [...items, { k: "approval", id: ev.request_id, tool: ev.tool, input: ev.input }];
     case "turn_completed": {
+      // Fim de turno repetido (nada entre os dois): mostra um só.
+      if (last?.k === "turn") return items;
       const secs = Math.max(1, Math.round((Date.now() - started) / 1000));
       const lastText = [...items].reverse().find((i) => i.k === "assistant") as { text: string } | undefined;
       const extra = [ev.output_tokens != null && `${ev.output_tokens} tokens`, ev.cost_usd ? `US$ ${ev.cost_usd.toFixed(4)}` : null].filter(Boolean).join(" · ");
-      return [...items, { k: "turn", meta: `${secs}s · ${time()}${extra ? " · " + extra : ""}`, copy: lastText?.text ?? ev.result ?? "" }];
+      // Agentes que só mandam deltas (agy, ACP): o fim do turno encerra o streaming do texto.
+      const done = items.map((i) => (i.k === "assistant" && i.streaming ? { ...i, streaming: false } : i));
+      return [...done, { k: "turn", meta: `${secs}s · ${time()}${extra ? " · " + extra : ""}`, copy: lastText?.text ?? ev.result ?? "" }];
     }
     case "error":
       // O mesmo erro pode chegar duas vezes (notificação e fim do turno): mostra uma.
@@ -250,10 +255,13 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
       const lastTurn = [...itemsRef.current.keys()].filter((k) => itemsRef.current[k].k === "turn").pop();
       if (lastTurn !== undefined) forkTabRef.current(lastTurn);
     };
+    // Painel de recursos: clicar no agente desta conversa traz a aba para a frente.
+    const focusChat = (e: Event) => (e as CustomEvent).detail === liveRef.current?.id && window.dispatchEvent(new CustomEvent("kabul:activate-tab", { detail: sessionId }));
+    window.addEventListener("kabul:focus-chat", focusChat);
     window.addEventListener("kabul:fork-last", forkLast);
     window.addEventListener("kabul:compose-chat", h);
     window.addEventListener("kabul:send-chat", send);
-    return () => (window.removeEventListener("kabul:compose-chat", h), window.removeEventListener("kabul:send-chat", send), window.removeEventListener("kabul:fork-last", forkLast));
+    return () => (window.removeEventListener("kabul:focus-chat", focusChat), window.removeEventListener("kabul:compose-chat", h), window.removeEventListener("kabul:send-chat", send), window.removeEventListener("kabul:fork-last", forkLast));
   }, [sessionId]);
 
   const dictation = useDictation(useCallback((t: string) => setText((x) => (x && !x.endsWith(" ") ? x + " " : x) + t), []), onError);
@@ -596,25 +604,40 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
           {(() => {
             // Recolhe os passos intermediários de turnos concluídos (⌃O desliga).
             const hidden = new Set<number>();
-            const toggles = new Map<number, { user: number; tools: number; msgs: number }>();
+            const toggles = new Map<number, { user: number; tools: number; msgs: number; shell: boolean }>();
             if (!noCollapse) {
               let u = -1;
+              const collapse = (mid: number[]) => {
+                if (mid.length < 2 || expanded.has(u)) return;
+                mid.forEach((j) => hidden.add(j));
+                const tools = mid.filter((j) => items[j].k === "tool");
+                toggles.set(mid[0], { user: u, tools: tools.length, msgs: mid.length - tools.length, shell: tools.some((j) => (items[j] as { name: string }).name === "Bash") });
+              };
               items.forEach((it, k) => {
                 if (it.k === "user" && !it.queued) u = k;
                 if (it.k === "turn" && u >= 0) {
                   const finalA = [...items.keys()].filter((j) => j > u && j < k && items[j].k === "assistant").pop();
-                  const mid = [...items.keys()].filter((j) => j > u && j < (finalA ?? k) && ["tool", "reasoning", "assistant"].includes(items[j].k));
-                  if (mid.length >= 2 && !expanded.has(u)) {
-                    mid.forEach((j) => hidden.add(j));
-                    toggles.set(mid[0], { user: u, tools: mid.filter((j) => items[j].k === "tool").length, msgs: mid.filter((j) => items[j].k !== "tool").length });
-                  }
+                  collapse([...items.keys()].filter((j) => j > u && j < (finalA ?? k) && ["tool", "reasoning", "assistant"].includes(items[j].k)));
                 }
               });
+              // Turno em andamento: os passos também ficam numa linha só (a linha de status diz o que está rodando);
+              // o texto que está chegando continua visível.
+              const lastTurn = items.map((x) => x.k).lastIndexOf("turn");
+              if (busy && u > lastTurn) {
+                const lastIdx = items.length - 1;
+                collapse([...items.keys()].filter((j) => j > u && ["tool", "reasoning", "assistant"].includes(items[j].k) && !(j === lastIdx && items[j].k === "assistant")));
+              }
             }
             const openFile = (p: string) => window.dispatchEvent(new CustomEvent("kabul:open-file", { detail: { ws: ws.id, path: p.startsWith(ws.path) ? p.slice(ws.path.length + 1) : p } }));
             return items.map((i, n) => {
               const tg = toggles.get(n);
-              const toggle = tg ? <button key={`t${n}`} className="steps-toggle" onClick={() => setExpanded((e) => new Set(e).add(tg.user))} data-testid="expand-steps">▸ Expandir {tg.tools} chamada{tg.tools === 1 ? "" : "s"} de ferramenta{tg.msgs ? `, ${tg.msgs} mensage${tg.msgs === 1 ? "m" : "ns"}` : ""}</button> : null;
+              const toggle = tg ? (
+                <button key={`t${n}`} className="steps-toggle" onClick={() => setExpanded((e) => new Set(e).add(tg.user))} data-testid="expand-steps" title="Mostrar os passos (⌃O mostra sempre)">
+                  <span className="st-chev">›</span>
+                  {[tg.tools && `${tg.tools} ferramenta${tg.tools === 1 ? "" : "s"}`, tg.msgs && `${tg.msgs} mensage${tg.msgs === 1 ? "m" : "ns"}`].filter(Boolean).join(", ")}
+                  {tg.shell && <span className="st-shell mono" data-testid="steps-shell">&gt;_</span>}
+                </button>
+              ) : null;
               if (hidden.has(n)) return toggle;
               switch (i.k) {
                 case "user": return (
@@ -651,8 +674,8 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
               }
             });
           })()}
-          {!busy && bgTasks > 0 && <div className="working" data-testid="bg-tasks"><span className="spinner" /> Aguardando {bgTasks} tarefa{bgTasks === 1 ? "" : "s"} em segundo plano</div>}
-          {busy && <div className="working"><span className="spinner" /> Trabalhando… <span className="dim">⌘⇧⌫ ou Esc interrompe</span></div>}
+          {!busy && bgTasks > 0 && <WorkingLine testid="bg-tasks" since={started.current} text={`Aguardando ${bgTasks} tarefa${bgTasks === 1 ? "" : "s"} em segundo plano`} />}
+          {busy && !waiting && <WorkingLine since={started.current} text={activity(items.slice(items.map((x) => x.k).lastIndexOf("user") + 1) as never)} />}
         </div>
       </div>
 
@@ -746,11 +769,9 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
             <button className={"icon-btn mic " + dictation.state} title="Ditado em português (⌃⇧D)" onClick={dictation.toggle} data-testid="mic">
               {dictation.state === "transcribing" ? <span className="spinner" /> : <IMic />}
             </button>
-            {busy && !text.trim() ? (
-              <button className="send stop" title="Parar (⌘⇧⌫)" onClick={stop} data-testid="stop"><IStop size={14} /></button>
-            ) : (
-              <button className="send" title={busy ? (chatPrefs.followUp() === "steer" ? "Redirecionar agora" : "Enfileirar") : "Enviar"} disabled={!text.trim()} onClick={send} data-testid="send"><IArrowUp size={15} /></button>
-            )}
+            {/* Trabalhando: Parar e Enviar lado a lado (enviar enfileira ou redireciona). */}
+            {busy && <button className="send stop" title="Parar (⌘⇧⌫)" onClick={stop} data-testid="stop"><IStop size={12} /></button>}
+            <button className="send" title={busy ? (chatPrefs.followUp() === "steer" ? "Redirecionar agora" : "Enfileirar") : "Enviar"} disabled={!text.trim()} onClick={send} data-testid="send"><IArrowUp size={15} /></button>
           </div>
         </div>
       </div>

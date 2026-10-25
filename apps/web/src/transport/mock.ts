@@ -25,11 +25,12 @@ const db = {
   history: {} as Record<string, any>,
   endpoints: [] as any[],
   registry: "",
-  settings: { branch_prefix_type: "github", branch_prefix_custom: "", notifications: true, sound: true, caffeinate: true, auto_rename_branch: true, env: [], env_file: null, completion_sound: "Glass", always_show_context: false, auto_convert_long_text: true, not_absolutely_right: false, open_prs_in: "github", delete_branch_on_archive: false, archive_on_merge: false, rename_ws_on_branch: true, merge_method: "squash", github_dry_run: false, pr_include_workspace_link: true, automerge: false, optional_checks_blocking: false, push_set_upstream: true, stacked_prs: true, clone_dir: "~/Developer", claude_output_style: "default", codex_personality: "pragmatic", review_model: null, default_plan: false, claude_path: null, codex_path: null, opencode_path: null, scrollback_mb: 10 } as any,
+  settings: { branch_prefix_type: "github", branch_prefix_custom: "", notifications: true, sound: true, caffeinate: true, show_resources: true, auto_rename_branch: true, env: [], env_file: null, completion_sound: "Glass", always_show_context: false, auto_convert_long_text: true, not_absolutely_right: false, open_prs_in: "github", delete_branch_on_archive: false, archive_on_merge: false, rename_ws_on_branch: true, merge_method: "squash", github_dry_run: false, pr_include_workspace_link: true, automerge: false, optional_checks_blocking: false, push_set_upstream: true, stacked_prs: true, clone_dir: "~/Developer", claude_output_style: "default", codex_personality: "pragmatic", review_model: null, default_plan: false, claude_path: null, codex_path: null, opencode_path: null, scrollback_mb: 10 } as any,
   repoSettings: { scripts: { setup: "echo instalando", archive: null, run_mode: "concurrent", run: { web: { command: "npm run dev", default: true, icon: "globe", available_in: null } } }, file_include_globs: [], target_branch: null, env: { API_URL: "http://localhost:$KABUL_PORT" }, prompts: { general: null, review: null, create_pr: null, fix_errors: null, resolve_conflicts: null, branch_rename: null }, preview_url: "http://localhost:$KABUL_PORT" } as any,
   chats: {} as Record<string, { pending: string | null; turn: number }>,
   linear: false,
   accounts: [] as any[],
+  agyLogins: {} as Record<string, number>,
   mirror: false,
   ghToken: false,
   sections: [] as any[],
@@ -64,6 +65,24 @@ function agentTurn(chatId: string, text: string, wid: string) {
     ch.pending = "Write";
     ev({ type: "tool_use", id: "t1-" + ch.turn, name: "Write", input: { file_path: "ok.txt", content: "ok" } }, 120);
     ev({ type: "approval_request", request_id: "req-" + ch.turn, tool: "Write", input: { file_path: "ok.txt" } }, 200);
+    return;
+  }
+  // agy: comando negado no modo headless vira pedido com a regra do projeto do workspace.
+  if (/\bagy-negado\b/i.test(text)) {
+    ch.pending = "agy";
+    ev({ type: "tool_use", id: "c:2-" + ch.turn, name: "Bash", input: { CommandLine: "npm audit", command: "npm audit" } }, 60);
+    ev({ type: "tool_result", id: "c:2-" + ch.turn, output: "Bloqueado pelo agy: precisa de permissão (aprove no cartão abaixo).", is_error: true }, 90);
+    ev({ type: "approval_request", request_id: "agy-perm-c:2-" + ch.turn, tool: "Bash", input: { command: "npm audit", rule: "command(npm audit)", scope: "workspace" } }, 120);
+    return;
+  }
+  // Turno lento: comando rodando (linha de status com cronômetro), subagente e texto no fim.
+  if (/\bdevagar\b/i.test(text)) {
+    ev({ type: "reasoning", text: "Vou auditar as dependências." }, 40);
+    ev({ type: "tool_use", id: "dv1-" + ch.turn, name: "Bash", input: { command: "npm audit", description: "Audita" } }, 80);
+    ev({ type: "tool_result", id: "dv1-" + ch.turn, output: "found 0 vulnerabilities", is_error: false }, 1500);
+    ev({ type: "tool_use", id: "dv2-" + ch.turn, name: "Task", input: { description: "Revisar o lockfile", prompt: "revise" } }, 1550);
+    ev({ type: "tool_result", id: "dv2-" + ch.turn, output: "ok", is_error: false }, 2600);
+    done("Sem vulnerabilidades.", 2700);
     return;
   }
   if (/\bplano\b/i.test(text) && !/segundo plano/i.test(text)) {
@@ -249,15 +268,27 @@ const handlers: Record<string, (a: any) => unknown> = {
     db.registry = text;
   },
   registry_reset: () => void (db.registry = ""),
-  chat_start: ({ model }) => {
+  chat_start: ({ model, resume }) => {
+    (window as any).__kabulLastStart = { harness: model.harness, resume: resume ?? null };
     const cid = id();
     db.chats[cid] = { pending: null, turn: 0 };
-    return { chat_id: cid, harness: model.harness, approvals: model.harness !== "opencode", note: model.local?.note ?? null };
+    return { chat_id: cid, harness: model.harness, approvals: true, note: model.local?.note ?? null };
   },
   chat_send: ({ chatId, text }) => agentTurn(chatId, text, ""),
   chat_approve: ({ chatId, allow, updatedInput }) => {
     const ev = (e: unknown, t: number) => setTimeout(() => emit("chat-event", { chat_id: chatId, event: e }), t);
     const pend = db.chats[chatId]?.pending;
+    if (pend === "agy") {
+      db.chats[chatId].pending = null;
+      if (allow) {
+        ev({ type: "tool_use", id: "c:5-" + db.chats[chatId].turn, name: "Bash", input: { CommandLine: "npm audit", command: "npm audit" } }, 40);
+        ev({ type: "tool_result", id: "c:5-" + db.chats[chatId].turn, output: "found 0 vulnerabilities", is_error: false }, 60);
+      }
+      ev({ type: "text_delta", text: allow ? "Nenhuma vulnerabilidade." : "Ok, sigo sem rodar." }, 90);
+      ev({ type: "turn_completed", result: null, input_tokens: 15000, output_tokens: 30, cost_usd: null }, 120);
+      ev({ type: "turn_completed", result: null, input_tokens: 15000, output_tokens: 30, cost_usd: null }, 121);
+      return;
+    }
     if (pend === "ExitPlanMode" || pend === "AskUserQuestion") {
       db.chats[chatId].pending = null;
       const msg = pend === "ExitPlanMode" ? (allow ? "Executando o plano." : "Ok, ajusto o plano.") : allow ? `Respostas: ${Object.values(updatedInput?.answers ?? {}).join(", ")}` : "Sem respostas.";
@@ -270,6 +301,20 @@ const handlers: Record<string, (a: any) => unknown> = {
     ev({ type: "turn_completed", result: null, input_tokens: 15000, output_tokens: 30, cost_usd: 0.02 }, 160);
     if (allow) for (const w of db.workspaces) (db.changed[w.id] ??= {})["ok.txt"] = "ok\n";
   },
+  resources_get: () => {
+    // Árvore sintética: app → Principal → agentes (por workspace) → filhos.
+    const ws = db.workspaces[0]?.id ?? null;
+    const n = (pid: number, name: string, cpu: number, mem: number, kind: string, children: any[] = [], extra: any = {}) => ({ pid, name, cpu: cpu + children.reduce((a: number, c: any) => a + c.cpu, 0), mem: mem + children.reduce((a: number, c: any) => a + c.mem, 0), kind, agent: kind === "agent" ? name : null, workspace_id: extra.ws ?? null, chat_id: extra.chat ?? null, children });
+    const MB = 1024 * 1024;
+    const kids = [
+      n(11, "claude", 0.2, 510.8 * MB, "agent", [n(12, "node", 0, 673.4 * MB, "process", [], { ws }), n(13, "zsh", 0, 1.8 * MB, "terminal", [n(14, "cargo", 0, 71.3 * MB, "process", [], { ws })], { ws })], { ws, chat: Object.keys(db.chats)[0] ?? null }),
+      n(21, "codex", 1.1, 120 * MB, "agent", [], { ws }),
+      ...Array.from({ length: 8 }, (_, i) => n(30 + i, `helper-${i + 1}`, 0.1, (5 + i) * MB, "process")),
+    ];
+    const main = n(10, "Principal", 4.5, 238.2 * MB, "main", kids);
+    const own = { ...main, cpu: 4.5, mem: 238.2 * MB };
+    return { cpu: main.cpu, mem: main.mem, count: 15, root: { ...main, pid: 10, name: "App", kind: "app", children: [own] } };
+  },
   chat_stop: () => undefined,
   history_list: ({ workspaceId }) => Object.values(db.history).filter((h: any) => h.workspace_id === workspaceId).map((h: any) => ({ id: h.id, title: h.title, model_key: h.model_key, updated_at: h.updated_at })),
   history_load: ({ id: hid }) => {
@@ -280,6 +325,22 @@ const handlers: Record<string, (a: any) => unknown> = {
   history_delete: ({ id: hid }) => void delete db.history[hid],
   history_search: ({ q }) => Object.values(db.history).filter((h: any) => JSON.stringify(h.items).toLowerCase().includes(q.toLowerCase())).map((h: any) => [h.workspace_id, h.id, h.title, q]),
   slash_commands: () => [["/compact", "resumir a conversa"], ["/review", "revisar as mudanças"], ["/plan", "alternar plan mode"]],
+  external_sessions: () => {
+    // Fora do Kabul: um codex no Terminal dentro do workspace e um claude numa pasta sem workspace.
+    const w = db.workspaces[0];
+    const t = Math.floor(Date.now() / 1000);
+    return {
+      running: [
+        { agent: "codex", pid: 4242, cwd: w?.path ?? "/tmp/x", repo: "demo", branch: w?.branch ?? "main", running_secs: 754, terminal: "Terminal", session_id: "0000-codex-sess" },
+        { agent: "claude", pid: 4343, cwd: "/fora/projeto", repo: "projeto", branch: "main", running_secs: 30, terminal: "iTerm2", session_id: "1111-claude-sess" },
+      ],
+      recent: [
+        { agent: "claude", id: "2222-claude-hist", title: "Revisar a fila de mensagens", cwd: w?.path ?? "/tmp/x", repo: "demo", branch: "feat/fila", updated: t - 3600 },
+        { agent: "agy", id: "3333-agy-hist", title: "Análise de segurança", cwd: "/fora/outro", repo: "outro", branch: null, updated: t - 86400 * 2 },
+      ],
+      cloud_note: "O Claude Code não lista sessões de nuvem fora de um terminal interativo. Cole o link ou o id.",
+    };
+  },
   sessions_list: () => ({ tmux: [{ session: "kabul-kabul", window_index: 0, pane_index: 0, pane_id: "%1", pid: 1, command: "zsh", path: "/mock/ws/kabul", active: true, title: "", agent: "shell" }], imported_workspaces: [], imported_sessions: [{ id: "c1", workspace_id: null, status: "idle", title: "Sessão importada", model: "opus", agent_type: "claude", updated_at: null }], imported_error: null }),
   auth_status: () => ["claude", "codex", "antigravity", "opencode", "qwen", "gemini"].map((k) => ({ kind: k, logged_in: !["qwen", "gemini"].includes(k), source: "mock", method: null, error: null, installed: !["qwen", "gemini"].includes(k) })),
   auth_login: ({ kind }) => {
@@ -299,7 +360,18 @@ const handlers: Record<string, (a: any) => unknown> = {
     if (a && nickname) a.nickname = nickname;
     if (makeDefault) db.accounts.forEach((x: any) => (x.default = x.id === aid));
   },
-  account_login: ({ id: aid }) => { emit("account-auth-event", { id: aid, event: { Url: "https://claude.ai/oauth/authorize?mock=1" } }); emit("account-auth-event", { id: aid, event: "PedeCodigo" }); },
+  account_login: ({ id: aid }) => {
+    // agy: link do Google e pedido de código na hora; a primeira tentativa "expira" rápido (no real, 60 s).
+    if (aid.startsWith("agy:")) {
+      const n = (db.agyLogins[aid] = (db.agyLogins[aid] ?? 0) + 1);
+      emit("account-auth-event", { id: aid, event: { Url: `https://accounts.google.com/o/oauth2/auth?mock=${n}` } });
+      emit("account-auth-event", { id: aid, event: "PedeCodigo" });
+      if (n === 1) setTimeout(() => emit("account-auth-event", { id: aid, event: "Expirou" }), 1200);
+      return;
+    }
+    emit("account-auth-event", { id: aid, event: { Url: "https://claude.ai/oauth/authorize?mock=1" } });
+    emit("account-auth-event", { id: aid, event: "PedeCodigo" });
+  },
   account_code: ({ id: aid }) => { const a = db.accounts.find((x: any) => x.id === aid); if (a) (a.logged_in = true, a.email = "dev2@example.com"); emit("account-auth-event", { id: aid, event: "Ok" }); },
   account_cancel: () => undefined,
   repo_branches: () => ["main", "dev/login-safari", "feat/relatorio-pdf"],

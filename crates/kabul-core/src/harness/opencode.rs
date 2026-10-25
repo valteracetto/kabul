@@ -1,4 +1,6 @@
-//! OpenCode: `opencode run --format json [-m provider/modelo] [--session id] <mensagem>`, um processo por turno.
+//! OpenCode. Modo estruturado pelo ACP (`opencode acp`, ver [`super::acp`]): sessão persistente e
+//! aprovações no app (`session/request_permission`). O modo antigo por turno
+//! (`opencode run --format json`) fica em [`OpenCode::run_command`] e [`OpenCodeProtocol`].
 //!
 //! Confirmado nesta máquina (v2.1.4, `opencode run --help` e turno real com qwen3-8b no LM Studio):
 //! linhas `step_start` | `text` | `tool_use` (com `state.input/output/status`) | `step_finish` (tokens, custo).
@@ -34,10 +36,35 @@ impl Harness for OpenCode {
     }
 
     fn command(&self, opts: &SessionOptions) -> CmdSpec {
-        self.turn_command("", opts).unwrap()
+        // Mesmo ambiente do modo por turno (endpoint local e MCPs desligados via OPENCODE_CONFIG_CONTENT).
+        let env = self.run_command("", opts).env;
+        CmdSpec::new("opencode", ["acp"]).with_cwd(opts.cwd.clone()).with_env(&env)
     }
 
-    fn turn_command(&self, prompt: &str, opts: &SessionOptions) -> Option<CmdSpec> {
+    fn interactive_command(&self, opts: &SessionOptions) -> CmdSpec {
+        self.tui_command(opts)
+    }
+
+    fn protocol(&self, opts: &SessionOptions) -> Box<dyn Protocol> {
+        let model = match &opts.endpoint {
+            Some(ep) => Some(format!("{PROVIDER}/{}", ep.model)),
+            None => opts.model.clone(),
+        };
+        Box::new(super::acp::AcpProtocol::new(super::acp::options(opts, model)))
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities { remote_control: Support::TmuxMirror, cloud: Support::TmuxMirror, teleport: Support::TmuxMirror, background: Support::TmuxMirror }
+    }
+
+    fn endpoint_apis(&self) -> &'static [Api] {
+        &[Api::Openai, Api::Anthropic]
+    }
+}
+
+impl OpenCode {
+    /// Modo antigo, um processo por turno: `opencode run --format json … -- <mensagem>`.
+    pub fn run_command(&self, prompt: &str, opts: &SessionOptions) -> CmdSpec {
         let mut a: Vec<String> = ["run", "--format", "json"].map(String::from).to_vec();
         let mut env = opts.env.clone();
         if let Some(ep) = &opts.endpoint {
@@ -75,10 +102,10 @@ impl Harness for OpenCode {
         }
         a.push("--".into());
         a.push(prompt.into());
-        Some(CmdSpec::new("opencode", a).with_cwd(opts.cwd.clone()).with_env(&env))
+        CmdSpec::new("opencode", a).with_cwd(opts.cwd.clone()).with_env(&env)
     }
 
-    fn interactive_command(&self, opts: &SessionOptions) -> CmdSpec {
+    fn tui_command(&self, opts: &SessionOptions) -> CmdSpec {
         let mut a = vec![];
         let mut env = opts.env.clone();
         if let Some(ep) = &opts.endpoint {
@@ -91,22 +118,6 @@ impl Harness for OpenCode {
             a.extend(["--session".into(), s.clone()]);
         }
         CmdSpec::new("opencode", a).with_cwd(opts.cwd.clone()).with_env(&env)
-    }
-
-    fn protocol(&self, _opts: &SessionOptions) -> Box<dyn Protocol> {
-        Box::new(OpenCodeProtocol::default())
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        Capabilities { remote_control: Support::TmuxMirror, cloud: Support::TmuxMirror, teleport: Support::TmuxMirror, background: Support::TmuxMirror }
-    }
-
-    fn endpoint_apis(&self) -> &'static [Api] {
-        &[Api::Openai, Api::Anthropic]
-    }
-
-    fn app_approvals(&self) -> bool {
-        false
     }
 }
 
@@ -195,12 +206,18 @@ mod tests {
     fn comando_com_endpoint() {
         let ep = Endpoint { base_url: "http://127.0.0.1:1234".into(), apis: vec![Api::Openai], api_key: None, model: "qwen3-8b".into(), context: Some(40960) };
         let o = SessionOptions { endpoint: Some(ep), resume: Some("ses_1".into()), permission_mode: Some("plan".into()), ..Default::default() };
-        let c = OpenCode.turn_command("oi", &o).unwrap();
+        let c = OpenCode.run_command("oi", &o);
         assert_eq!(c.args[..6], ["run", "--format", "json", "--standalone", "-m", "kabul/qwen3-8b"]);
         assert!(c.args.windows(2).any(|w| w == ["--session", "ses_1"]));
         assert!(c.args.windows(2).any(|w| w == ["--agent", "plan"]));
         assert_eq!(c.args.last().unwrap(), "oi");
         let cfg = &c.env.iter().find(|(k, _)| k == "OPENCODE_CONFIG_CONTENT").unwrap().1;
         assert!(cfg.contains("http://127.0.0.1:1234/v1") && cfg.contains("40960"));
+        // Modo estruturado pelo ACP, com o mesmo ambiente; o turno não é mais um processo.
+        let acp = OpenCode.command(&o);
+        assert_eq!(acp.args, vec!["acp"]);
+        assert!(acp.env.iter().any(|(k, _)| k == "OPENCODE_CONFIG_CONTENT"));
+        assert!(OpenCode.turn_command("oi", &o).is_none());
+        assert!(OpenCode.app_approvals());
     }
 }

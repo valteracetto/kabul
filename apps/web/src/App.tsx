@@ -265,7 +265,7 @@ export function App() {
           const on = route.kind === "workspace" && route.id === id;
           return w && r ? <div key={id} className="ws-host" hidden={!on}><WorkspaceView ws={w} repo={r} active={on} sidebarHidden={!sidebar} onAgent={onAgent} onError={onError} onChange={reload} onOpenSettings={(repoId) => go({ kind: "settings", tab: "repo", repoId })} /></div> : null;
         })}
-        {route.kind === "sessions" && <SessionsView onError={onError} />}
+        {route.kind === "sessions" && <SessionsView onError={onError} onRoute={go} />}
         {route.kind === "settings" && <SettingsView key={route.tab + (route.repoId ?? "")} tab={route.tab ?? "geral"} repoId={route.repoId} repos={repos} onError={onError} onRoute={go} />}
         {route.kind === "local" && <LocalModelsView onError={onError} />}
         {route.kind === "diagnostics" && <DiagnosticsView onError={onError} />}

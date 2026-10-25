@@ -1,7 +1,8 @@
 import { confirmDialog } from "../components/Confirm";
 import { RemotePanel } from "../components/RemotePanel";
+import { LoginFlow, reduceLogin, MAX_RESTARTS, type LoginState } from "../components/LoginFlow";
 import { noSuggest } from "../noSuggest";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, HARNESS_LABEL, type AuthStatus, type HarnessKind, type Layer, type Repo, type RepoSettingsT } from "../api";
 import type { Route } from "../App";
 import { AccountsPanel } from "../components/Accounts";
@@ -54,24 +55,18 @@ export function SettingsView({ tab, repoId, repos, onError, onRoute }: { tab: st
   );
 }
 
-type Flow = { url?: string; askCode?: boolean; done?: "ok" | string };
-
 function Accounts({ onError }: { onError: (e: string) => void }) {
   const [st, setSt] = useState<AuthStatus[]>([]);
-  const [flows, setFlows] = useState<Partial<Record<HarnessKind, Flow>>>({});
-  const [codes, setCodes] = useState<Partial<Record<HarnessKind, string>>>({});
+  const [flows, setFlows] = useState<Partial<Record<HarnessKind, LoginState>>>({});
   const load = () => api.authStatus().then(setSt, (e) => onError(String(e)));
+  const restarts = useRef<Partial<Record<HarnessKind, number>>>({});
+  const start = (kind: HarnessKind) => api.authLogin(kind).catch((e) => setFlows((f) => ({ ...f, [kind]: { ...f[kind], done: String(e) } })));
   useEffect(() => {
     load();
     return api.onAuth(({ kind, event }) => {
-      setFlows((f) => {
-        const cur = { ...(f[kind] ?? {}) };
-        if (event === "PedeCodigo") cur.askCode = true;
-        else if (event === "Ok") cur.done = "ok";
-        else if ("Url" in event) cur.url = event.Url;
-        else if ("Erro" in event) cur.done = event.Erro;
-        return { ...f, [kind]: cur };
-      });
+      setFlows((f) => ({ ...f, [kind]: reduceLogin(f[kind], event) }));
+      // O CLI desistiu de esperar (agy: 60 s): link novo sozinho, sem perder o campo do código.
+      if (event === "Expirou" && (restarts.current[kind] = (restarts.current[kind] ?? 0) + 1) <= MAX_RESTARTS) start(kind);
       if (event === "Ok") load();
     });
   }, []);
@@ -89,20 +84,13 @@ function Accounts({ onError }: { onError: (e: string) => void }) {
               </div>
               <div className="dim small">{a.error ?? [a.method, a.source].filter(Boolean).join(" · ")}</div>
               {!a.installed ? <button className="btn" onClick={() => confirmDialog(`Instalar ${HARNESS_LABEL[a.kind]}? O comando roda numa sessão tmux visível no Painel.`).then((ok) => void (ok && api.installHarness(a.kind).then(() => onError(`Instalação de ${HARNESS_LABEL[a.kind]} iniciada (veja no Painel).`), (e) => onError(String(e)))))}>Instalar</button>
-                : !f && <button className="btn" onClick={() => (setFlows((x) => ({ ...x, [a.kind]: {} })), api.authLogin(a.kind).catch((e) => onError(String(e))))}>{a.logged_in ? "Entrar de novo" : "Entrar"}</button>}
+                : !f && <button className="btn" onClick={() => ((restarts.current[a.kind] = 0), setFlows((x) => ({ ...x, [a.kind]: {} })), start(a.kind))} data-testid={`auth-login-${a.kind}`}>{a.logged_in ? "Entrar de novo" : "Entrar"}</button>}
               {f && (
-                <div className="flow">
-                  {!f.url && !f.done && <div className="dim">iniciando o CLI…</div>}
-                  {f.url && <div>1. Abra: <a className="url" onClick={() => api.openExternal(f.url!)}>{f.url}</a></div>}
-                  {f.askCode && !f.done && (
-                    <div className="row">
-                      <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} placeholder="2. Cole o código" value={codes[a.kind] ?? ""} onChange={(e) => setCodes({ ...codes, [a.kind]: e.target.value })} />
-                      <button className="btn primary" onClick={() => api.authCode(a.kind, codes[a.kind] ?? "").catch((e) => onError(String(e)))}>Enviar</button>
-                    </div>
-                  )}
-                  {f.done && <div className={f.done === "ok" ? "ok" : "error"}>{f.done === "ok" ? "Login concluído." : f.done}</div>}
-                  <button className="btn" onClick={() => { api.authCancel(a.kind).catch(() => {}); setFlows((x) => ({ ...x, [a.kind]: undefined })); }}>{f.done ? "Fechar" : "Cancelar"}</button>
-                </div>
+                <LoginFlow f={f} codeNow={a.kind === "antigravity"} timeout={a.kind === "antigravity" ? 60 : undefined}
+                  onInput={(v) => setFlows((x) => ({ ...x, [a.kind]: { ...x[a.kind], input: v } }))}
+                  onSend={() => (setFlows((x) => ({ ...x, [a.kind]: { ...x[a.kind], sent: true } })), api.authCode(a.kind, f.input ?? "").catch((e) => onError(String(e))))}
+                  onRetry={() => ((restarts.current[a.kind] = 0), setFlows((x) => ({ ...x, [a.kind]: { input: x[a.kind]?.input } })), start(a.kind))}
+                  onCancel={() => { api.authCancel(a.kind).catch(() => {}); setFlows((x) => ({ ...x, [a.kind]: undefined })); }} />
               )}
             </div>
           );

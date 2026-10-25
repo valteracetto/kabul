@@ -20,7 +20,9 @@ async function turn(text) {
     out({ type: "system", subtype: "init", session_id: session, model: "claude-falso", tools: ["Bash"], mcp_servers: [] });
   }
   if (text.includes("devagar")) await sleep(1500);
-  let reply = `eco: ${text}`;
+  // Retomada (--resume <id>): a resposta diz qual sessão continuou.
+  const r = process.argv.indexOf("--resume");
+  let reply = `${r > 0 ? `retomada ${process.argv[r + 1]}: ` : ""}eco: ${text}`;
   if (text.includes("aprovar")) {
     const id = `req-${++req}`;
     out({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: `tool-${req}`, name: "Bash", input: { command: "npm test" } }] }, session_id: session });

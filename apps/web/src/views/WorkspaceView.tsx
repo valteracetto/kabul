@@ -18,7 +18,7 @@ import { Resizer, usePanelSize } from "../components/Resizer";
 import type { AgentState } from "../App";
 import { CloudDialog, CloudTab } from "../components/Cloud";
 import { pendingFirst } from "../components/CreateModal";
-import { pendingFork, pendingForkWs, pendingModel } from "../components/chatPrefs";
+import { mountedWs, pendingFork, pendingForkWs, pendingModel } from "../components/chatPrefs";
 import { useSettings } from "../components/useSettings";
 import { RunsOnBadge, cloudAdd, cloudList, cloudRemove, cloudRunsOn } from "../components/RunsOn";
 import type { CloudInfo, RepoAccess } from "../api";
@@ -89,6 +89,7 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
     open({ kind: "term", session, title: `Terminal ${n}` });
   };
 
+  useEffect(() => (mountedWs.add(ws.id), () => void mountedWs.delete(ws.id)), [ws.id]);
   // Sessões salvas viram abas; se não houver, uma conversa nova.
   useEffect(() => {
     api.historyList(ws.id).then((h) => {
@@ -329,6 +330,12 @@ export function WorkspaceView({ ws, repo, active, sidebarHidden, onAgent, onErro
     window.addEventListener("kabul:zen-state", zen);
     return () => (window.removeEventListener("kabul:ws-action", h), window.removeEventListener("kabul:zen-state", zen));
   }, [ws.id]);
+  // Painel de recursos: a aba da conversa clicada vem para a frente.
+  useEffect(() => {
+    const activate = (e: Event) => { const i = tabs.findIndex((t) => "id" in t && t.id === (e as CustomEvent).detail); if (i >= 0) setActiveTab(i); };
+    window.addEventListener("kabul:activate-tab", activate);
+    return () => window.removeEventListener("kabul:activate-tab", activate);
+  }, [tabs]);
   // ⌥⌘B alterna o painel direito.
   useEffect(() => {
     if (!active) return;

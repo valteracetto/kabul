@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type AccountRow } from "../api";
 import { confirmDialog } from "./Confirm";
+import { LoginFlow, reduceLogin, MAX_RESTARTS, type LoginState } from "./LoginFlow";
 
 const PROVIDERS: [string, string][] = [["claude", "Claude"], ["codex", "ChatGPT / Codex"], ["agy", "Google / Gemini (Antigravity)"], ["gh", "GitHub"]];
 
@@ -13,21 +14,17 @@ function ProviderAccounts({ provider, label, onError }: { provider: string; labe
   const [rows, setRows] = useState<AccountRow[]>([]);
   const [adding, setAdding] = useState("");
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
-  const [flow, setFlow] = useState<Record<string, { url?: string; code?: string; ask?: boolean; done?: string; input?: string }>>({});
+  const [flow, setFlow] = useState<Record<string, LoginState>>({});
   const load = () => api.accountsList(provider).then(setRows, (e) => onError(String(e)));
+  const restarts = useRef<Record<string, number>>({});
+  const start = (id: string) => api.accountLogin(id).catch((e) => setFlow((f) => ({ ...f, [id]: { ...f[id], done: String(e) } })));
   useEffect(() => {
     load();
     return api.onAccountAuth(({ id, event }) => {
       if (!id.startsWith(provider + ":")) return;
-      setFlow((f) => {
-        const c = { ...(f[id] ?? {}) };
-        if (event === "Ok") c.done = "ok";
-        else if (event === "PedeCodigo") c.ask = true;
-        else if ("Url" in event) c.url = event.Url;
-        else if ("Codigo" in event) c.code = event.Codigo;
-        else if ("Erro" in event) c.done = event.Erro;
-        return { ...f, [id]: c };
-      });
+      setFlow((f) => ({ ...f, [id]: reduceLogin(f[id], event) }));
+      // O CLI desistiu de esperar (agy: 60 s): link novo sozinho, sem perder o campo do código.
+      if (event === "Expirou" && (restarts.current[id] = (restarts.current[id] ?? 0) + 1) <= MAX_RESTARTS) start(id);
       if (event === "Ok") load();
     });
   }, [provider]);
@@ -53,19 +50,16 @@ function ProviderAccounts({ provider, label, onError }: { provider: string; labe
                 {!r.default && <button className="text-btn small" onClick={() => api.accountUpdate(r.id, { makeDefault: true }).then(load)} data-testid="account-default">Tornar padrão</button>}
                 <button className="text-btn small" onClick={() => setEditing({ id: r.id, name: r.nickname })} data-testid="account-rename">Renomear</button>
                 <button className="text-btn small" onClick={async () => (await confirmDialog(`Remover a conta "${r.nickname}"? As credenciais dela no Kabul são apagadas.`, { ok: "Remover", danger: true })) && api.accountUpdate(r.id, { remove: true }).then(load)} data-testid="account-remove">Remover</button>
-                {!f && <button className="btn" onClick={() => (setFlow({ ...flow, [r.id]: {} }), api.accountLogin(r.id).catch((e) => onError(String(e))))} data-testid="account-login">Entrar</button>}
+                {!f && <button className="btn" onClick={() => ((restarts.current[r.id] = 0), setFlow({ ...flow, [r.id]: {} }), start(r.id))} data-testid="account-login">Entrar</button>}
               </>
             )}
             {f && (
-              <div className="flow acc-flow">
-                {f.code && <div>Código: <code className="big-code">{f.code}</code></div>}
-                {f.url && <div className="small">Abra: <a className="url" onClick={() => api.openExternal(f.url!)}>{f.url}</a></div>}
-                {f.ask && !f.done && (
-                  <div className="row"><input placeholder="Cole o código" value={f.input ?? ""} onChange={(e) => setFlow({ ...flow, [r.id]: { ...f, input: e.target.value } })} data-testid="account-code" />
-                    <button className="btn primary" onClick={() => api.accountCode(r.id, f.input ?? "").catch((e) => onError(String(e)))}>Enviar</button></div>
-                )}
-                {f.done && <div className={f.done === "ok" ? "ok" : "error"}>{f.done === "ok" ? "Conta conectada." : f.done}</div>}
-                <button className="text-btn small" onClick={() => (api.accountCancel(r.id).catch(() => {}), setFlow((x) => { const n = { ...x }; delete n[r.id]; return n; }))}>{f.done ? "Fechar" : "Cancelar"}</button>
+              <div className="acc-flow">
+                <LoginFlow f={f} codeNow={provider === "agy"} timeout={provider === "agy" ? 60 : undefined} testid="account-flow"
+                  onInput={(v) => setFlow((x) => ({ ...x, [r.id]: { ...x[r.id], input: v } }))}
+                  onSend={() => (setFlow((x) => ({ ...x, [r.id]: { ...x[r.id], sent: true } })), api.accountCode(r.id, f.input ?? "").catch((e) => onError(String(e))))}
+                  onRetry={() => ((restarts.current[r.id] = 0), setFlow((x) => ({ ...x, [r.id]: { input: x[r.id]?.input } })), start(r.id))}
+                  onCancel={() => (api.accountCancel(r.id).catch(() => {}), setFlow((x) => { const n = { ...x }; delete n[r.id]; return n; }))} />
               </div>
             )}
           </div>

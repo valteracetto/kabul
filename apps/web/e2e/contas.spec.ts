@@ -20,9 +20,9 @@ test("várias contas: adicionar, entrar, renomear, padrão, remover; trocar no m
   await page.getByTestId("account-add-claude").press("Enter");
   await expect(claude.getByTestId("account-row")).toHaveCount(2);
   await claude.getByTestId("account-login").click();
-  await claude.getByTestId("account-code").fill("codigo-falso");
-  await claude.getByRole("button", { name: "Enviar" }).click();
-  await expect(claude).toContainText("Conta conectada.");
+  await claude.getByTestId("login-code").fill("codigo-falso");
+  await claude.getByTestId("login-send").click();
+  await expect(claude).toContainText("Login concluído.");
   await expect(claude).toContainText("dev2@example.com");
   await claude.getByTestId("account-rename").click();
   await claude.getByTestId("account-rename-input").fill("Cliente");
@@ -50,6 +50,29 @@ test("várias contas: adicionar, entrar, renomear, padrão, remover; trocar no m
   await page.getByTestId("accounts-claude").getByTestId("account-remove").click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("accounts-claude").getByTestId("account-row")).toHaveCount(1);
+});
+
+test("conta do Antigravity: link e campo do código na hora, contagem de 60 s, link novo quando expira sem perder o código", async ({ page }) => {
+  await page.goto("/?mock");
+  await page.getByTestId("settings").click();
+  await page.getByTestId("set-tab-contas").click();
+  const agy = page.getByTestId("accounts-agy");
+  await page.getByTestId("account-add-agy").fill("Pessoal");
+  await page.getByTestId("account-add-agy").press("Enter");
+  await expect(agy.getByTestId("account-row")).toHaveCount(2);
+  await agy.getByTestId("account-login").click();
+  const flow = agy.getByTestId("account-flow");
+  await expect(flow.getByTestId("login-open")).toBeVisible();
+  await expect(flow.locator(".url")).toContainText("accounts.google.com");
+  await expect(flow.getByTestId("login-code")).toBeVisible();
+  await expect(flow.getByTestId("login-countdown")).toContainText(/expira em (60|59|58) s/);
+  await flow.getByTestId("login-code").fill("4/0AFAKE");
+  await page.screenshot({ path: "../../.context/e2e/contas-agy-login.png" });
+  // O CLI desistiu (60 s no agy): link novo sozinho, o código digitado continua no campo.
+  await expect(flow.locator(".url")).toContainText("mock=2");
+  await expect(flow.getByTestId("login-code")).toHaveValue("4/0AFAKE");
+  await flow.getByTestId("login-send").click();
+  await expect(flow.getByTestId("login-result")).toContainText("Login concluído.");
 });
 
 test("aba: renomear sem prompt() (o WKWebView não tem)", async ({ page }) => {

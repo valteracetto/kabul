@@ -10,5 +10,7 @@ export const chatPrefs = {
 export interface PendingFork { items: unknown[]; resume: string | null; forkSession: boolean; replay: boolean; modelKey: string | null }
 export const pendingFork: Record<string, PendingFork> = {};
 export const pendingForkWs: Record<string, { chatId: string }> = {};
+/** Workspaces com a tela montada (recebem eventos como kabul:fork-tab na hora). */
+export const mountedWs = new Set<string>();
 /** Modelo pedido para uma aba nova (ex.: "Modelo da revisão"). */
 export const pendingModel: Record<string, string> = {};

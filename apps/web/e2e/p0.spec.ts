@@ -19,7 +19,8 @@ test("cards por ferramenta, passos recolhidos (⌃O), markdown, popover de tempo
   await setup(page);
   await say(page, "liste");
   await expect(host(page).locator(".turn-meta")).toBeVisible();
-  await expect(host(page).getByTestId("expand-steps")).toContainText("Expandir 3 chamadas de ferramenta");
+  await expect(host(page).getByTestId("expand-steps")).toContainText("3 ferramentas");
+  await expect(host(page).getByTestId("steps-shell")).toBeVisible();
   await host(page).getByTestId("expand-steps").click();
   await expect(host(page).locator('[data-tool="TodoWrite"]')).toContainText("1/2 concluídas");
   await expect(host(page).locator('[data-tool="Edit"]')).toContainText('+ println!("olá");');
@@ -140,4 +141,66 @@ test("⌘O abre no app padrão das configurações; ⌘⇧O abre a lista", async
   await expect.poll(() => page.evaluate(() => (window as any).__opened)).toBe("terminal:/mock/ws/kabul");
   await page.keyboard.press("Meta+Shift+o");
   await expect(page.locator(".open-pop")).toBeVisible();
+});
+
+test("agy: comando negado vira cartão com a regra; permitir uma vez continua; fim de turno não duplica", async ({ page }) => {
+  await setup(page);
+  await say(page, "agy-negado");
+  const card = host(page).getByTestId("approval");
+  await expect(card).toContainText("Rodar este comando?");
+  await expect(card).toContainText("npm audit");
+  await expect(card.getByTestId("approval-rule")).toContainText("command(npm audit)");
+  await expect(card.getByTestId("approve-always")).toContainText("Sempre permitir neste workspace");
+  await expect(card).toContainText("Permitir uma vez");
+  await expect(card).toContainText("Negar");
+  await page.screenshot({ path: "../../.context/e2e/p0-agy-aprovacao.png" });
+  await host(page).getByTestId("composer").press("Enter");
+  await expect(card).toContainText("Aprovado");
+  await expect(host(page).locator(".msg-assistant").last()).toContainText("Nenhuma vulnerabilidade.");
+  await expect(host(page).locator(".turn-meta")).toHaveCount(1);
+  await expect(host(page).locator(".msg-assistant .caret")).toHaveCount(0);
+});
+
+test("Configurações › Modelos: 'Gemini: aprovar tudo' desligado por padrão e pede confirmação", async ({ page }) => {
+  await page.goto("/?mock");
+  await page.getByTestId("settings").click();
+  await page.getByTestId("set-tab-modelos").click();
+  const t = page.getByTestId("toggle-agy_skip_permissions");
+  await expect(t).toHaveAttribute("aria-checked", "false");
+  await expect(page.locator('[data-setting^="Gemini: aprovar tudo"]')).toContainText("pede aprovação num cartão");
+  await t.click();
+  await expect(page.getByTestId("confirm-ok")).toContainText("Aprovar tudo");
+  await page.keyboard.press("Escape");
+  await expect(t).toHaveAttribute("aria-checked", "false");
+  await t.click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(t).toHaveAttribute("aria-checked", "true");
+});
+
+test("IA trabalhando: linha de status com o que está rodando e cronômetro; Parar e Enviar lado a lado; passos numa linha", async ({ page }) => {
+  await setup(page);
+  await say(page, "devagar");
+  const line = host(page).getByTestId("working");
+  await expect(line).toContainText("Rodando npm audit");
+  await expect(line.getByTestId("working-time")).toHaveText(/^\d+\.\ds$/);
+  const t1 = Number((await line.getByTestId("working-time").textContent())!.slice(0, -1));
+  await page.waitForTimeout(400);
+  expect(Number((await line.getByTestId("working-time").textContent())!.slice(0, -1))).toBeGreaterThan(t1);
+  await expect(host(page).getByTestId("stop")).toBeVisible();
+  await expect(host(page).getByTestId("send")).toBeVisible();
+  await expect(host(page).getByTestId("send")).toBeDisabled();
+  await host(page).getByTestId("composer").fill("depois disso, rode os testes");
+  await expect(host(page).getByTestId("send")).toBeEnabled();
+  await expect(host(page).getByTestId("stop")).toBeVisible();
+  await page.screenshot({ path: "../../.context/e2e/p0-trabalhando.png" });
+  await expect(line).toContainText("Aguardando subagente Revisar o lockfile");
+  // Passos do turno em andamento já recolhidos numa linha (sem cartões grandes).
+  await expect(host(page).getByTestId("expand-steps")).toContainText(/ferramenta/);
+  await expect(host(page).locator('[data-tool="Bash"]')).toHaveCount(0);
+  await expect(host(page).locator(".turn-meta")).toHaveCount(1);
+  await expect(host(page).getByTestId("working")).toHaveCount(0);
+  await expect(host(page).getByTestId("expand-steps")).toContainText("2 ferramentas, 1 mensagem");
+  await expect(host(page).getByTestId("steps-shell")).toBeVisible();
+  await host(page).getByTestId("expand-steps").click();
+  await expect(host(page).locator('[data-tool="Bash"]')).toContainText("npm audit");
 });

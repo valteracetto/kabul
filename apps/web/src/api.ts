@@ -1,6 +1,6 @@
 import { transport } from "./transport";
 
-export type HarnessKind = "claude" | "codex" | "antigravity" | "opencode" | "qwen" | "gemini";
+export type HarnessKind = "claude" | "codex" | "antigravity" | "opencode" | "qwen" | "gemini" | "goose" | "cursor";
 export type Api = "openai" | "anthropic" | "gemini";
 
 export interface Repo { id: string; name: string; path: string; default_branch: string; hidden?: boolean; icon?: string | null }
@@ -48,7 +48,7 @@ export interface AppSettings {
   branch_prefix_type: string; branch_prefix_custom: string; notifications: boolean; sound: boolean; caffeinate: boolean; auto_rename_branch: boolean; env: EnvVar[]; env_file?: string | null;
   completion_sound?: string; always_show_context?: boolean; auto_convert_long_text?: boolean; not_absolutely_right?: boolean;
   open_prs_in?: string; delete_branch_on_archive?: boolean; archive_on_merge?: boolean; rename_ws_on_branch?: boolean; merge_method?: string; github_dry_run?: boolean; pr_include_workspace_link?: boolean; automerge?: boolean; optional_checks_blocking?: boolean; push_set_upstream?: boolean; stacked_prs?: boolean;
-  claude_output_style?: string; codex_personality?: string; review_model?: string | null; default_plan?: boolean;
+  claude_output_style?: string; codex_personality?: string; review_model?: string | null; default_plan?: boolean; agy_skip_permissions?: boolean; show_resources?: boolean;
   clone_dir?: string; claude_path?: string | null; codex_path?: string | null; opencode_path?: string | null; scrollback_mb?: number;
 }
 export interface SessionSummary { id: string; title: string; model_key: string | null; updated_at: number }
@@ -81,7 +81,16 @@ export type AgentEvent =
   | { type: "log"; line: string }
   | { type: "exited"; code: number | null };
 
-export type AuthEvent = { kind: HarnessKind; event: { Url: string } | "PedeCodigo" | "Ok" | { Erro: string } };
+/** Processo no painel de recursos (CPU e memória somam os filhos). */
+export interface ResourceNode { pid: number; name: string; cpu: number; mem: number; kind: string; agent: string | null; workspace_id: string | null; chat_id: string | null; children: ResourceNode[] }
+export interface ResourceSnapshot { cpu: number; mem: number; count: number; root: ResourceNode }
+
+/** Agente rodando fora do Kabul (outro terminal) e sessões recentes dos CLIs (core `external`). */
+export interface ExternalRunning { agent: string; pid: number; cwd: string | null; repo: string | null; branch: string | null; running_secs: number; terminal: string | null; session_id: string | null }
+export interface ExternalRecent { agent: string; id: string; title: string; cwd: string | null; repo: string | null; branch: string | null; updated: number }
+export interface ExternalSessions { running: ExternalRunning[]; recent: ExternalRecent[]; cloud_note: string }
+
+export type AuthEvent = { kind: HarnessKind; event: import("./components/LoginFlow").LoginEvent };
 
 const c = transport.call.bind(transport);
 
@@ -181,7 +190,7 @@ export const api = {
   accountLogin: (id: string) => c<void>("account_login", { id }),
   accountCode: (id: string, code: string) => c<void>("account_code", { id, code }),
   accountCancel: (id: string) => c<void>("account_cancel", { id }),
-  onAccountAuth: (h: (p: { id: string; event: { Url: string } | { Codigo: string } | "PedeCodigo" | "Ok" | { Erro: string } }) => void) => transport.subscribe("account-auth-event", h),
+  onAccountAuth: (h: (p: { id: string; event: import("./components/LoginFlow").LoginEvent }) => void) => transport.subscribe("account-auth-event", h),
   cloudStart: (workspaceId: string, prompt: string, environment: string | null) => c<{ tmux: string; info: CloudInfo }>("cloud_start", { workspaceId, prompt, environment }),
   cloudPoll: (tmux: string) => c<CloudInfo>("cloud_poll", { tmux }),
   teleport: (workspaceId: string, id: string) => c<string>("teleport", { workspaceId, id }),
@@ -211,6 +220,8 @@ export const api = {
   chatSend: (chatId: string, text: string) => c<void>("chat_send", { chatId, text }),
   chatApprove: (chatId: string, requestId: string, allow: boolean, extra: { tool?: string; updatedInput?: unknown; always?: boolean } = {}) => c<void>("chat_approve", { chatId, requestId, allow, ...extra }),
   chatStop: (chatId: string) => c<void>("chat_stop", { chatId }),
+  resources: () => c<ResourceSnapshot>("resources_get"),
+  externalSessions: () => c<ExternalSessions>("external_sessions"),
   onChat: (h: (p: { chat_id: string; event: AgentEvent }) => void) => transport.subscribe("chat-event", h),
 
   historyList: (workspaceId: string) => c<SessionSummary[]>("history_list", { workspaceId }),
@@ -237,7 +248,7 @@ export const api = {
   transcribe: (audio: number[], ext: string) => c<string>("transcribe", { audio, ext }),
 };
 
-export const HARNESS_LABEL: Record<HarnessKind, string> = { claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", opencode: "OpenCode", qwen: "Qwen Code", gemini: "Gemini CLI" };
+export const HARNESS_LABEL: Record<HarnessKind, string> = { claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", opencode: "OpenCode", qwen: "Qwen Code", gemini: "Gemini CLI", goose: "Goose", cursor: "Cursor" };
 export const EFFORT_LABEL: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "XHigh", max: "Max", ultra: "Ultra" };
 export const STATUS_LABEL: Record<string, string> = { backlog: "Backlog", "in-progress": "Em andamento", "in-review": "Em revisão", done: "Concluído", canceled: "Cancelado" };
 /** Ordem dos grupos por status na barra lateral. */

@@ -246,6 +246,9 @@ pub struct AppSettings {
     pub notifications: bool,
     #[serde(default = "d_true")]
     pub sound: bool,
+    /// Chip de uso de recursos (memória do Kabul e filhos) no topo da barra lateral.
+    #[serde(default = "d_true")]
+    pub show_resources: bool,
     /// Mantém o Mac acordado (`caffeinate`) enquanto há agente rodando.
     #[serde(default = "d_true")]
     pub caffeinate: bool,
@@ -322,6 +325,9 @@ pub struct AppSettings {
     /// Conversas novas começam em plan mode.
     #[serde(default)]
     pub default_plan: bool,
+    /// Gemini (agy): aprova tudo sozinho (`--dangerously-skip-permissions`) em vez do cartão de aprovação.
+    #[serde(default)]
+    pub agy_skip_permissions: bool,
 
     // ---- Advanced ----
     /// Executáveis dos agentes (vazio = o do PATH).

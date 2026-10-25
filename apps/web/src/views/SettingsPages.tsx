@@ -30,6 +30,7 @@ export function GeneralPage({ onError }: { onError: (e: string) => void }) {
           <button className="btn" disabled={!s.sound} onClick={() => api.soundPlay(s.completion_sound ?? "Glass").catch((e) => onError(String(e)))} data-testid="sound-test">Testar</button>
         </div>
       </Row>
+      <Toggle s={s} save={save} k="show_resources" label="Mostrar uso de recursos na barra lateral" hint="Memória e CPU do Kabul e dos agentes; o detalhe abre com um clique" />
       <Toggle s={s} save={save} k="caffeinate" label="Manter o Mac acordado com agentes rodando" hint="Usa caffeinate enquanto houver uma sessão ativa" />
       <Toggle s={s} save={save} k="always_show_context" label="Sempre mostrar o uso de contexto" hint="Sem isso, o anel só aparece acima de 70%" />
       <Toggle s={s} save={save} k="auto_convert_long_text" label="Converter texto longo em anexo" hint="Colar mais de 5.000 caracteres vira um arquivo em .context/attachments" />
@@ -98,6 +99,12 @@ export function ModelsPage({ onError }: { onError: (e: string) => void }) {
       <Row label="Personalidade do Codex" hint="Guardada; o Codex instalado ainda não tem a opção confirmada"><select value={s.codex_personality ?? "pragmatic"} onChange={(e) => save({ ...s, codex_personality: e.target.value })}><option value="pragmatic">Pragmática</option><option value="friendly">Amigável</option><option value="none">Nenhuma</option></select></Row>
       <Row label="Modelo da revisão" hint="O botão Revisar (⌘⇧R) abre uma conversa nova com este modelo"><select value={s.review_model ?? ""} onChange={(e) => save({ ...s, review_model: e.target.value || null })} data-testid="review-model"><option value="">O da conversa atual</option>{models.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}</select></Row>
       <Toggle s={s} save={save} k="default_plan" label="Conversas novas em plan mode" hint="⇧⇥ alterna em cada conversa" />
+      <Toggle s={s} k="agy_skip_permissions" danger label="Gemini: aprovar tudo automaticamente (--dangerously-skip-permissions)"
+        hint="Desligado (padrão): cada comando ou escrita do Gemini (agy) pede aprovação num cartão e a regra aprovada fica só neste workspace. Ligado: o agente roda qualquer comando e grava qualquer arquivo sem perguntar. Vale para conversas novas."
+        save={async (n) => {
+          if (n.agy_skip_permissions && !(await confirmDialog("Aprovar tudo automaticamente no Gemini? O agente vai rodar comandos e alterar arquivos sem pedir permissão. Use só em repositórios em que você confia.", { ok: "Aprovar tudo", danger: true }))) return;
+          save(n);
+        }} />
     </div>
   );
 }

@@ -8,6 +8,9 @@ const base = (p: string) => p.split("/").pop() ?? p;
 
 /** Linhas de diff de um Edit/MultiEdit/Write para o card. */
 function editLines(name: string, input: O): { sign: string; text: string }[] {
+  // Agentes que não mandam o conteúdo (ex.: agy): só o nome do arquivo.
+  if (name === "Write" && input.content == null) return [];
+  if (name !== "Write" && input.old_string == null && input.new_string == null && !input.edits) return [];
   if (name === "Write") return String(input.content ?? "").split("\n").slice(0, 60).map((t) => ({ sign: "+", text: t }));
   const edits: O[] = name === "MultiEdit" ? input.edits ?? [] : [input];
   return edits.flatMap((e) => [
@@ -61,8 +64,11 @@ export function ToolCard({ name, input, output, error, onOpenFile }: { name: str
     sub = short(JSON.stringify(input) ?? "", 100);
     body = <><pre>{JSON.stringify(input, null, 2)}</pre>{output !== undefined && <pre className="tc-out">{short(output, 4000)}</pre>}</>;
   } else {
-    sub = short(JSON.stringify(input) ?? "", 100);
-    body = <><pre>{JSON.stringify(input, null, 2)}</pre>{output !== undefined && <pre className="tc-out">{short(output, 4000)}</pre>}</>;
+    // Ferramenta sem cartão próprio: nome legível e os parâmetros como "chave: valor".
+    title = name.replace(/_/g, " ");
+    const params = Object.entries(i).filter(([, v]) => v != null && v !== "");
+    sub = short(params.map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`).join(" · "), 100);
+    body = <><dl className="tc-params">{params.map(([k, v]) => <div key={k}><dt>{k}</dt><dd><code>{typeof v === "string" ? v : JSON.stringify(v)}</code></dd></div>)}</dl>{output !== undefined && <pre className="tc-out">{short(output, 4000)}</pre>}</>;
   }
   // Todo e edição abertos por padrão (o conteúdo é o que interessa).
   useEffect(() => void ((name === "TodoWrite" || ["Edit", "MultiEdit", "Write"].includes(name)) && setOpen(true)), [name]);
@@ -86,20 +92,24 @@ export function ThinkingCard({ text }: { text: string }) {
   );
 }
 
-const APPROVAL_TITLE: Record<string, string> = { Bash: "Rodar este comando?", Edit: "Aplicar esta edição?", MultiEdit: "Aplicar estas edições?", Write: "Criar/sobrescrever este arquivo?", WebFetch: "Abrir esta página?" };
+const APPROVAL_TITLE: Record<string, string> = { Bash: "Rodar este comando?", Edit: "Aplicar esta edição?", MultiEdit: "Aplicar estas edições?", Write: "Criar/sobrescrever este arquivo?", Read: "Ler este arquivo?", LS: "Listar esta pasta?", WebFetch: "Abrir esta página?" };
 
-/** Pedido de permissão: Sim (↵), "Sempre permitir <ferramenta> nesta sessão" (⌘↵), Não (⌫). */
+/** Pedido de permissão: Sim (↵), "Sempre permitir <ferramenta> nesta sessão" (⌘↵), Não (⌫).
+ *  Com `input.rule` (agy), "sempre" grava a regra no projeto do workspace e o cartão mostra a regra. */
 export function ApprovalCard({ tool, input, decided, allow, always, onDecide }: { tool: string; input: unknown; decided?: boolean; allow?: boolean; always?: boolean; onDecide: (allow: boolean, always: boolean) => void }) {
   const i = (input ?? {}) as O;
+  const rule = typeof i.rule === "string" ? i.rule : null;
+  const what = i.command ?? i.file_path ?? i.url ?? i.path ?? (rule ? null : short(JSON.stringify(input) ?? "", 300));
   return (
-    <div className="approval" data-testid="approval">
+    <div className="approval" data-testid="approval" data-rule={rule ?? undefined}>
       <div className="ap-head"><ITool size={14} /> <b>{APPROVAL_TITLE[tool] ?? `Permitir ${tool}?`}</b></div>
-      <code className="ap-what">{i.command ?? i.file_path ?? i.url ?? short(JSON.stringify(input) ?? "", 300)}</code>
-      {decided ? <span className={"badge " + (allow ? "ok" : "bad")}>{allow ? (always ? `Sempre permitido (${tool})` : "Aprovado") : "Negado"}</span> : (
+      {what && <code className="ap-what">{what}</code>}
+      {rule && <div className="dim small" data-testid="approval-rule">Regra: <code>{rule}</code></div>}
+      {decided ? <span className={"badge " + (allow ? "ok" : "bad")}>{allow ? (always ? (rule ? "Sempre permitido neste workspace" : `Sempre permitido (${tool})`) : "Aprovado") : "Negado"}</span> : (
         <div className="row ap-btns">
-          <button className="btn primary" onClick={() => onDecide(true, false)}>Sim <kbd>↵</kbd></button>
-          <button className="btn" onClick={() => onDecide(true, true)} data-testid="approve-always">Sempre permitir {tool} nesta sessão <kbd>⌘↵</kbd></button>
-          <button className="btn" onClick={() => onDecide(false, false)}>Não <kbd>⌫</kbd></button>
+          <button className="btn primary" onClick={() => onDecide(true, false)}>{rule ? "Permitir uma vez" : "Sim"} <kbd>↵</kbd></button>
+          <button className="btn" onClick={() => onDecide(true, true)} data-testid="approve-always">{rule ? "Sempre permitir neste workspace" : `Sempre permitir ${tool} nesta sessão`} <kbd>⌘↵</kbd></button>
+          <button className="btn" onClick={() => onDecide(false, false)}>{rule ? "Negar" : "Não"} <kbd>⌫</kbd></button>
         </div>
       )}
     </div>

@@ -90,6 +90,8 @@ pub fn list(kind: HarnessKind, workspace: &Path, repo: &Path) -> Vec<McpEntry> {
             }
             v
         }
+        // MCP do Goose/Cursor: config própria de cada um, ainda não lida (a confirmar).
+        HarnessKind::Goose | HarnessKind::Cursor => vec![],
         HarnessKind::Antigravity => {
             let o = crate::harness::CmdSpec::new("agy", ["mcp", "list"]).command().output();
             let out = o.map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
