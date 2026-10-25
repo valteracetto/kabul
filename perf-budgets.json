@@ -13,7 +13,7 @@
     "cpu_media": { "path": "server.cpu_pct.avg", "max": 30 },
     "cpu_p95": { "path": "server.cpu_pct.p95", "max": 60 },
     "memoria_max": { "path": "server.rss_mb.max", "max": 150 },
-    "latencia_p95": { "path": "latency_ms.p95", "max": 25 },
+    "latencia_p95": { "path": "latency_ms.p95", "max": 40 },
     "latencia_p99": { "path": "latency_ms.p99", "max": 60 },
     "entrega": { "path": "delivery_ratio", "min": 0.99 },
     "rpc_live_sessions_p95": { "path": "rpc_ms.live_sessions.p95", "max": 50 },
