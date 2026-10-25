@@ -4,6 +4,14 @@
 
 ## English
 
+### Creator
+
+Kabul was created by **Valter Acetto** ([@valteracetto](https://github.com/valteracetto)): the idea, the product vision and every decision about what Kabul should be came from him.
+
+### Built with Claude
+
+Kabul was built with the help of [Claude](https://www.anthropic.com/claude), by Anthropic, through [Claude Code](https://claude.com/claude-code). Claude wrote most of the code, tests and documentation under Valter's direction, coordinating many agents working in parallel.
+
 ### CodexBar
 
 Parts of Kabul's usage features were based on ideas from
@@ -33,6 +41,14 @@ Kabul is built on many open-source projects. Each one keeps its own license; see
 `package-lock.json` files for the complete list.
 
 ## Português
+
+### Criador
+
+O Kabul foi criado por **Valter Acetto** ([@valteracetto](https://github.com/valteracetto)): a ideia, a visão do produto e todas as decisões sobre o que o Kabul deve ser vieram dele.
+
+### Feito com o Claude
+
+O Kabul foi construído com a ajuda do [Claude](https://www.anthropic.com/claude), da Anthropic, pelo [Claude Code](https://claude.com/claude-code). O Claude escreveu a maior parte do código, dos testes e da documentação sob a direção do Valter, coordenando vários agentes trabalhando em paralelo.
 
 ### CodexBar
 

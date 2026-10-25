@@ -1,0 +1,19 @@
+# Cloudflare Pages project for the Kabul landing page (site/).
+# Deploy: npm run deploy (wrangler pages deploy dist --project-name kabul). See site/README.md.
+name = "kabul"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-10-01"
+
+# Waitlist storage for Kabul Cloud (functions/api/waitlist.ts).
+# Create the namespace once and paste its id here:
+#   npx wrangler kv namespace create WAITLIST
+# The binding name must stay WAITLIST; only the id changes per account.
+[[kv_namespaces]]
+binding = "WAITLIST"
+id = "0083b9dd4f2d471d8658f666f9e9cd5d"
+
+[vars]
+# Sign-ups allowed per IP in each window, and the window in seconds (KV's minimum TTL is 60).
+WAITLIST_RATE_LIMIT = "5"
+WAITLIST_RATE_WINDOW = "3600"
+# WAITLIST_SALT is a secret, not a var: npx wrangler pages secret put WAITLIST_SALT --project-name kabul

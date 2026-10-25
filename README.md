@@ -12,8 +12,11 @@ English · [Português](README.pt-BR.md)
   <a href="https://github.com/valteracetto/kabul/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/valteracetto/kabul/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/valteracetto/kabul/releases"><img alt="Release" src="https://img.shields.io/github/v/release/valteracetto/kabul?include_prereleases&sort=semver"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <a href="https://kabul.dev"><img alt="Website" src="https://img.shields.io/badge/website-kabul.dev-111111"></a>
   <a href="https://valteracetto.github.io/kabul/"><img alt="Docs" src="https://img.shields.io/badge/docs-English%20%C2%B7%20Portugu%C3%AAs-8A2BE2"></a>
 </p>
+
+<p align="center"><a href="https://kabul.dev"><strong>kabul.dev</strong></a> · <a href="https://valteracetto.github.io/kabul/">Docs</a> · <a href="https://github.com/valteracetto/kabul/releases/latest">Download</a></p>
 
 <p align="center">
   <img src="docs/assets/hero.png" alt="Kabul: parallel workspaces, chat with approvals and the diff side by side" width="900">
@@ -275,6 +278,9 @@ CI and releases) and the [contributing guide](docs/guide/contributing.md) (layou
 Security issues: please report privately, see [SECURITY.md](SECURITY.md).
 
 ## Credits
+
+Created by **Valter Acetto** ([@valteracetto](https://github.com/valteracetto)), who had the idea and leads the
+product. Built with the help of [Claude](https://www.anthropic.com/claude) through [Claude Code](https://claude.com/claude-code).
 
 Parts of the usage and menu bar features were based on ideas from
 [CodexBar](https://github.com/steipete/CodexBar) by Peter Steinberger (MIT). Kabul's code is its own.

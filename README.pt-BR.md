@@ -12,8 +12,11 @@
   <a href="https://github.com/valteracetto/kabul/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/valteracetto/kabul/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/valteracetto/kabul/releases"><img alt="Release" src="https://img.shields.io/github/v/release/valteracetto/kabul?include_prereleases&sort=semver"></a>
   <a href="LICENSE"><img alt="Licença: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <a href="https://kabul.dev/pt-BR/"><img alt="Site" src="https://img.shields.io/badge/site-kabul.dev-111111"></a>
   <a href="https://valteracetto.github.io/kabul/pt-BR/"><img alt="Documentação" src="https://img.shields.io/badge/docs-Portugu%C3%AAs%20%C2%B7%20English-8A2BE2"></a>
 </p>
+
+<p align="center"><a href="https://kabul.dev/pt-BR/"><strong>kabul.dev</strong></a> · <a href="https://valteracetto.github.io/kabul/pt-BR/">Documentação</a> · <a href="https://github.com/valteracetto/kabul/releases/latest">Baixar</a></p>
 
 <p align="center">
   <img src="docs/assets/hero.png" alt="Kabul: workspaces em paralelo, chat com aprovações e o diff lado a lado" width="900">
@@ -276,6 +279,9 @@ versões, CI e releases) e pelo [guia de contribuição](docs/pt-BR/guia/contrib
 regras). Falhas de segurança: reporte em particular, veja o [SECURITY.md](SECURITY.md).
 
 ## Créditos
+
+Criado por **Valter Acetto** ([@valteracetto](https://github.com/valteracetto)), que teve a ideia e conduz o
+produto. Feito com a ajuda do [Claude](https://www.anthropic.com/claude), pelo [Claude Code](https://claude.com/claude-code).
 
 Partes dos recursos de uso e da barra de menus foram baseadas em ideias do
 [CodexBar](https://github.com/steipete/CodexBar), de Peter Steinberger (MIT). O código do Kabul é próprio.
