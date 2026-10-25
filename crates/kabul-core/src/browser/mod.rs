@@ -150,6 +150,11 @@ pub fn launch_args(b: &Binary, profile: &Path, viewport: &Viewport) -> Vec<Strin
         "--use-mock-keychain".into(),
         "--password-store=basic".into(),
         "--hide-scrollbars".into(),
+        // Abas fora de foco (a aba do humano ou de outro agente) continuam renderizando: sem isso o
+        // Chrome sem janela adia quadros e o print/screencast pode ficar sem resposta.
+        "--disable-background-timer-throttling".into(),
+        "--disable-backgrounding-occluded-windows".into(),
+        "--disable-renderer-backgrounding".into(),
         "--mute-audio".into(),
         format!("--window-size={},{}", viewport.width, viewport.height),
     ];

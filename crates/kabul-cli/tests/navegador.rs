@@ -70,6 +70,13 @@ fn tmp(name: &str) -> PathBuf {
 }
 
 /// Navegador disponível? (respeita `KABUL_BROWSER_BIN`).
+/// Um Chrome real por vez: em runners de CI com pouca CPU, vários ao mesmo tempo atrasam prints e screencast.
+static CHROME: Mutex<()> = Mutex::new(());
+
+fn chrome_lock() -> std::sync::MutexGuard<'static, ()> {
+    CHROME.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn have_browser(home: &Path) -> bool {
     let ok = browser::find_binary(home).is_some();
     if !ok {
@@ -159,6 +166,7 @@ fn answer_next(d: &Dirs, allow: bool) -> std::thread::JoinHandle<policy::Request
 
 #[test]
 fn mcp_com_chromium_real() {
+    let _chrome = chrome_lock();
     let home = tmp("mcp");
     if !have_browser(&home) {
         return;
@@ -317,6 +325,7 @@ fn mcp_com_chromium_real() {
 /// outro navegador (perfil e cookies separados).
 #[test]
 fn compartilhado_entre_agentes_e_isolado_por_workspace() {
+    let _chrome = chrome_lock();
     let home = tmp("dois");
     if !have_browser(&home) {
         return;
@@ -351,6 +360,7 @@ fn compartilhado_entre_agentes_e_isolado_por_workspace() {
 /// O lado do humano (aba Browser do app e kabuld): comandos, screencast e entrada de mouse/teclado.
 #[test]
 fn aba_browser_screencast_e_entrada() {
+    let _chrome = chrome_lock();
     use kabul_core::browser::live;
     let home = tmp("aba");
     if !have_browser(&home) {
