@@ -8,7 +8,16 @@ fn tmp(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("kabul-repo-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
-    d.canonicalize().unwrap()
+    // Sem canonicalize: no Windows ele devolve `\\?\C:\...`, que não é o que o git (nem o usuário) usa.
+    d
+}
+
+/// O caminho como o Kabul guarda: o `--show-toplevel` do git. É ele que o CLI mostra; comparar com o
+/// do sistema não é portável (no Windows o git usa `C:/...`, no macOS resolve `/var` → `/private/var`).
+fn toplevel(dir: &Path) -> String {
+    let o = Command::new("git").arg("-C").arg(dir).args(["rev-parse", "--show-toplevel"]).output().unwrap();
+    assert!(o.status.success());
+    String::from_utf8_lossy(&o.stdout).trim_end().to_string()
 }
 
 fn git_repo(dir: &Path) {
@@ -30,6 +39,7 @@ fn repo_add_e_ls_com_kabul_home() {
     git_repo(&a);
     git_repo(&b);
     std::fs::create_dir_all(&plain).unwrap();
+    let (top_a, top_b) = (toplevel(&a), toplevel(&b));
 
     // O "app" já aberto no mesmo estado (vazio).
     let app = SharedStore::new(Store::open(home.join("state.json"), home.join("workspaces"), "val".into()).unwrap());
@@ -41,8 +51,8 @@ fn repo_add_e_ls_com_kabul_home() {
     // Vários caminhos: relativo, subpasta (vale o repositório inteiro), não-git, inexistente e repetido.
     let (out, ok) = kabul(&home, &["repo", "add", "alfa", "beta/src", "nao-e-git", "sumiu", "alfa"], &t);
     assert!(ok, "{out}");
-    assert!(out.contains(&format!("+ alfa  {}", a.display())), "{out}");
-    assert!(out.contains(&format!("+ beta  {}", b.display())), "{out}");
+    assert!(out.contains(&format!("+ alfa  {top_a}")), "{out}");
+    assert!(out.contains(&format!("+ beta  {top_b}")), "{out}");
     assert!(out.contains("- nao-e-git: a pasta não é um repositório git"), "{out}");
     assert!(out.contains("- sumiu: pasta não encontrada"), "{out}");
     assert!(out.contains("(já estava no Kabul)"), "{out}");
@@ -58,7 +68,7 @@ fn repo_add_e_ls_com_kabul_home() {
     let names: Vec<&str> = v.as_array().unwrap().iter().map(|r| r["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["alfa", "beta"]);
     let (out, _) = kabul(&home, &["repo", "ls"], &t);
-    assert!(out.lines().any(|l| l.starts_with("alfa") && l.contains("main") && l.ends_with(&a.display().to_string())), "{out}");
+    assert!(out.lines().any(|l| l.starts_with("alfa") && l.contains("main") && l.ends_with(&top_a)), "{out}");
 
     // O app aberto enxerga sem reiniciar (e uma gravação dele não apaga o que o CLI adicionou).
     assert!(app.changed_on_disk());
