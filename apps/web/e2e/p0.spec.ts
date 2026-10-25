@@ -98,7 +98,7 @@ test("fork para nova aba e novo workspace, reset chat, menu da aba, ⌘/ abre o 
   await expect(host(page).locator(".turn-meta")).toHaveCount(2);
   // Fork para nova aba a partir do primeiro turno
   await host(page).getByTestId("turn-more").first().click();
-  await host(page).getByTestId("fork-tab").click();
+  await page.getByTestId("fork-tab").click();
   await expect(host(page).locator(".ctab", { hasText: "Fork" })).toBeVisible();
   await expect(chat(page).locator(".msg-user")).toHaveCount(1);
   await expect(host(page).locator(".notice", { hasText: "Fork desta conversa" })).toBeVisible();
@@ -112,7 +112,7 @@ test("fork para nova aba e novo workspace, reset chat, menu da aba, ⌘/ abre o 
   await say(page, "quarta");
   await expect(chat(page).locator(".turn-meta")).toHaveCount(3);
   await chat(page).getByTestId("turn-more").nth(1).click();
-  await host(page).getByTestId("reset-chat").click();
+  await page.getByTestId("reset-chat").click();
   await page.getByTestId("confirm-check").check();
   await page.getByTestId("confirm-ok").click();
   await expect(host(page).locator(".notice", { hasText: "resetada" })).toBeVisible();
@@ -127,7 +127,7 @@ test("fork para nova aba e novo workspace, reset chat, menu da aba, ⌘/ abre o 
   await page.screenshot({ path: "../../.context/e2e/p0-handoff.png" });
   // Fork para novo workspace
   await host(page).getByTestId("turn-more").first().click();
-  await host(page).getByTestId("fork-ws").click();
+  await page.getByTestId("fork-ws").click();
   await expect(page.getByTestId("ws-row")).toHaveCount(2);
   await expect(host(page).locator(".ctab", { hasText: "Fork" })).toBeVisible();
 });
@@ -177,7 +177,7 @@ test("Configurações › Modelos: 'Gemini: aprovar tudo' desligado por padrão 
   await expect(t).toHaveAttribute("aria-checked", "true");
 });
 
-test("IA trabalhando: linha de status com o que está rodando e cronômetro; Parar e Enviar lado a lado; passos numa linha", async ({ page }) => {
+test("IA trabalhando: passos ao vivo um por linha, linha de status com cronômetro; Parar e Enviar lado a lado; recolhe ao terminar", async ({ page }) => {
   await setup(page);
   await say(page, "devagar");
   const line = host(page).getByTestId("working");
@@ -194,8 +194,14 @@ test("IA trabalhando: linha de status com o que está rodando e cronômetro; Par
   await expect(host(page).getByTestId("stop")).toBeVisible();
   await page.screenshot({ path: "../../.context/e2e/p0-trabalhando.png" });
   await expect(line).toContainText("Aguardando subagente Revisar o lockfile");
-  // Passos do turno em andamento já recolhidos numa linha (sem cartões grandes).
-  await expect(host(page).getByTestId("expand-steps")).toContainText(/ferramenta/);
+  // Passos do turno em andamento ao vivo, um por linha: ícone, rótulo e chip com o argumento (sem cartão).
+  const bash = host(page).locator('[data-tool="Bash"]');
+  await expect(bash.locator(".step-label")).toHaveText("Audita");
+  await expect(bash.locator(".step-chip")).toHaveText("npm audit");
+  await expect(host(page).getByTestId("thinking").locator(".step-label")).toHaveText("Pensando");
+  await expect(host(page).locator('[data-tool="Task"] .step-label')).toHaveText("Revisar o lockfile");
+  await expect(host(page).getByTestId("expand-steps")).toHaveCount(0);
+  // Ao terminar, os passos recolhem em "N ferramentas, M mensagens".
   await expect(host(page).locator('[data-tool="Bash"]')).toHaveCount(0);
   await expect(host(page).locator(".turn-meta")).toHaveCount(1);
   await expect(host(page).getByTestId("working")).toHaveCount(0);
@@ -203,4 +209,11 @@ test("IA trabalhando: linha de status com o que está rodando e cronômetro; Par
   await expect(host(page).getByTestId("steps-shell")).toBeVisible();
   await host(page).getByTestId("expand-steps").click();
   await expect(host(page).locator('[data-tool="Bash"]')).toContainText("npm audit");
+  // Hover: fundo sutil e "+" no lugar do ícone; clique abre o detalhe (comando e saída).
+  const head = host(page).locator('[data-tool="Bash"] .step-head');
+  await head.hover();
+  await expect(head.locator(".si-hover")).toBeVisible();
+  await expect(head.locator(".si-kind")).toBeHidden();
+  await head.click();
+  await expect(host(page).locator('[data-tool="Bash"] .step-body')).toContainText("found 0 vulnerabilities");
 });

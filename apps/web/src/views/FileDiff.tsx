@@ -1,8 +1,12 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Floating } from "../components/Floating";
 import { api, type DiffComment, type DiffScope, type Workspace } from "../api";
 import { IChevronDown, IComment } from "../icons";
 import { highlight } from "../components/Markdown";
 import { usePopover } from "../components/useDismiss";
+import { LazyChunks } from "../components/LazyChunks";
+
+const CHUNK = 200;
 
 type Line = { kind: "a" | "d" | "c" | "h"; text: string; old: number | null; neu: number | null };
 
@@ -71,6 +75,7 @@ export function FileDiff({ ws, path, scope = "all", files = [], active = true, o
     load();
   }, [ws.id, path, scope, ignoreWs, load, onError]);
   const lines = useMemo(() => (d ? parseDiff(d) : []), [d]);
+  const srows = useMemo(() => (mode === "split" ? splitRows(lines) : []), [lines, mode]);
   const h = d ? hash(d) : "";
   const isViewed = !!d && viewed[path] === h;
   const toggleViewed = useCallback(() => {
@@ -115,6 +120,9 @@ export function FileDiff({ ws, path, scope = "all", files = [], active = true, o
     load();
   };
   const open = comments.filter((c) => !c.resolved);
+  // Blocos sempre desenhados: os que têm comentário ou a caixa de comentar aberta (⌥⌘J/K e foco funcionam).
+  const marked = new Set([...comments.map((c) => c.line), ...(composing != null ? [composing] : [])]);
+  const pinOf = (list: (number | null | undefined)[]) => [...new Set(list.flatMap((n, i) => (n != null && marked.has(n) ? [Math.floor(i / CHUNK)] : [])))];
   const sendToAgent = () => window.dispatchEvent(new CustomEvent("kabul:compose", { detail: { ws: ws.id, text: "Revise estes comentários no diff:\n" + open.map((c) => `- ${c.path}:${c.line} — ${c.body}`).join("\n") } }));
   const setPref = (k: string, v: string, f: (x: never) => void) => (localStorage.setItem(k, v), f(v as never));
   const code = (t: string) => (t ? highlight(t) : " ");
@@ -152,10 +160,10 @@ export function FileDiff({ ws, path, scope = "all", files = [], active = true, o
         <div className="picker" ref={opts.ref}>
           <button className={"btn" + (opts.open ? " on" : "")} onClick={opts.toggle} data-testid="diff-options">Opções <IChevronDown size={11} /></button>
           {opts.open && (
-            <div className="popover status-pop diff-opts">
+            <Floating className="status-pop diff-opts" placement="bottom-end">
               <label className="pop-row"><input type="checkbox" checked={ignoreWs} onChange={(e) => setPref("kabul.diff.ignoreWs", e.target.checked ? "1" : "0", () => setIgnoreWs(e.target.checked))} data-testid="diff-ignore-ws" /> Ocultar mudanças de espaço</label>
               <label className="pop-row"><input type="checkbox" checked={wrap} onChange={(e) => setPref("kabul.diff.wrap", e.target.checked ? "1" : "0", () => setWrap(e.target.checked))} data-testid="diff-wrap" /> Quebrar linhas</label>
-            </div>
+            </Floating>
           )}
         </div>
         <label className={"viewed-box" + (isViewed ? " on" : "")} title="Marcar como visto (⌃V)"><input type="checkbox" checked={isViewed} onChange={toggleViewed} data-testid="diff-viewed" /> Visto</label>
@@ -164,7 +172,7 @@ export function FileDiff({ ws, path, scope = "all", files = [], active = true, o
       {d !== null && d.trim() === "" && <div className="empty-state">Sem diferenças neste arquivo{ignoreWs ? " (ignorando espaços)" : ""}.</div>}
       {isViewed ? <div className="empty-state dim small">Visto. <button className="text-btn small" onClick={toggleViewed}>Mostrar de novo</button></div> : mode === "split" ? (
         <div className="patch split" hidden={!d} data-testid="patch">
-          {splitRows(lines).map(([l, r], i) => (
+          <LazyChunks count={srows.length} chunk={CHUNK} rowPx={20} pin={pinOf(srows.map(([, r]) => r?.neu))} render={(a, b) => srows.slice(a, b).map(([l, r], k) => { const i = a + k; return (
             <Fragment key={i}>
               {l?.kind === "h" ? <div className="pl h"><span className="code">{l.text}</span></div> : (
                 <div className="srow">
@@ -174,18 +182,18 @@ export function FileDiff({ ws, path, scope = "all", files = [], active = true, o
               )}
               {r && r.kind !== "h" && extras(r.neu)}
             </Fragment>
-          ))}
+          ); })} />
         </div>
       ) : (
         <div className="patch" hidden={!d} data-testid="patch">
-          {lines.map((r, i) => (
-            <div key={i}>
+          <LazyChunks count={lines.length} chunk={CHUNK} rowPx={20} pin={pinOf(lines.map((r) => r.neu))} render={(a, b) => lines.slice(a, b).map((r, k) => (
+            <div key={a + k}>
               <div className={"pl " + (r.kind === "c" ? "" : r.kind)}>
                 {r.kind === "h" ? <><span className="ln" /><span className="ln" /><span className="code">{r.text}</span></> : <><span className="ln old">{r.old ?? ""}</span>{lnCell(r.neu)}<span className="sign">{r.kind === "a" ? "+" : r.kind === "d" ? "-" : " "}</span><span className="code">{code(r.text)}</span></>}
               </div>
               {extras(r.neu)}
             </div>
-          ))}
+          ))} />
         </div>
       )}
     </div>
@@ -197,11 +205,12 @@ export function FileView({ ws, path, line, onError }: { ws: Workspace; path: str
   const [t, setT] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => void api.readFile(ws.id, path).then(setT, (e) => onError(String(e))), [ws.id, path, onError]);
+  const rows = useMemo(() => (t ?? "").split("\n"), [t]);
   useEffect(() => void (t !== null && line && root.current?.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ block: "center" })), [t, line]);
   return (
     <div className="filediff" ref={root} data-testid="fileview">
       <div className="fd-head"><code>{path}</code>{line ? <span className="dim small">linha {line}</span> : null}</div>
-      <div className="patch">{(t ?? "").split("\n").map((l, i) => <div key={i} data-line={i + 1} className={"pl" + (line === i + 1 ? " hit" : "")}><span className="ln">{i + 1}</span><span className="code">{l ? highlight(l) : " "}</span></div>)}</div>
+      <div className="patch"><LazyChunks count={rows.length} chunk={CHUNK} rowPx={20} pin={line ? [Math.floor((line - 1) / CHUNK)] : []} render={(a, b) => rows.slice(a, b).map((l, k) => { const i = a + k; return <div key={i} data-line={i + 1} className={"pl" + (line === i + 1 ? " hit" : "")}><span className="ln">{i + 1}</span><span className="code">{l ? highlight(l) : " "}</span></div>; })} /></div>
     </div>
   );
 }

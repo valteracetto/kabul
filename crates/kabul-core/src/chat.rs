@@ -53,14 +53,27 @@ pub fn prepare(home: &Path, w: &Workspace, r: &Repo, model: &Model, req: &ChatRe
     env.extend(accounts::env_for(&prof));
     let cli_model = if endpoint.is_some() { None } else { Some(models::cli_model(model, req.effort.as_deref())) };
     let effort = if model.effort_in_id || model.efforts.is_empty() { None } else { req.effort.clone() };
-    let disabled_mcp = req.disabled_mcp.clone().unwrap_or_default();
-    // Claude: com MCP desligado na sessão, passa só os habilitados (--mcp-config + --strict-mcp-config).
-    let mcp_config = if k == HarnessKind::Claude && !disabled_mcp.is_empty() {
-        let entries = crate::mcp::list(k, Path::new(&w.path), Path::new(&r.path));
-        Some(crate::mcp::claude_config_file(&entries, &disabled_mcp, &home.join("mcp"))?.display().to_string())
-    } else {
-        None
+    // MCP: registro único (todas as configs nativas) menos o que a sessão/repo desligou. A mesma lista vale
+    // em qualquer harness, inclusive ao trocar de LLM na conversa (cada início passa por aqui).
+    let off = req.disabled_mcp.clone().unwrap_or_default();
+    let all = crate::mcp_share::shared(Path::new(&w.path), Path::new(&r.path));
+    let mcp = crate::mcp_share::plan(k, &all, &off, &crate::mcp_share::Prefs::load(home));
+    let (mcp_config, mcp_strict) = match k {
+        HarnessKind::Claude => match crate::mcp_share::claude_config(&mcp, &home.join("mcp"))? {
+            Some((f, strict)) => (Some(f.display().to_string()), strict),
+            None => (None, false),
+        },
+        _ => (None, false),
     };
+    if k == HarnessKind::Antigravity && !mcp.inject.is_empty() {
+        let names: Vec<&str> = mcp.inject.iter().map(|s| s.name.as_str()).collect();
+        let n = format!("MCP de outras IAs não chega ao Antigravity por sessão (a config dele é só global): {}. Use Exportar no painel de MCP.", names.join(", "));
+        note = Some(match note {
+            Some(x) => format!("{x} · {n}"),
+            None => n,
+        });
+    }
+    let disabled_mcp = mcp.disable_native.clone();
     let h = k.harness();
     let plan = req.plan.unwrap_or(false);
     // Claude: estilo de saída (Configurações › Modelos) e preferências gerais do repo (› Ações).
@@ -70,7 +83,10 @@ pub fn prepare(home: &Path, w: &Workspace, r: &Repo, model: &Model, req: &ChatRe
     let opts = SessionOptions {
         fork: req.fork.unwrap_or(false),
         mcp_config,
+        mcp_strict,
         disabled_mcp,
+        mcp_inject: if k == HarnessKind::Claude { vec![] } else { mcp.inject.clone() },
+        mcp_keep: mcp.keep_native.clone(),
         cwd: Some(w.path.clone()),
         model: cli_model,
         effort,
@@ -111,11 +127,19 @@ pub fn pump(rx: std::sync::mpsc::Receiver<harness::Event>, emit: impl FnMut(serd
 }
 
 /// Como [`pump`], mas `tap` vê cada evento antes de ser emitido (ex.: espelho no kabuld embutido).
-pub fn pump_with(rx: std::sync::mpsc::Receiver<harness::Event>, mut tap: impl FnMut(&harness::Event), mut emit: impl FnMut(serde_json::Value), stopped: impl Fn() -> bool, wait: impl FnOnce() -> Option<i32>, log: Option<(std::path::PathBuf, String)>) {
+pub fn pump_with(
+    rx: std::sync::mpsc::Receiver<harness::Event>,
+    mut tap: impl FnMut(&harness::Event),
+    mut emit: impl FnMut(serde_json::Value),
+    stopped: impl Fn() -> bool,
+    wait: impl FnOnce() -> Option<i32>,
+    log: Option<(std::path::PathBuf, String)>,
+) {
     use harness::Event;
     let mut tail: std::collections::VecDeque<String> = Default::default();
     let mut answered = false;
-    for ev in rx {
+    // Deltas de texto juntados por quadro: menos eventos até a UI com muitos agentes em streaming.
+    for ev in crate::batch::coalesce(rx, crate::batch::frame()) {
         match &ev {
             Event::Log { line } => {
                 tail.push_back(line.clone());
@@ -133,13 +157,20 @@ pub fn pump_with(rx: std::sync::mpsc::Receiver<harness::Event>, mut tap: impl Fn
     let user_stopped = stopped();
     if !user_stopped && (code.unwrap_or(0) != 0 || !answered) {
         let detail = tail.iter().rev().take(8).rev().cloned().collect::<Vec<_>>().join("\n");
-        let what = match code { Some(0) | None => "O agente encerrou sem responder".to_string(), Some(c) => format!("O agente encerrou com erro (código {c})") };
+        let what = match code {
+            Some(0) | None => "O agente encerrou sem responder".to_string(),
+            Some(c) => format!("O agente encerrou com erro (código {c})"),
+        };
         emit(serde_json::json!({ "type": "error", "message": if detail.is_empty() { what } else { format!("{what}:\n{detail}") } }));
     }
     if let Some((file, header)) = log {
         let _ = std::fs::create_dir_all(file.parent().unwrap_or(std::path::Path::new(".")));
         let line = format!("{header} · saiu {code:?}{} · respondeu {answered}\n{}\n", if user_stopped { " (parado)" } else { "" }, tail.iter().map(|l| format!("  | {l}")).collect::<Vec<_>>().join("\n"));
-        let _ = std::fs::OpenOptions::new().create(true).append(true).open(file).and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+        let mut o = std::fs::OpenOptions::new();
+        o.create(true).append(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+        let _ = o.open(file).and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
     }
     emit(serde_json::json!({ "type": "exited", "code": code }));
 }
@@ -148,13 +179,60 @@ pub fn pump_with(rx: std::sync::mpsc::Receiver<harness::Event>, mut tap: impl Fn
 pub fn log_header(p: &Prepared) -> String {
     let spec = p.kind.harness().command(&p.opts);
     let keys: Vec<&str> = p.opts.env.iter().map(|(k, _)| k.as_str()).collect();
-    format!("[{}] {} {} (cwd {}) env: {}", crate::store::now(), spec.program, spec.args.join(" "), p.opts.cwd.as_deref().unwrap_or("-"), keys.join(","))
+    format!("[{}] {} {} (cwd {}) env: {}", crate::store::now(), spec.program, redact_args(&spec.args).join(" "), p.opts.cwd.as_deref().unwrap_or("-"), keys.join(","))
+}
+
+/// Argumentos para o log: valor de opção com cara de segredo (`--api-key x`, `token=x`, `Bearer x`)
+/// vira `***`, e texto longo (prompt, JSON de config) é cortado.
+pub fn redact_args(args: &[String]) -> Vec<String> {
+    let secretish = |k: &str| {
+        let k = k.to_lowercase();
+        ["key", "token", "secret", "password", "passwd", "auth", "credential", "bearer"].iter().any(|w| k.contains(w))
+    };
+    let mut out = Vec::with_capacity(args.len());
+    let mut hide_next = false;
+    for a in args {
+        if hide_next {
+            out.push("***".into());
+            hide_next = false;
+            continue;
+        }
+        if a.starts_with('-') && !a.contains('=') && secretish(a) {
+            hide_next = true;
+            out.push(a.clone());
+            continue;
+        }
+        if let Some((k, _)) = a.split_once('=') {
+            if secretish(k) {
+                out.push(format!("{k}=***"));
+                continue;
+            }
+        }
+        if a.to_lowercase().starts_with("bearer ") || secretish(a) && a.contains(':') && !a.starts_with('-') && a.len() > 20 {
+            out.push("***".into());
+            continue;
+        }
+        out.push(if a.chars().count() > 120 { format!("{}…({} caracteres)", a.chars().take(60).collect::<String>(), a.chars().count()) } else { a.clone() });
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::harness::Event;
+
+    #[test]
+    fn log_sem_segredos_nos_argumentos() {
+        let a: Vec<String> = ["-p", "--api-key", "sk-123", "--model", "x", "-c", "model_providers.k.api_key=sk-456", "OPENAI_API_KEY=sk-789", "--token=abc"].iter().map(|s| s.to_string()).collect();
+        let r = redact_args(&a).join(" ");
+        for s in ["sk-123", "sk-456", "sk-789", "abc"] {
+            assert!(!r.contains(s), "{s} vazou: {r}");
+        }
+        assert!(r.contains("--model x"), "{r}");
+        let long = vec!["x".repeat(500)];
+        assert!(redact_args(&long)[0].len() < 100);
+    }
 
     #[test]
     fn saida_sem_resposta_vira_erro() {
@@ -197,8 +275,7 @@ mod prep_tests {
         std::fs::create_dir_all(repo.join(".kabul")).unwrap();
         std::fs::write(repo.join(".kabul/settings.toml"), "[prompts]\ngeneral = \"Responda em português.\"\n").unwrap();
         let home = tmp.join("home");
-        let mut set = AppSettings::default();
-        set.claude_output_style = "Explanatory".into();
+        let mut set = AppSettings { claude_output_style: "Explanatory".into(), ..Default::default() };
         set.save(&home.join("app-settings.json")).unwrap();
         let r = Repo { id: "r".into(), name: "r".into(), path: repo.display().to_string(), default_branch: "main".into(), ..Default::default() };
         let w = Workspace { id: "w".into(), repo_id: "r".into(), name: "kabul".into(), path: repo.display().to_string(), ..Default::default() };

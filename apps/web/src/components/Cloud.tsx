@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type CloudInfo, type Workspace } from "../api";
-import { TerminalTab } from "../views/TerminalTab";
+import { TerminalTab } from "../views/TerminalLazy";
 
 /** Diálogo "Nova sessão na nuvem (Claude)": prompt e ambiente opcional (`--environment`). */
 export function CloudDialog({ ws, onClose, onCreated, onError }: { ws: Workspace; onClose: () => void; onCreated: (tmux: string, info: CloudInfo) => void; onError: (e: string) => void }) {

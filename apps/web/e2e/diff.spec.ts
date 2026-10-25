@@ -31,7 +31,7 @@ test("diff: unificado/lado a lado, opções, realce, visto ⌃V, ↑↓ entre ar
   await host(page).getByText("Unificado").click();
   // Opções: quebra de linha e ocultar espaços
   await host(page).getByTestId("diff-options").click();
-  await host(page).getByTestId("diff-wrap").check();
+  await page.getByTestId("diff-wrap").check();
   await expect(host(page).locator(".filediff.wrap")).toBeVisible();
   await page.keyboard.press("Escape");
   // Comentários e ⌥⌘J
@@ -65,7 +65,7 @@ test("diff: unificado/lado a lado, opções, realce, visto ⌃V, ↑↓ entre ar
   await host(page).getByTestId("changes-filter").fill("");
   // Branch alvo
   await host(page).getByTestId("target-branch").click();
-  await host(page).getByTestId("target-row").filter({ hasText: "feat/relatorio-pdf" }).click();
+  await page.getByTestId("target-row").filter({ hasText: "feat/relatorio-pdf" }).click();
   await expect(host(page).getByTestId("target-branch")).toContainText("feat/relatorio-pdf");
   // Menu do arquivo: copiar caminho relativo, anexar no chat, descartar
   await host(page).getByTestId("change-row").filter({ hasText: "notas.txt" }).click({ button: "right" });

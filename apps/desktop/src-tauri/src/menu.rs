@@ -20,12 +20,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     #[cfg(target_os = "macos")]
     let kabul = kabul.services().separator().hide().hide_others().show_all().separator();
     let kabul = kabul.item(&item("quit", "Sair do Kabul", Some("CmdOrCtrl+Q"))?).build()?;
-    let file = SubmenuBuilder::new(app, "Arquivo")
-        .item(&item("new-workspace", "Novo workspace", None)?)
-        .item(&item("add-project", "Adicionar projeto…", None)?)
-        .separator()
-        .close_window()
-        .build()?;
+    let file = SubmenuBuilder::new(app, "Arquivo").item(&item("new-workspace", "Novo workspace", None)?).item(&item("add-project", "Adicionar projeto…", None)?).separator().close_window().build()?;
     let edit = SubmenuBuilder::new(app, "Editar").undo().redo().separator().cut().copy().paste().select_all().build()?;
     let view = SubmenuBuilder::new(app, "Ver")
         .item(&item("toggle-sidebar", "Alternar barra lateral", None)?)

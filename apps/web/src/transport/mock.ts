@@ -10,12 +10,13 @@ if (typeof window !== "undefined") window.confirm = () => false;
 if (typeof window !== "undefined") window.prompt = () => null;
 if (typeof window !== "undefined") (window as any).__calls = [];
 const subs = new Map<string, Set<H>>();
-const emit = (ch: string, p: unknown) => setTimeout(() => subs.get(ch)?.forEach((h) => h(p)), 0);
+const emit = (ch: string, p: unknown) => setTimeout(() => (subs.get(ch)?.forEach((h) => h(p)), recordUsage(ch, p)), 0);
 let seq = 0;
 const id = () => `m${++seq}`;
 const now = () => Math.floor(Date.now() / 1000);
 
 const db = {
+  mcp: null as any[] | null,
   repos: [] as any[],
   workspaces: [] as any[],
   comments: [] as any[],
@@ -25,9 +26,10 @@ const db = {
   history: {} as Record<string, any>,
   endpoints: [] as any[],
   registry: "",
-  settings: { branch_prefix_type: "github", branch_prefix_custom: "", notifications: true, sound: true, caffeinate: true, show_resources: true, auto_rename_branch: true, env: [], env_file: null, completion_sound: "Glass", always_show_context: false, auto_convert_long_text: true, not_absolutely_right: false, open_prs_in: "github", delete_branch_on_archive: false, archive_on_merge: false, rename_ws_on_branch: true, merge_method: "squash", github_dry_run: false, pr_include_workspace_link: true, automerge: false, optional_checks_blocking: false, push_set_upstream: true, stacked_prs: true, clone_dir: "~/Developer", claude_output_style: "default", codex_personality: "pragmatic", review_model: null, default_plan: false, claude_path: null, codex_path: null, opencode_path: null, scrollback_mb: 10 } as any,
+  settings: { branch_prefix_type: "github", branch_prefix_custom: "", notifications: true, sound: true, caffeinate: true, show_resources: true, auto_rename_branch: true, env: [], env_file: null, completion_sound: "Glass", always_show_context: false, auto_convert_long_text: true, not_absolutely_right: false, open_prs_in: "github", delete_branch_on_archive: false, archive_on_merge: false, rename_ws_on_branch: true, merge_method: "squash", github_dry_run: false, pr_include_workspace_link: true, automerge: false, optional_checks_blocking: false, push_set_upstream: true, stacked_prs: true, clone_dir: "~/Developer", claude_output_style: "default", codex_personality: "pragmatic", review_model: null, default_plan: false, claude_path: null, codex_path: null, opencode_path: null, scrollback_mb: 10, tray: true, usage_alert_pct: 80, usage_daily_budget: null, usage_monthly_budget: null, usage_codexbar: true, auto_update: true, update_channel: "stable" } as any,
   repoSettings: { scripts: { setup: "echo instalando", archive: null, run_mode: "concurrent", run: { web: { command: "npm run dev", default: true, icon: "globe", available_in: null } } }, file_include_globs: [], target_branch: null, env: { API_URL: "http://localhost:$KABUL_PORT" }, prompts: { general: null, review: null, create_pr: null, fix_errors: null, resolve_conflicts: null, branch_rename: null }, preview_url: "http://localhost:$KABUL_PORT" } as any,
-  chats: {} as Record<string, { pending: string | null; turn: number }>,
+  chats: {} as Record<string, { pending: string | null; turn: number; last?: string; ws?: string; model?: string; provider?: string; since?: number; working?: boolean }>,
+  kept: [] as any[],
   linear: false,
   accounts: [] as any[],
   agyLogins: {} as Record<string, number>,
@@ -48,10 +50,86 @@ const models = [
 const ws = (wid: string) => db.workspaces.find((w) => w.id === wid);
 const changes = (wid: string) => Object.entries(db.changed[wid] ?? {}).map(([path, body]) => ({ path, added: body.split("\n").length - 1, removed: db.files[path] ? 1 : 0, untracked: !db.files[path] }));
 
+// ---------- escala: limite de agentes simultâneos (fila "aguardando vaga") e agentes de carga ----------
+// Contrato em docs/escala.md. `__mock.agentLimit` liga o limite; `carga` faz o agente emitir sem parar.
+const running = new Set<string>();
+const waitingSlot: { chatId: string; go: () => void }[] = [];
+const loads = new Map<string, ReturnType<typeof setInterval>[]>();
+const agentLimit = (): number | null => (window as any).__mock?.agentLimit ?? null;
+function releaseSlot(chatId: string) {
+  for (const t of loads.get(chatId) ?? []) clearInterval(t), clearTimeout(t);
+  loads.delete(chatId);
+  const qi = waitingSlot.findIndex((w) => w.chatId === chatId);
+  if (qi >= 0) waitingSlot.splice(qi, 1);
+  if (!running.delete(chatId)) return;
+  const lim = agentLimit();
+  while (waitingSlot.length && (lim == null || running.size < lim)) {
+    const next = waitingSlot.shift()!;
+    running.add(next.chatId);
+    emit("chat-event", { chat_id: next.chatId, event: { type: "slot_acquired" } });
+    next.go();
+  }
+  waitingSlot.forEach((w, i) => emit("chat-event", { chat_id: w.chatId, event: { type: "queued", position: i + 1, limit: lim } }));
+}
+/** Passa pelo limite: roda já ou entra na fila e avisa a posição. */
+function withSlot(chatId: string, go: () => void) {
+  const lim = agentLimit();
+  if (running.has(chatId) || lim == null || running.size < lim) return running.add(chatId), go();
+  waitingSlot.push({ chatId, go });
+  emit("chat-event", { chat_id: chatId, event: { type: "queued", position: waitingSlot.length, limit: lim } });
+}
+/** Agente de carga: deltas de texto, ferramentas e subagentes (Task) com eventos filhos, até ser parado. */
+function loadAgent(chatId: string) {
+  const ev = (e: unknown) => emit("chat-event", { chat_id: chatId, event: e });
+  let n = 0;
+  const words = "Analisando o módulo de autenticação e as rotas que dependem dele antes de editar".split(" ");
+  const timers: ReturnType<typeof setInterval>[] = [];
+  ev({ type: "session_started", session_id: "sess-" + chatId, model: "mock" });
+  timers.push(setInterval(() => ev({ type: "text_delta", text: words[n++ % words.length] + " " }), 50));
+  timers.push(setInterval(() => {
+    const id = `ld-${chatId}-${n}`;
+    ev({ type: "tool_use", id, name: "Bash", input: { command: `rg -n auth src/${n % 7}`, description: "Procura" } });
+    setTimeout(() => ev({ type: "tool_result", id, output: `src/${n % 7}/auth.ts:12: export function auth()`, is_error: false }), 300);
+  }, 1000));
+  timers.push(setInterval(() => {
+    const task = `task-${chatId}-${n}`;
+    ev({ type: "tool_use", id: task, name: "Task", input: { description: `Revisar parte ${n % 5}`, prompt: "revise", subagent_type: "general-purpose" } });
+    setTimeout(() => ev({ type: "tool_use", id: task + "-r", name: "Read", input: { file_path: "src/app.tsx" }, parent_tool_use_id: task }), 300);
+    setTimeout(() => ev({ type: "tool_result", id: task + "-r", output: "ok", is_error: false, parent_tool_use_id: task }), 600);
+    setTimeout(() => ev({ type: "usage", input: 3000, output: 200, cache_read: 0, cache_write: 0, duration_ms: 900, parent_tool_use_id: task }), 900);
+    setTimeout(() => ev({ type: "tool_result", id: task, output: "Revisado.", is_error: false }), 2000);
+  }, 3000));
+  loads.set(chatId, timers);
+}
+
 function agentTurn(chatId: string, text: string, wid: string) {
   const ch = db.chats[chatId];
   ch.turn++;
+  ch.last = text;
+  if (/\bcarga\b/.test(text)) return withSlot(chatId, () => loadAgent(chatId));
   const ev = (e: unknown, t: number) => setTimeout(() => emit("chat-event", { chat_id: chatId, event: e }), t);
+  // Com limite ligado, o turno espera vaga; o fim do turno devolve a vaga.
+  if (agentLimit() != null && !running.has(chatId)) return (ch.turn--, withSlot(chatId, () => agentTurn(chatId, text, wid)));
+  if (agentLimit() != null) setTimeout(() => releaseSlot(chatId), 400);
+  // Comando longo: o resultado e o fim do turno só chegam depois de 3 s (se o usuário parar antes, chegam atrasados).
+  if (/sleep 30/.test(text)) {
+    ev({ type: "tool_use", id: "sl-" + ch.turn, name: "Bash", input: { command: "sleep 30", description: "Espera 30 s" } }, 50);
+    ev({ type: "tool_result", id: "sl-" + ch.turn, output: "saída atrasada", is_error: false }, 3000);
+    ev({ type: "text", text: "Texto atrasado." }, 3050);
+    ev({ type: "turn_completed", result: null }, 3100);
+    return;
+  }
+  if (/\bfalhe\b/.test(text)) {
+    ev({ type: "error", message: "Limite de uso atingido. Tente de novo mais tarde." }, 40);
+    ev({ type: "turn_completed", result: null }, 60);
+    return;
+  }
+  if (/servidor/.test(text)) {
+    ev({ type: "tool_use", id: "sv1-" + ch.turn, name: "Bash", input: { command: "npm run dev", description: "Sobe o servidor", run_in_background: true } }, 40);
+    ev({ type: "tool_result", id: "sv1-" + ch.turn, output: "started", is_error: false }, 60);
+    ev({ type: "tool_use", id: "sv2-" + ch.turn, name: "Bash", input: { command: "docker run -d --name kabul_db postgres:16 && npm test -- --watch", description: "Testes em modo watch" } }, 80);
+    return;
+  }
   if (ch.turn === 1) {
     ev({ type: "session_started", session_id: "sess-mock", model: "mock" }, 30);
     ev({ type: "session_info", tools: ["Bash", "Read", "Write", "mcp__linear__list_issues", "mcp__linear__get_issue"], mcp_servers: [{ name: "linear", status: "connected" }, { name: "docs", status: "failed" }] }, 40);
@@ -123,7 +201,97 @@ function agentTurn(chatId: string, text: string, wid: string) {
   void wid;
 }
 
+// ---------------- uso, custos e limites (espelha o core `usage`) ----------------
+type UTurn = { at: number; provider: string; harness: string; model: string; account: string | null; workspace_id: string; session: string; input: number; output: number; cache_read: number; cache_write: number; cost_usd: number | null; duration_ms: number };
+const usage = {
+  turns: [] as UTurn[],
+  seeded: false,
+  limits: null as any[] | null,
+};
+function seedUsage() {
+  if (usage.seeded) return;
+  usage.seeded = true;
+  const t = now();
+  const mk = (daysAgo: number, model: string, provider: string, cost: number | null, tokens: number, ws = "m-demo", session = "s-" + model + daysAgo): UTurn => ({ at: t - daysAgo * 86400 - 600, provider, harness: provider === "agy" ? "antigravity" : provider, model, account: `${provider}:sistema`, workspace_id: ws, session, input: tokens, output: Math.round(tokens / 20), cache_read: tokens * 3, cache_write: 0, cost_usd: cost, duration_ms: 45_000 });
+  usage.turns.push(mk(9, "Opus 5.5", "claude", 1.2, 40_000), mk(5, "Opus 5.5", "claude", 0.8, 30_000), mk(3, "GPT-6-Luna", "codex", null, 50_000), mk(1, "Opus 5.5", "claude", 2.4, 90_000), mk(0, "Opus 5.5", "claude", 0.6, 12_000, "m-demo", "s-hoje"), mk(0, "Gemini 4 Argon", "agy", null, 8_000, "m-demo", "s-gem"));
+}
+function mockLimits(): any[] {
+  const t = now();
+  return usage.limits ?? (window as any).__mock?.usageLimits ?? [
+    { provider: "claude", account: "claude:sistema", account_label: "dev@example.com", plan: "max", window: "5h", title: "Sessão (5 h)", used_pct: 86, window_mins: 300, resets_at: t + 2 * 3600 + 600, source: "claude-stream", updated_at: t },
+    { provider: "claude", account: "claude:sistema", account_label: "dev@example.com", plan: "max", window: "semana", title: "Semana", used_pct: 41, window_mins: 10080, resets_at: t + 3 * 86400, source: "codexbar", updated_at: t },
+    { provider: "codex", account: "codex:sistema", account_label: "dev@example.com", plan: "plus", window: "5h", title: "Sessão (5 h)", used_pct: 22, window_mins: 300, resets_at: t + 4 * 3600, source: "codex-app-server", updated_at: t },
+  ];
+}
+function recordUsage(ch: string, p: any) {
+  if (ch !== "chat-event" || p?.event?.type !== "turn_completed") return;
+  const c = db.chats[p.chat_id];
+  if (!c) return;
+  c.working = false;
+  usage.turns.push({ at: now(), provider: c.provider ?? "claude", harness: c.provider ?? "claude", model: c.model ?? "mock", account: `${c.provider ?? "claude"}:sistema`, workspace_id: c.ws ?? "", session: p.chat_id, input: p.event.input_tokens ?? 0, output: p.event.output_tokens ?? 0, cache_read: 0, cache_write: 0, cost_usd: p.event.cost_usd ?? null, duration_ms: 900 });
+  emit("usage-changed", null);
+}
+const dayKey = (at: number) => { const d = new Date(at * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const tokensOf = (t: UTurn) => t.input + t.output + t.cache_read + t.cache_write;
+function usageGroup(turns: UTurn[], key: (t: UTurn) => string, label: (k: string) => string) {
+  const m = new Map<string, any>();
+  for (const t of turns) {
+    const k = key(t);
+    const r = m.get(k) ?? { key: k, label: label(k), turns: 0, input: 0, output: 0, cache_read: 0, cache_write: 0, tokens: 0, cost_usd: 0, unpriced: 0, duration_ms: 0 };
+    Object.assign(r, { turns: r.turns + 1, input: r.input + t.input, output: r.output + t.output, cache_read: r.cache_read + t.cache_read, tokens: r.tokens + tokensOf(t), cost_usd: r.cost_usd + (t.cost_usd ?? 0), unpriced: r.unpriced + (t.cost_usd == null ? 1 : 0), duration_ms: r.duration_ms + t.duration_ms });
+    m.set(k, r);
+  }
+  return [...m.values()].sort((a, b) => b.cost_usd - a.cost_usd || b.tokens - a.tokens);
+}
+const PL: Record<string, string> = { claude: "Claude", codex: "Codex", agy: "Antigravity", local: "Local" };
+function usageOverview(days: number) {
+  seedUsage();
+  const t = now();
+  const lims = mockLimits();
+  const turns = usage.turns.filter((x) => x.at >= t - days * 86400);
+  const today = dayKey(t), month = today.slice(0, 7);
+  const sum = (f: (x: UTurn) => boolean, v: (x: UTurn) => number) => usage.turns.filter(f).reduce((a, x) => a + v(x), 0);
+  const byDay = new Map(usageGroup(turns, (x) => dayKey(x.at), (k) => k).map((r) => [r.key, r]));
+  const by_day = Array.from({ length: days }, (_, i) => dayKey(t - (days - 1 - i) * 86400)).map((k) => byDay.get(k) ?? { key: k, label: k, turns: 0, input: 0, output: 0, cache_read: 0, cache_write: 0, tokens: 0, cost_usd: 0, unpriced: 0, duration_ms: 0 });
+  const today_usd = sum((x) => dayKey(x.at) === today, (x) => x.cost_usd ?? 0), month_usd = sum((x) => dayKey(x.at).startsWith(month), (x) => x.cost_usd ?? 0);
+  const alertPct = db.settings.usage_alert_pct ?? 80;
+  const hot = lims.filter((l) => l.used_pct >= alertPct && (!l.resets_at || l.resets_at > t));
+  const alerts = hot.map((l) => ({ key: `limit:${l.provider}:${l.window}`, kind: "limit", level: l.used_pct >= 100 ? "crit" : "warn", text: `${PL[l.provider] ?? l.provider} (${l.account_label}): ${l.title} em ${l.used_pct}%`, provider: l.provider, account: l.account }));
+  const budget = db.settings.usage_daily_budget;
+  if (budget && today_usd >= budget * 0.8) alerts.push({ key: "daily", kind: "daily_budget", level: today_usd >= budget ? "crit" : "warn", text: `Gasto de hoje: US$ ${today_usd.toFixed(2)} de US$ ${budget.toFixed(2)}`, provider: null, account: null });
+  const others = (p: string) => db.accounts.filter((a: any) => a.provider === p);
+  const suggestions = hot.map((l) => {
+    const o = others(l.provider)[0];
+    return o ? { provider: l.provider, account: l.account, to_account: { id: o.id, nickname: o.nickname }, to_provider: null, text: `${PL[l.provider]} perto do limite (${l.title}: ${l.used_pct}%). Usar a conta ${o.nickname} nas conversas.` }
+      : { provider: l.provider, account: l.account, to_account: null, to_provider: l.provider === "codex" ? "claude" : "codex", text: `${PL[l.provider]} perto do limite (${l.title}: ${l.used_pct}%). Trocar para um modelo do ${l.provider === "codex" ? "Claude" : "Codex"} na mesma conversa.` };
+  });
+  const sessions = usageGroup(turns, (x) => x.session, (k) => k).map((r) => {
+    const ts = turns.filter((x) => x.session === r.key);
+    return { session: r.key, workspace_id: ts[0].workspace_id, provider: ts[0].provider, model: ts[ts.length - 1].model, account: ts[0].account, started: Math.min(...ts.map((x) => x.at)) - 45, ended: Math.max(...ts.map((x) => x.at)), turns: r.turns, tokens: r.tokens, cost_usd: r.cost_usd, unpriced: r.unpriced, duration_ms: r.duration_ms };
+  }).sort((a, b) => b.ended - a.ended);
+  const wsLabel = (k: string) => ws(k)?.title ?? ws(k)?.name ?? k;
+  return {
+    schema_version: 1, days, today_usd, month_usd, today_tokens: sum((x) => dayKey(x.at) === today, tokensOf), month_tokens: sum((x) => dayKey(x.at).startsWith(month), tokensOf), unpriced_turns: turns.filter((x) => x.cost_usd == null).length,
+    by_day, by_model: usageGroup(turns, (x) => x.model, (k) => k), by_account: usageGroup(turns, (x) => x.account ?? x.provider, (k) => `${PL[k.split(":")[0]] ?? k} · Padrão do sistema`), by_workspace: usageGroup(turns, (x) => x.workspace_id, wsLabel), by_provider: usageGroup(turns, (x) => x.provider, (k) => PL[k] ?? k),
+    sessions, limits: { schema_version: 1, limits: lims, status: [{ provider: "codex", indicator: "minor", description: "Lentidão parcial", url: "https://status.example" }], credits: [], sources: [{ name: "Codex app-server · Padrão do sistema", ok: true, detail: "1 janela(s)" }, { name: "CodexBar", ok: true, detail: "2 janela(s)" }], updated_at: t },
+    tightest: [...lims].sort((a, b) => b.used_pct - a.used_pct)[0] ?? null, alerts, suggestions,
+  };
+}
+function usageCsv(days: number) {
+  seedUsage();
+  const t = now();
+  const rows = usage.turns.filter((x) => x.at >= t - days * 86400).map((x) => [dayKey(x.at), x.provider, x.harness, x.model, x.account ?? "", x.workspace_id, x.session, x.input, x.output, x.cache_read, x.cache_write, x.cost_usd ?? "", x.duration_ms].join(","));
+  return ["data,provedor,harness,modelo,conta,workspace,sessao,entrada,saida,cache_lido,cache_gravado,custo_usd,duracao_ms", ...rows].join("\n") + "\n";
+}
+
 const handlers: Record<string, (a: any) => unknown> = {
+  usage_overview: ({ days }) => usageOverview(days ?? 30),
+  usage_refresh: () => ((window as any).__usageRefreshed = ((window as any).__usageRefreshed ?? 0) + 1, emit("usage-changed", null), usageOverview(30).limits),
+  usage_csv: ({ days }) => usageCsv(days ?? 30),
+  usage_csv_save: () => "/mock/Downloads/kabul-uso.csv",
+  agents_running: () => Object.entries(db.chats).filter(([, c]) => c.ws).map(([cid, c]) => ({ chat_id: cid, workspace_id: c.ws, workspace: ws(c.ws!)?.title ?? ws(c.ws!)?.name ?? c.ws, model: c.model, harness: c.provider === "agy" ? "antigravity" : c.provider, since: c.since, working: !!c.working })),
+  tray_action: ({ action, workspaceId }) => ((window as any).__trayActions ??= []).push(action) && emit("tray-action", { action, workspace_id: workspaceId ?? null }),
+  tray_hide: () => void ((window as any).__trayHidden = true),
   repos_list: () => db.repos.map((r) => ({ ...r })),
   repo_add: ({ path }) => {
     const r = { id: id(), name: path.split("/").filter(Boolean).pop(), path, default_branch: "main" };
@@ -246,12 +414,22 @@ const handlers: Record<string, (a: any) => unknown> = {
   script_stop: () => undefined,
   term_open: ({ workspaceId, name }) => ({ session: name ?? `kabul-${ws(workspaceId).name}`, pane: "%1", snapshot: "dev@mac " + ws(workspaceId).name + " % " }),
   term_input: ({ session, pane, data }) => {
+    ((window as any).__termInput ??= []).push([session, data]);
     const out = data === "\r" ? "\r\nmock: comando executado\r\nval@mac % " : data;
     emit("term-output", { session, pane, data: [...new TextEncoder().encode(out)] });
   },
   term_resize: () => undefined,
   term_close: () => undefined,
-  models_list: () => models,
+  // `__mock.holdModels`: a lista de modelos só chega quando o primeiro envio pede o checkpoint (corrida do envio).
+  models_list: () => {
+    const m = (window as any).__mock;
+    if (!m?.holdModels) return models;
+    // Todos os pedidos pendentes são liberados juntos (mais de uma aba pode pedir a lista).
+    return new Promise((r) => {
+      const prev = m.releaseModels;
+      m.releaseModels = () => (prev?.(), r(models), (m.releaseModels = null));
+    });
+  },
   local_overview: () => ({ memory: 34359738368, harnesses: [["claude", true, ""], ["codex", true, ""], ["antigravity", true, ""], ["opencode", true, ""], ["qwen", false, "npm install -g @qwen-code/qwen-code"], ["gemini", false, "npm install -g @google/gemini-cli"]], sources: [
     { id: "ollama", name: "Ollama", kind: "runtime", base_url: "http://127.0.0.1:11434", installed: false, running: false, apis: ["openai"], models: [], can_start: false, can_pull: true, pull_hint: "ex.: qwen3-coder:30b", custom: false },
     { id: "lmstudio", name: "LM Studio", kind: "runtime", base_url: "http://127.0.0.1:1234", installed: true, running: true, apis: ["openai", "anthropic"], models: [{ id: "qwen3-8b", name: "Qwen3 8B", source: "lmstudio", size_bytes: 4623782544, quant: "4bit", params: "8B", context: 40960, loaded: true }], can_start: true, can_pull: true, pull_hint: "ex.: qwen/qwen3-coder-30b", custom: false },
@@ -268,13 +446,17 @@ const handlers: Record<string, (a: any) => unknown> = {
     db.registry = text;
   },
   registry_reset: () => void (db.registry = ""),
-  chat_start: ({ model, resume }) => {
+  chat_start: ({ model, resume, workspaceId }) => {
+    (window as any).__kabulStarts = ((window as any).__kabulStarts ?? 0) + 1;
     (window as any).__kabulLastStart = { harness: model.harness, resume: resume ?? null };
     const cid = id();
-    db.chats[cid] = { pending: null, turn: 0 };
-    return { chat_id: cid, harness: model.harness, approvals: true, note: model.local?.note ?? null };
+    db.chats[cid] = { pending: null, turn: 0, ws: workspaceId, model: model.label, provider: ({ claude: "claude", codex: "codex", antigravity: "agy" } as Record<string, string>)[model.harness] ?? "local", since: now() };
+    // Goose e OpenCode não têm plan mode no ACP: o Kabul emula.
+    return { chat_id: cid, harness: model.harness, approvals: true, note: model.local?.note ?? null, plan: ["goose", "opencode", "cursor"].includes(model.harness) ? "emulated" : "native" };
   },
-  chat_send: ({ chatId, text }) => agentTurn(chatId, text, ""),
+  // Troca ao vivo: todos menos o Antigravity (esse reinicia retomando a conversa).
+  chat_set_mode: ({ chatId }) => { const c = db.chats[chatId]; return !!c && !(window as any).__kabulNoLiveMode; },
+  chat_send: ({ chatId, text }) => (db.chats[chatId] && (db.chats[chatId].working = true), agentTurn(chatId, text, "")),
   chat_approve: ({ chatId, allow, updatedInput }) => {
     const ev = (e: unknown, t: number) => setTimeout(() => emit("chat-event", { chat_id: chatId, event: e }), t);
     const pend = db.chats[chatId]?.pending;
@@ -315,7 +497,29 @@ const handlers: Record<string, (a: any) => unknown> = {
     const own = { ...main, cpu: 4.5, mem: 238.2 * MB };
     return { cpu: main.cpu, mem: main.mem, count: 15, root: { ...main, pid: 10, name: "App", kind: "app", children: [own] } };
   },
-  chat_stop: () => undefined,
+  chat_stop: ({ chatId }) => void releaseSlot(chatId),
+  // Parar: "rode sleep 30" deixa só o comando em primeiro plano (o CLI encerra); "suba o servidor" deixa
+  // o servidor em segundo plano e um contêiner com -d.
+  chat_interrupt: ({ chatId }) => {
+    releaseSlot(chatId);
+    const ch = db.chats[chatId];
+    const last = ch?.last ?? "";
+    const t = now();
+    const leftovers = /servidor/.test(last) ? [{ pid: 4242, start: t - 20, name: "node", cmd: "node node_modules/.bin/vite --port 3000", ports: [3000], age: 20 }] : [];
+    const containers = /servidor/.test(last) ? [{ id: "abc123def456", image: "postgres:16", name: "kabul_db" }] : [];
+    (window as any).__mock.interrupted = ((window as any).__mock.interrupted ?? 0) + 1;
+    return { alive: true, leftovers, containers };
+  },
+  chat_processes: ({ chatIds }) => (chatIds as string[]).some((id) => /servidor/.test(db.chats[id]?.last ?? "")) ? [{ pid: 4242, start: now() - 20, name: "node", cmd: "node node_modules/.bin/vite --port 3000", ports: [3000], age: 20 }] : [],
+  processes_keep: ({ items, workspaceId }) => void (db.kept = [...(db.kept ?? []), ...(items as any[]).map((x) => ({ ...x, workspace_id: workspaceId }))]),
+  processes_kept: () => db.kept ?? [],
+  process_kill: ({ keys }) => {
+    const k = keys as { pid: number }[];
+    db.kept = (db.kept ?? []).filter((x: any) => !k.some((y) => y.pid === x.pid));
+    ((window as any).__mock.killed ??= []).push(...k.map((x) => x.pid));
+    return k.length;
+  },
+  docker_stop: ({ id }) => void ((window as any).__mock.dockerStopped ??= []).push(id),
   history_list: ({ workspaceId }) => Object.values(db.history).filter((h: any) => h.workspace_id === workspaceId).map((h: any) => ({ id: h.id, title: h.title, model_key: h.model_key, updated_at: h.updated_at })),
   history_load: ({ id: hid }) => {
     if (!db.history[hid]) throw new Error("sessão não encontrada");
@@ -351,7 +555,16 @@ const handlers: Record<string, (a: any) => unknown> = {
   auth_cancel: () => undefined,
   app_settings_get: () => db.settings,
   app_settings_save: ({ settings }) => void (db.settings = settings),
-  notify: () => undefined,
+  notify: ({ title, body }) => void ((window as any).__notified ??= []).push(`${title}: ${body}`),
+  badge_set: ({ count }) => void ((window as any).__badge = count),
+  // Atualizações: `__mock.update` simula uma versão nova; `__mock.offline` simula sem rede.
+  app_version: () => ({ version: __KABUL_VERSION__, protocol: 1, channel: db.settings.update_channel ?? "stable", updater: true }),
+  update_check: ({ channel }) => {
+    if ((window as any).__mock?.offline) throw "Sem conexão com o servidor de atualizações; tente mais tarde.";
+    const u = (window as any).__mock?.update;
+    return u ? { current: __KABUL_VERSION__, notes: null, date: null, channel: channel ?? db.settings.update_channel ?? "stable", ...u } : null;
+  },
+  update_install: () => void ((window as any).__updateInstalled = true),
   accounts_list: ({ provider }) => [{ id: `${provider}:sistema`, provider, nickname: "Padrão do sistema", email: null, plan: null, dir: null, default: !db.accounts.some((a: any) => a.provider === provider && a.default), logged_in: true, env_var: "CLAUDE_CONFIG_DIR", env_confirmed: true }, ...db.accounts.filter((a: any) => a.provider === provider)],
   account_add: ({ provider, nickname }) => { const a = { id: `${provider}:${id()}`, provider, nickname, email: null, plan: null, dir: `/mock/accounts/${provider}`, default: false, logged_in: false, env_var: "CLAUDE_CONFIG_DIR", env_confirmed: true }; db.accounts.push(a); return a; },
   account_update: ({ id: aid, nickname, makeDefault, remove }) => {
@@ -398,6 +611,15 @@ const handlers: Record<string, (a: any) => unknown> = {
   github_repo_access: () => ({ slug: "dev/demo", ok: false, permission: null, message: "Missing GitHub access: a conta ativa não acessa dev/demo." }),
   mcp_list: () => [{ name: "linear", scope: "user", source: "~/.claude.json", transport: "http", target: "https://mcp.linear.app/mcp" }, { name: "docs", scope: "project", source: ".mcp.json", transport: "stdio", target: "npx -y docs-mcp" }],
   mcp_add: () => undefined,
+  // Registro único: linear vem do Claude e do Codex; docs só do projeto (Claude); figma é remoto com login (não compartilhado).
+  // Cópia, como o backend de verdade (JSON novo a cada chamada): o painel re-renderiza ao recarregar.
+  mcp_shared: () => structuredClone(db.mcp ??= [
+    { name: "docs", transport: "stdio", target: "npx -y docs-mcp", origins: [{ harness: "claude", scope: "project", source: ".mcp.json" }], conflict: false, shared: true, env_keys: [], weight: null },
+    { name: "linear", transport: "http", target: "https://mcp.linear.app/mcp", origins: [{ harness: "claude", scope: "user", source: "~/.claude.json" }, { harness: "codex", scope: "user", source: "~/.codex/config.toml" }], conflict: false, shared: true, env_keys: ["Authorization"], weight: { tools: 24, tokens: 3200 } },
+  ]),
+  mcp_weigh: ({ name }) => { const m = db.mcp!.find((x: any) => x.name === name); m.weight = { tools: 6, tokens: 900 }; return m.weight; },
+  mcp_set_shared: ({ name, on }) => void (db.mcp!.find((x: any) => x.name === name).shared = on),
+  mcp_export_agy: () => "~/.gemini/config/mcp_config.json.bak-kabul-1",
   linear_status: () => ({ connected: db.linear, who: db.linear ? "Dev · Acme" : null, error: null }),
   linear_connect: ({ key }) => { if (!String(key).startsWith("lin_api_")) throw new Error("Linear: chave inválida"); db.linear = true; return "Dev · Acme"; },
   linear_disconnect: () => void (db.linear = false),
@@ -412,6 +634,11 @@ const handlers: Record<string, (a: any) => unknown> = {
   pr_checks: () => (db as any).checks ?? ({ checks: [{ name: "build", state: "SUCCESS", bucket: "pass", link: "https://github.com/dev/demo/actions/runs/101/job/1", workflow: "CI", required: true }, { name: "e2e", state: "IN_PROGRESS", bucket: "pending", link: "https://github.com/dev/demo/actions/runs/101/job/2", workflow: "CI", required: true }, { name: "lint", state: "FAILURE", bucket: "fail", link: "https://github.com/dev/demo/actions/runs/102/job/3", workflow: "CI", required: true }], message: null }),
   open_external: ({ target }) => void ((window as any).__external = target),
   transcribe: () => "texto ditado de teste",
+  // Escala (docs/escala.md): estado da fila, parar em lote, foco e configuração do limite.
+  agents_status: () => ({ limit: agentLimit(), running: running.size, queued: waitingSlot.map((w, i) => ({ chat_id: w.chatId, position: i + 1, workspace_id: null })), running_chats: [...running], suspended: [], focus: (db as any).focus ?? null, idle_minutes: null }),
+  agents_config: ({ limit }) => (limit !== undefined && ((window as any).__mock.agentLimit = limit), handlers.agents_status({})),
+  agents_focus: ({ workspaceId }) => void ((db as any).focus = workspaceId),
+  chats_interrupt: ({ chatIds }) => { const ids = chatIds as string[]; ids.forEach((c) => handlers.chat_interrupt({ chatId: c })); ((window as any).__mock.batchStopped ??= []).push(...ids); return { stopped: ids, errors: [] }; },
 };
 
 // Ganchos para os testes montarem estados de git/PR sem backend.
@@ -423,16 +650,57 @@ if (typeof window !== "undefined") (window as any).__mock = {
   change: (wid: string | null, path: string, body: string) => { const w = wid ?? db.workspaces[0]?.id; (db.changed[w] ??= {})[path] = body; },
 };
 
+/**
+ * Cenário de escala (`window.__kabulSeed`, usado por `npm run perf`): N repositórios, M workspaces prontos e,
+ * opcionalmente, uma conversa salva com `longChat` mensagens (metade sua, metade do agente) no workspace 0.
+ */
+function seedScale(seed: { repos?: number; workspaces?: number; longChat?: number; agentHistory?: number; agents?: number }) {
+  const R = seed.repos ?? 5, W = seed.workspaces ?? 100;
+  const st = ["in-progress", "in-review", "backlog", "done"];
+  for (let r = 0; r < R; r++) db.repos.push({ id: `r${r}`, name: `projeto-${r + 1}`, path: `/mock/repos/projeto-${r + 1}`, default_branch: "main" });
+  for (let i = 0; i < W; i++) {
+    const name = `cidade-${i}`;
+    db.workspaces.push({ id: `w${i}`, repo_id: `r${i % R}`, name, branch: `dev/${name}`, path: `/mock/ws/${name}`, archived: false, created_at: now() - i * 60, title: `Tarefa ${i}`, status: st[i % st.length], state: "ready", pinned: false, notes: "", port: 42000 + i * 10, target_branch: null, pr_url: null, archive_checkpoint: null, user_set_branch: false, files_copied: 0 });
+    db.changed[`w${i}`] = i % 3 ? {} : { [`src/m${i}.ts`]: "export const x = 1;\n" };
+  }
+  const conv = (n: number) => {
+  const items: any[] = [];
+  for (let k = 0; k < n / 2; k++) {
+    items.push({ k: "user", text: `Pergunta ${k}: ajuste o componente ${k % 40} e explique o que mudou` });
+    if (k % 3 === 0) items.push({ k: "tool", id: `h${k}`, name: "Bash", input: { command: `rg -n comp${k % 40} src`, description: "Procura" }, output: `src/c${k % 40}.tsx:10: export function Comp${k % 40}()` });
+    const code = k % 5 === 0 ? `\n\n\`\`\`ts\nexport function comp${k}(x: number) {\n  return x * ${k} + 1;\n}\n\`\`\`` : "";
+    items.push({ k: "assistant", text: `Feito: o **componente ${k % 40}** agora valida a entrada antes de salvar. Mudei \`src/c${k % 40}.tsx\` e o teste correspondente; o resto do fluxo continua igual.${code}`, streaming: false });
+    items.push({ k: "turn", meta: `${(k % 50) + 3}s · 10:${String(k % 60).padStart(2, "0")}`, copy: "Feito." });
+  }
+  return items;
+  };
+  // Conversas já com histórico nos workspaces dos agentes (sessões longas, como no uso real).
+  for (let i = 1; i <= (seed.agents ?? 0); i++) if (seed.agentHistory) db.history[`chat-w${i}`] = { id: `chat-w${i}`, workspace_id: `w${i}`, title: `Sessão ${i}`, model_key: "claude:opus", agent_session: null, updated_at: now(), items: conv(seed.agentHistory) };
+  if (seed.longChat) db.history["chat-longa"] = { id: "chat-longa", workspace_id: "w0", title: "Conversa longa", model_key: "claude:opus", agent_session: null, updated_at: now(), items: conv(seed.longChat) };
+}
+if (typeof window !== "undefined" && (window as any).__kabulSeed) seedScale((window as any).__kabulSeed);
+
 export const mockTransport: Transport = {
   async call<T>(command: string, args?: Record<string, unknown>) {
     ((window as any).__calls ??= []).push(command);
+    if (command === "checkpoint_create" && (window as any).__mock?.holdModels) ((window as any).__mock.holdModels = false, (window as any).__mock.releaseModels?.());
     const h = handlers[command];
     if (!h) throw new Error(`mock: comando desconhecido ${command}`);
     await new Promise((r) => setTimeout(r, 15));
     return (await h(args ?? {})) as T;
   },
   subscribe(channel, handler) {
+    // Contagem de inscrições por canal: o E2E confere que a aba não se reinscreve a cada render.
+    const n = ((window as any).__subs ??= {} as Record<string, number>);
+    n[channel] = (n[channel] ?? 0) + 1;
     const s = subs.get(channel) ?? new Set();
+    // `__mock.slowListen`: registra como o Tauri (listen por IPC, assíncrono); evento emitido antes disso se perde.
+    if ((window as any).__mock?.slowListen) {
+      let dead = false;
+      setTimeout(() => void (!dead && s.add(handler as H)), 20);
+      subs.set(channel, s);
+      return () => ((dead = true), s.delete(handler as H));
+    }
     s.add(handler as H);
     subs.set(channel, s);
     return () => s.delete(handler as H);

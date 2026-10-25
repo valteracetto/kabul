@@ -1,0 +1,12 @@
+# `cargo audit`: avisos aceitos, com o motivo (ver docs/security.md › Dependências).
+# Revise quando o web-push-native sair com jwt-simple/p256 novos.
+[advisories]
+ignore = [
+  # rsa 0.9 (Marvin, sem versão corrigida) vem por web-push-native → jwt-simple → superboring.
+  # O kabuld só assina ES256 (VAPID do Web Push); nenhum código RSA é chamado.
+  "RUSTSEC-2023-0071",
+  # crypto-bigint 0.5 (variação de tempo) vem por p256 0.13 do web-push-native. Só assina o JWT
+  # VAPID enviado aos serviços de push; a chave VAPID não dá acesso ao kabuld (no pior caso, mandar
+  # notificação aos aparelhos inscritos). Corrigir exige p256 0.14, que o web-push-native ainda não usa.
+  "RUSTSEC-2026-0387",
+]

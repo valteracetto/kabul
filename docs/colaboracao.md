@@ -13,6 +13,9 @@ o workspace roda (veja [celular.md](celular.md)).
 3. Escolha o papel e gere o link/QR.
    - **Editor:** vê tudo do workspace, manda mensagens, aprova, digita no terminal e abre chats.
    - **Observador:** só acompanha. Não manda mensagem, não aprova e não digita.
+   - Convide como **editor** só quem você deixaria usar o seu computador: digitar no terminal e aprovar
+     ferramentas do agente roda comandos com o seu usuário. O escopo do workspace limita o que a pessoa vê
+     e alcança pelo Kabul, não o que um comando rodado no terminal pode fazer (ver [security.md](security.md)).
 4. A pessoa abre o link, digita o nome e entra.
    - O convite vale 30 minutos e uma vez só.
    - Depois disso, o aparelho dela tem uma credencial própria, presa àquele workspace. Ela não vê os outros

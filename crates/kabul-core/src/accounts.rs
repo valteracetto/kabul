@@ -34,8 +34,9 @@ pub fn isolation(provider: &str) -> Option<(&'static str, bool)> {
         "agy" => Some(("HOME", true)),
         // XDG_DATA_HOME guarda o auth.json do OpenCode; a confirmar.
         "opencode" => Some(("XDG_DATA_HOME", false)),
-        // Qwen Code e Gemini CLI leem de ~/.qwen e ~/.gemini: isolar o HOME; a confirmar.
-        "qwen" | "gemini" => Some(("HOME", false)),
+        // Confirmado (Gemini CLI 0.65, Qwen Code 0.26.1, Goose 1.55): com HOME=<perfil> cada um cria
+        // <perfil>/.gemini, <perfil>/.qwen e <perfil>/.config/goose + .local/share/goose.
+        "qwen" | "gemini" | "goose" => Some(("HOME", true)),
         _ => None,
     }
 }
@@ -60,6 +61,10 @@ pub fn env_for(p: &AccountProfile) -> Vec<(String, String)> {
         (Some(d), Some((var, _))) => {
             if var == "HOME" {
                 link_home_basics(d);
+                // No Windows o Node (os.homedir) e o git leem o USERPROFILE: isola os dois.
+                if cfg!(windows) {
+                    return vec![("HOME".into(), d.display().to_string()), ("USERPROFILE".into(), d.display().to_string())];
+                }
             }
             vec![(var.to_string(), d.display().to_string())]
         }
@@ -69,26 +74,41 @@ pub fn env_for(p: &AccountProfile) -> Vec<(String, String)> {
 
 /// Perfil isolado pelo HOME: o agente roda git/gh/ssh com esse HOME, então a identidade do git,
 /// as chaves SSH e o login do gh do usuário entram como links (só se ainda não existirem no perfil).
+/// No Windows: pastas viram junções (`mklink /J`, sem privilégio de administrador) e arquivos são
+/// copiados (link simbólico de arquivo exige o modo de desenvolvedor).
 pub fn link_home_basics(dir: &Path) {
-    #[cfg(unix)]
-    {
-        let Some(real) = std::env::var_os("HOME").map(PathBuf::from) else { return };
-        if real == dir {
-            return;
-        }
-        for rel in [".gitconfig", ".config/git", ".ssh", ".config/gh"] {
-            let (src, dst) = (real.join(rel), dir.join(rel));
-            if src.exists() && std::fs::symlink_metadata(&dst).is_err() {
-                if let Some(parent) = dst.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                let _ = std::os::unix::fs::symlink(&src, &dst);
+    let real = crate::paths::home();
+    if real.as_os_str().is_empty() || real == dir {
+        return;
+    }
+    let gh = if cfg!(windows) { "AppData/Roaming/GitHub CLI" } else { ".config/gh" };
+    for rel in [".gitconfig", ".config/git", ".ssh", gh] {
+        let (src, dst) = (real.join(rel), dir.join(rel));
+        if src.exists() && std::fs::symlink_metadata(&dst).is_err() {
+            if let Some(parent) = dst.parent() {
+                let _ = std::fs::create_dir_all(parent);
             }
+            link(&src, &dst);
         }
     }
-    #[cfg(not(unix))]
-    let _ = dir;
 }
+
+#[cfg(unix)]
+fn link(src: &Path, dst: &Path) {
+    let _ = std::os::unix::fs::symlink(src, dst);
+}
+
+#[cfg(windows)]
+fn link(src: &Path, dst: &Path) {
+    if src.is_dir() {
+        let _ = crate::shell::command("cmd").arg("/C").arg("mklink").arg("/J").arg(dst).arg(src).output();
+    } else {
+        let _ = std::fs::copy(src, dst);
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn link(_src: &Path, _dst: &Path) {}
 
 pub struct Accounts {
     file: PathBuf,
@@ -99,20 +119,23 @@ pub struct Accounts {
 impl Accounts {
     pub fn open(home: &Path) -> Self {
         let file = home.join("accounts.json");
-        let list = std::fs::read_to_string(&file).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let list = crate::schema::load_json(&file, crate::schema::ACCOUNTS, crate::schema::ACCOUNTS_MIGRATIONS).and_then(|(mut doc, _)| serde_json::from_value(doc["accounts"].take()).ok()).unwrap_or_default();
         Self { file, root: home.join("accounts"), list }
     }
 
+    /// Formato v1: `{schema_version, accounts: [...]}` (a v0 era a lista pura; ver `crate::schema`).
     fn save(&self) -> Result<()> {
         if let Some(d) = self.file.parent() {
             std::fs::create_dir_all(d)?;
         }
-        std::fs::write(&self.file, serde_json::to_vec_pretty(&self.list)?).context("salvando contas")
+        let doc = serde_json::json!({ "schema_version": crate::schema::ACCOUNTS, "accounts": self.list });
+        std::fs::write(&self.file, serde_json::to_vec_pretty(&doc)?).context("salvando contas")
     }
 
     /// Perfis do provedor, com o "padrão do sistema" sempre primeiro.
     pub fn of(&self, provider: &str) -> Vec<AccountProfile> {
-        let mut v = vec![AccountProfile { id: format!("{provider}:sistema"), provider: provider.into(), nickname: "Padrão do sistema".into(), email: None, plan: None, dir: None, default: !self.list.iter().any(|p| p.provider == provider && p.default) }];
+        let mut v =
+            vec![AccountProfile { id: format!("{provider}:sistema"), provider: provider.into(), nickname: "Padrão do sistema".into(), email: None, plan: None, dir: None, default: !self.list.iter().any(|p| p.provider == provider && p.default) }];
         v.extend(self.list.iter().filter(|p| p.provider == provider).cloned());
         v
     }
@@ -172,32 +195,6 @@ impl Accounts {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn perfis_isolados() {
-        let home = std::env::temp_dir().join(format!("kabul-acc-{}", std::process::id()));
-        let mut a = Accounts::open(&home);
-        assert_eq!(a.of("claude").len(), 1, "só o padrão do sistema");
-        let p = a.add("claude", "Trabalho").unwrap();
-        assert!(p.dir.as_ref().unwrap().is_dir());
-        assert_eq!(env_for(&p), vec![("CLAUDE_CONFIG_DIR".to_string(), p.dir.as_ref().unwrap().display().to_string())]);
-        assert!(a.default_for("claude").dir.is_none());
-        a.set_default(&p.id).unwrap();
-        assert_eq!(Accounts::open(&home).default_for("claude").nickname, "Trabalho");
-        a.rename(&p.id, "Cliente").unwrap();
-        assert_eq!(a.get(&p.id).unwrap().nickname, "Cliente");
-        assert!(env_for(&a.default_for("codex")).is_empty());
-        let dir = p.dir.clone().unwrap();
-        a.remove(&p.id).unwrap();
-        assert!(!dir.exists());
-        assert!(a.add("desconhecido", "x").is_err());
-        std::fs::remove_dir_all(&home).ok();
-    }
-}
-
 /// O perfil está logado? (sem ler tokens: comando de status ou existência do arquivo de credenciais).
 pub fn logged_in(p: &AccountProfile) -> Option<bool> {
     let env = env_for(p);
@@ -239,4 +236,48 @@ pub fn login_argv(provider: &str) -> Option<(Vec<&'static str>, &'static [u8])> 
         "gh" => (vec!["gh", "auth", "login", "--web", "-h", "github.com", "-p", "https", "--skip-ssh-key"], b"\n"),
         p => (crate::auth::login_command(HarnessKind::parse(if p == "agy" { "agy" } else { p })?), b""),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn perfis_isolados() {
+        let home = std::env::temp_dir().join(format!("kabul-acc-{}", std::process::id()));
+        let mut a = Accounts::open(&home);
+        assert_eq!(a.of("claude").len(), 1, "só o padrão do sistema");
+        let p = a.add("claude", "Trabalho").unwrap();
+        assert!(p.dir.as_ref().unwrap().is_dir());
+        assert_eq!(env_for(&p), vec![("CLAUDE_CONFIG_DIR".to_string(), p.dir.as_ref().unwrap().display().to_string())]);
+        assert!(a.default_for("claude").dir.is_none());
+        a.set_default(&p.id).unwrap();
+        assert_eq!(Accounts::open(&home).default_for("claude").nickname, "Trabalho");
+        a.rename(&p.id, "Cliente").unwrap();
+        assert_eq!(a.get(&p.id).unwrap().nickname, "Cliente");
+        assert!(env_for(&a.default_for("codex")).is_empty());
+        let dir = p.dir.clone().unwrap();
+        a.remove(&p.id).unwrap();
+        assert!(!dir.exists());
+        assert!(a.add("desconhecido", "x").is_err());
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn accounts_json_v0_migra() {
+        let home = std::env::temp_dir().join(format!("kabul-acc-mig-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        // v0: a lista pura, como gravavam as versões antigas.
+        let v0 = r#"[{"id":"claude:abc","provider":"claude","nickname":"Trabalho","dir":null,"default":true}]"#;
+        std::fs::write(home.join("accounts.json"), v0).unwrap();
+        let mut a = Accounts::open(&home);
+        assert_eq!(a.default_for("claude").nickname, "Trabalho");
+        assert_eq!(std::fs::read_to_string(home.join("accounts.json.v0.bak")).unwrap(), v0);
+        a.rename("claude:abc", "Cliente").unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(home.join("accounts.json")).unwrap()).unwrap();
+        assert_eq!((saved["schema_version"].as_u64(), saved["accounts"][0]["nickname"].as_str()), (Some(crate::schema::ACCOUNTS as u64), Some("Cliente")));
+        assert_eq!(Accounts::open(&home).get("claude:abc").unwrap().nickname, "Cliente");
+        std::fs::remove_dir_all(&home).ok();
+    }
 }

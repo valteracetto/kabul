@@ -7,3 +7,10 @@ apps/desktop/src-tauri/gen/
 test-results/
 playwright-report/
 docs/internal/
+
+# CI only (release.yml): signing overrides for tauri build
+apps/desktop/src-tauri/tauri.release.conf.json
+# Signing keys never live in the repo
+*.key
+*.p12
+*.pfx

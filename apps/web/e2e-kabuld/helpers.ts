@@ -32,14 +32,18 @@ export async function freePort(): Promise<number> {
 
 const tmux = (...args: string[]) => execFileSync("tmux", args, { stdio: "pipe" }).toString();
 
-/** Só as sessões deste E2E (`kabul-test-kd-*`): outros testes podem estar usando `kabul-test-*`. */
-export function killTestSessions(prefix = "kabul-test-kd-") {
+/** Id desta execução do E2E: definido no globalSetup e herdado pelos workers (variável de ambiente). As
+ *  sessões levam esse id, então a limpeza não derruba as de outro checkout rodando o mesmo E2E. */
+export const RUN = (process.env.KABUL_E2E_RUN ??= Math.random().toString(36).slice(2, 8));
+
+/** Só as sessões desta execução (`kabul-test-kd-<RUN>-*`): outros testes e checkouts usam `kabul-test-*`. */
+export function killTestSessions(prefix = `kabul-test-kd-${RUN}-`) {
   try {
     for (const s of tmux("list-sessions", "-F", "#{session_name}").split("\n")) if (s.startsWith(prefix)) tmux("kill-session", "-t", `=${s}`);
   } catch {}
 }
 
-export async function startKabuld(opts: { trustLocalBrowser?: boolean; repoName?: string; fakeHome?: boolean } = {}): Promise<Kabuld> {
+export async function startKabuld(opts: { trustLocalBrowser?: boolean; repoName?: string; fakeHome?: boolean; wsPort?: number; tailscale?: string; env?: Record<string, string> } = {}): Promise<Kabuld> {
   const dir = mkdtempSync(join(tmpdir(), "kabul-e2e-kd-"));
   const id = Math.random().toString(36).slice(2, 7);
   // Repo git e um worktree sintéticos.
@@ -54,7 +58,7 @@ export async function startKabuld(opts: { trustLocalBrowser?: boolean; repoName?
     join(home, "state.json"),
     JSON.stringify({
       repos: [{ id: "r1", name: repoName, path: repo, default_branch: "main" }],
-      workspaces: [{ id: "w1", repo_id: "r1", name: "lisboa", branch: "dev/lisboa", path: wsPath, archived: false, created_at: 0, title: "Login novo", status: "in-progress", state: "ready", pinned: false, notes: "", port: 0 }],
+      workspaces: [{ id: "w1", repo_id: "r1", name: "lisboa", branch: "dev/lisboa", path: wsPath, archived: false, created_at: 0, title: "Login novo", status: "in-progress", state: "ready", pinned: false, notes: "", port: opts.wsPort ?? 0 }],
     }),
   );
   // Agente falso para o chat (claude stream-json) e "TUIs" para o espelho do tmux.
@@ -78,8 +82,8 @@ export async function startKabuld(opts: { trustLocalBrowser?: boolean; repoName?
     ].join("\n") + "\n");
   }
   const port = await freePort();
-  const env = { ...process.env, ...(opts.fakeHome ? { HOME: fakeHome } : {}), PATH: `${bin}:${process.env.PATH}`, KABULD_TRUST_LOCAL_BROWSER: opts.trustLocalBrowser === false ? "0" : "1", KABULD_VAPID_SUBJECT: "mailto:e2e@example.com" };
-  const proc: ChildProcess = spawn(KABULD, ["--port", String(port), "--home", home, "--web", DIST, "--no-tailscale", "--secrets", "file", "--pair"], { env, stdio: ["ignore", "ignore", "pipe"] });
+  const env = { ...process.env, ...(opts.fakeHome ? { HOME: fakeHome } : {}), PATH: `${bin}:${process.env.PATH}`, KABULD_TRUST_LOCAL_BROWSER: opts.trustLocalBrowser === false ? "0" : "1", KABULD_VAPID_SUBJECT: "mailto:e2e@example.com", ...(opts.tailscale ? { KABUL_BIN_TAILSCALE: opts.tailscale } : {}), ...opts.env };
+  const proc: ChildProcess = spawn(KABULD, ["--port", String(port), "--home", home, "--web", DIST, ...(opts.tailscale ? [] : ["--no-tailscale"]), "--secrets", "file", "--pair"], { env, stdio: ["ignore", "ignore", "pipe"] });
   let err = "";
   const pairLink = await new Promise<string>((ok, fail) => {
     const t = setTimeout(() => fail(new Error(`kabuld não subiu: ${err}`)), 20_000);
@@ -92,7 +96,8 @@ export async function startKabuld(opts: { trustLocalBrowser?: boolean; repoName?
   });
 
   // Sessões tmux de teste: cada "agente" é filho do shell do pane, como no uso real.
-  const s = { claude: `kabul-test-kd-${id}-claude`, codex: `kabul-test-kd-${id}-codex`, cloud: `kabul-test-kd-${id}-cloud-1`, shell: `kabul-test-kd-${id}-shell` };
+  const p = `kabul-test-kd-${RUN}-${id}`;
+  const s = { claude: `${p}-claude`, codex: `${p}-codex`, cloud: `${p}-cloud-1`, shell: `${p}-shell` };
   tmux("new-session", "-d", "-x", "100", "-y", "30", "-s", s.claude, "-c", wsPath, `sh -c 'printf "Bash command\\n  npm test\\nDo you want to proceed?\\n> 1. Yes\\n  2. No\\n"; ${tui}/claude; exec sh'`);
   tmux("new-session", "-d", "-x", "100", "-y", "30", "-s", s.codex, "-c", repo, `sh -c 'printf "Would you like to run the following command?\\n  $ npm test\\n"; ${tui}/codex; exec sh'`);
   tmux("new-session", "-d", "-x", "100", "-y", "30", "-s", s.cloud, "-c", wsPath, "sh");

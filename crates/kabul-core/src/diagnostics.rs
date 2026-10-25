@@ -1,7 +1,6 @@
 //! Diagnóstico do ambiente (Ajuda › Diagnóstico): ferramentas, versões, PATH e shell, com relatório
 //! copiável e uma versão sem dados pessoais (caminho da pasta pessoal, usuário, nome da máquina, e-mails).
 use serde::Serialize;
-use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Check {
@@ -13,7 +12,7 @@ pub struct Check {
 
 fn version(bin: &str, args: &[&str]) -> (bool, String) {
     let Some(path) = crate::harness::which(bin) else { return (false, "não encontrado no PATH".into()) };
-    match Command::new(&path).args(args).output() {
+    match crate::shell::command(&path).args(args).output() {
         Ok(o) => {
             let out = String::from_utf8_lossy(if o.stdout.is_empty() { &o.stderr } else { &o.stdout }).lines().next().unwrap_or("").trim().to_string();
             (o.status.success(), format!("{out} ({})", path.display()))
@@ -26,21 +25,38 @@ pub fn run() -> Vec<Check> {
     let mut v = vec![];
     let mut add = |group: &str, name: &str, (ok, detail): (bool, String)| v.push(Check { group: group.into(), name: name.into(), ok, detail });
     add("Essenciais", "git", version("git", &["--version"]));
-    add("Essenciais", "tmux", version("tmux", &["-V"]));
+    // Terminal: tmux onde ele é o backend; o PTY próprio (Windows) não depende de nada instalado.
+    match crate::term::backend().kind() {
+        "tmux" => add("Essenciais", "tmux", version("tmux", &["-V"])),
+        k => add("Essenciais", "terminal", (true, format!("{k} (multiplexador do Kabul)"))),
+    }
     add("Essenciais", "gh (GitHub CLI)", version("gh", &["--version"]));
     let gh_ok = crate::github::status().iter().any(|a| a.active && a.ok);
     add("Essenciais", "GitHub conectado", (gh_ok, if gh_ok { "conta ativa válida".into() } else { "rode gh auth login ou entre em Configurações › Contas".into() }));
-    for (name, bin, args) in [("Claude Code", "claude", vec!["--version"]), ("Codex", "codex", vec!["--version"]), ("OpenCode", "opencode", vec!["--version"]), ("Qwen Code", "qwen", vec!["--version"]), ("Gemini CLI", "gemini", vec!["--version"]), ("Antigravity", "agy", vec!["--version"])] {
+    for (name, bin, args) in [
+        ("Claude Code", "claude", vec!["--version"]),
+        ("Codex", "codex", vec!["--version"]),
+        ("OpenCode", "opencode", vec!["--version"]),
+        ("Qwen Code", "qwen", vec!["--version"]),
+        ("Gemini CLI", "gemini", vec!["--version"]),
+        ("Antigravity", "agy", vec!["--version"]),
+    ] {
         add("Agentes", name, version(bin, &args));
     }
     add("Ferramentas", "node", version("node", &["--version"]));
     add("Ferramentas", "npm", version("npm", &["--version"]));
     add("Ferramentas", "ffmpeg (ditado)", version("ffmpeg", &["-version"]));
-    add("Ferramentas", "whisper-cli (ditado)", version("whisper-cli", &["--help"]).0.then(|| (true, "instalado".to_string())).unwrap_or((false, "não encontrado no PATH".into())));
+    add("Ferramentas", "whisper-cli (ditado)", if version("whisper-cli", &["--help"]).0 { (true, "instalado".to_string()) } else { (false, "não encontrado no PATH".into()) });
     let path = std::env::var("PATH").unwrap_or_default();
-    add("Ambiente", "PATH", (!path.is_empty(), format!("{} pastas", path.split(':').filter(|p| !p.is_empty()).count())));
-    add("Ambiente", "SHELL", std::env::var("SHELL").map(|s| (true, s)).unwrap_or((false, "não definido".into())));
-    let home = std::env::var("HOME").unwrap_or_default();
+    add("Ambiente", "PATH", (!path.is_empty(), format!("{} pastas", path.split(crate::shell_env::PATH_SEP).filter(|p| !p.is_empty()).count())));
+    if cfg!(windows) {
+        let sh = crate::shell::Shell::interactive();
+        let scripts = crate::shell::Shell::for_scripts();
+        add("Ambiente", "Shell", (true, format!("terminal: {} · scripts: {}", sh.program, scripts.program)));
+    } else {
+        add("Ambiente", "SHELL", std::env::var("SHELL").map(|s| (true, s)).unwrap_or((false, "não definido".into())));
+    }
+    let home = crate::paths::home().display().to_string();
     add("Ambiente", "HOME", (std::path::Path::new(&home).is_dir(), home.clone()));
     v
 }
@@ -70,7 +86,11 @@ pub fn redact(text: &str, home: &str, user: &str, host: &str) -> String {
         .split_inclusive(char::is_whitespace)
         .map(|w| {
             let core = w.trim_end().trim_matches(|c: char| "(),;".contains(c));
-            if core.contains('@') && core.contains('.') && !core.starts_with('@') { w.replace(core, "<e-mail>") } else { w.to_string() }
+            if core.contains('@') && core.contains('.') && !core.starts_with('@') {
+                w.replace(core, "<e-mail>")
+            } else {
+                w.to_string()
+            }
         })
         .collect();
     if host.len() >= 2 {
@@ -99,7 +119,10 @@ mod tests {
 
     #[test]
     fn relatorio_e_redacao() {
-        let c = vec![Check { group: "Essenciais".into(), name: "git".into(), ok: true, detail: "git version 2.50 (/home/dev/bin/git)".into() }, Check { group: "Ambiente".into(), name: "HOME".into(), ok: false, detail: "/home/dev em mac-de-dev, dono dev@example.com".into() }];
+        let c = vec![
+            Check { group: "Essenciais".into(), name: "git".into(), ok: true, detail: "git version 2.50 (/home/dev/bin/git)".into() },
+            Check { group: "Ambiente".into(), name: "HOME".into(), ok: false, detail: "/home/dev em mac-de-dev, dono dev@example.com".into() },
+        ];
         let r = report(&c);
         assert!(r.contains("## Essenciais\n✓ git: git version 2.50"));
         assert!(r.contains("✕ HOME"));

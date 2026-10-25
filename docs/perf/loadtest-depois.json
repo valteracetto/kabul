@@ -1,0 +1,147 @@
+{
+  "clients": [
+    {
+      "bytes": 4566129,
+      "chat_events": 14184,
+      "client": 0,
+      "compressed_frames": 0,
+      "frames": 15739,
+      "frames_per_s": 684.3,
+      "lagged": 0,
+      "other_events": 1455,
+      "stamps": 13137,
+      "subs": "*",
+      "term_frames": 0,
+      "wire_bytes": 4566129
+    },
+    {
+      "bytes": 4566123,
+      "chat_events": 14184,
+      "client": 1,
+      "compressed_frames": 0,
+      "frames": 15739,
+      "frames_per_s": 684.3,
+      "lagged": 0,
+      "other_events": 1455,
+      "stamps": 13137,
+      "subs": "*",
+      "term_frames": 0,
+      "wire_bytes": 4566123
+    },
+    {
+      "bytes": 300010,
+      "chat_events": 0,
+      "client": 2,
+      "compressed_frames": 0,
+      "frames": 1455,
+      "frames_per_s": 63.26,
+      "lagged": 0,
+      "other_events": 1455,
+      "stamps": 0,
+      "subs": "status",
+      "term_frames": 0,
+      "wire_bytes": 300010
+    }
+  ],
+  "config": {
+    "agents": 30,
+    "clients": 3,
+    "compress": false,
+    "duration_s": 20,
+    "max_agents": null,
+    "monitor_ms": 1500,
+    "os": "macos",
+    "rate_per_agent": 20.0,
+    "tmux": 0,
+    "warmup_s": 3,
+    "workspaces": 100
+  },
+  "delivery_ratio": 0.9997719999999999,
+  "errors": [],
+  "label": "depois",
+  "latency_ms": {
+    "avg": 0.13,
+    "max": 3.24,
+    "n": 22804,
+    "p50": 0.11,
+    "p95": 0.29,
+    "p99": 0.53
+  },
+  "rpc_all_ms": {
+    "avg": 9.09,
+    "max": 51.21,
+    "n": 176,
+    "p50": 1.02,
+    "p95": 34.7,
+    "p99": 50.64
+  },
+  "rpc_ms": {
+    "chat_list": {
+      "avg": 0.71,
+      "max": 3.7,
+      "n": 44,
+      "p50": 0.43,
+      "p95": 2.16,
+      "p99": 3.7
+    },
+    "live_sessions": {
+      "avg": 1.13,
+      "max": 5.22,
+      "n": 44,
+      "p50": 0.63,
+      "p95": 3.71,
+      "p99": 5.22
+    },
+    "sessions_list": {
+      "avg": 32.99,
+      "max": 51.21,
+      "n": 44,
+      "p50": 29.99,
+      "p95": 50.64,
+      "p99": 51.21
+    },
+    "workspaces_list": {
+      "avg": 1.56,
+      "max": 5.05,
+      "n": 44,
+      "p50": 1.04,
+      "p95": 4.6,
+      "p99": 5.05
+    }
+  },
+  "server": {
+    "cpu_pct": {
+      "avg": 5.82,
+      "max": 13.06,
+      "n": 44,
+      "p50": 5.42,
+      "p95": 11.41,
+      "p99": 13.06
+    },
+    "rss_mb": {
+      "avg": 21.17,
+      "max": 22.42,
+      "n": 44,
+      "p50": 21.59,
+      "p95": 22.34,
+      "p99": 22.42
+    }
+  },
+  "startup_ms": 411.01,
+  "worker": {
+    "emitted": 13800,
+    "governor": {
+      "focus": null,
+      "idle_minutes": null,
+      "limit": null,
+      "nice_background": true,
+      "queued": [],
+      "running": 0,
+      "running_chats": [],
+      "suspended": []
+    },
+    "stamped": 13140,
+    "tmux_sessions": 0,
+    "turns": 330
+  }
+}

@@ -166,9 +166,10 @@ test("roteiro completo de um usuário (backend mock)", async ({ page }) => {
     await expect(page.getByTestId("confirm")).toContainText("Arquivar");
     await page.getByTestId("confirm-ok").click();
     await expect(page.getByTestId("ws-row")).toHaveCount(0);
-    await page.getByText(/Arquivados \(1\)/).click();
+    await page.getByTestId("group-menu").click();
+  await page.getByTestId("view-archived").click();
     await shot(page, "15-arquivado");
-    await page.getByTestId("unarchive").click();
+    await page.getByTestId("palette").locator(".pop-row").first().click();
     await expect(page.getByTestId("ws-row")).toHaveCount(1);
   });
 

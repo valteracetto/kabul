@@ -1,9 +1,11 @@
 /** Tema: claro, escuro ou sistema (segue prefers-color-scheme). Persistido no aparelho. */
 export type ThemePref = "light" | "dark" | "system";
-const KEY = "kabul.theme";
+// A PWA do celular (/m/) tem preferência própria e segue o sistema por padrão; o desktop começa escuro.
+const mobile = () => typeof location !== "undefined" && location.pathname.startsWith("/m");
+const key = () => (mobile() ? "kabul.m.theme" : "kabul.theme");
 const mq = typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
 
-export const getThemePref = (): ThemePref => (localStorage.getItem(KEY) as ThemePref) || "dark";
+export const getThemePref = (): ThemePref => (localStorage.getItem(key()) as ThemePref) || (mobile() ? "system" : "dark");
 export const effectiveTheme = (p = getThemePref()): "light" | "dark" => (p === "system" ? (mq?.matches ? "dark" : "light") : p);
 
 export function applyTheme() {
@@ -12,7 +14,7 @@ export function applyTheme() {
 }
 
 export function setThemePref(p: ThemePref) {
-  localStorage.setItem(KEY, p);
+  localStorage.setItem(key(), p);
   applyTheme();
 }
 

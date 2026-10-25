@@ -467,10 +467,8 @@ impl AgyProtocol {
 
     fn continuation(&mut self) -> Vec<String> {
         let decided = std::mem::take(&mut self.decided);
-        let lines: Vec<String> = decided
-            .iter()
-            .map(|(d, allow)| if *allow { format!("Permissão concedida para `{}`.", d.rule) } else { format!("Permissão negada para `{}`: não tente contornar (outro comando, script ou ferramenta); siga sem isso.", d.rule) })
-            .collect();
+        let lines: Vec<String> =
+            decided.iter().map(|(d, allow)| if *allow { format!("Permissão concedida para `{}`.", d.rule) } else { format!("Permissão negada para `{}`: não tente contornar (outro comando, script ou ferramenta); siga sem isso.", d.rule) }).collect();
         let any_allow = decided.iter().any(|(_, a)| *a);
         let tail = if any_allow { "Continue de onde parou." } else { "Continue sem essa ação e diga o que ficou faltando." };
         self.user_message(&format!("{}\n{tail}", lines.join("\n")))
@@ -642,8 +640,11 @@ mod tests {
         assert_eq!(rules::allowed(&f), vec!["command(echo ola)"]);
         let msg: Value = serde_json::from_str(&out[0]).unwrap();
         assert!(msg["message"]["content"].as_str().unwrap().contains("Continue de onde parou"));
-        let (ev2, _) = run_fixture(&mut p, r#"{"event":"step_update","step_update":{"conversation_id":"c-1","step_index":5,"state":"DONE","step_type":"tool","tool_info":{"name":"run_command","parameters":{"CommandLine":"echo ola"},"output":"ola"}}}
-{"event":"result","result":{"conversation_id":"c-1","status":"SUCCESS","response":"ola","usage":{},"denied_actions":[{"action":"command","display_name":"RunCommand"}]}}"#);
+        let (ev2, _) = run_fixture(
+            &mut p,
+            r#"{"event":"step_update","step_update":{"conversation_id":"c-1","step_index":5,"state":"DONE","step_type":"tool","tool_info":{"name":"run_command","parameters":{"CommandLine":"echo ola"},"output":"ola"}}}
+{"event":"result","result":{"conversation_id":"c-1","status":"SUCCESS","response":"ola","usage":{},"denied_actions":[{"action":"command","display_name":"RunCommand"}]}}"#,
+        );
         assert_eq!(ev2.iter().filter(|e| matches!(e, Event::TurnCompleted { .. })).count(), 1);
         assert!(!ev2.iter().any(|e| matches!(e, Event::ApprovalRequest { .. } | Event::Error { .. })), "denied_actions acumulado não gera pedido novo");
         assert!(rules::allowed(&f).is_empty());

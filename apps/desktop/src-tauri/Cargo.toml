@@ -9,7 +9,18 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 kabul-core = { path = "../../../crates/kabul-core" }
 kabuld = { path = "../../../crates/kabuld" }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-updater = "2"
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+# Notificação (com o clique abrindo a conversa) e links kabul:// em todos os sistemas.
+tauri-plugin-notification = "2"
+tauri-plugin-deep-link = "2"
+
+# No macOS o seletor de pasta/arquivo continua pelo osascript (sem mudança de comportamento).
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+tauri-plugin-dialog = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Media_Audio"] }

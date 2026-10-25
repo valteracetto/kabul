@@ -52,11 +52,7 @@ impl Registry {
 
     pub fn family_of(&self, model_id: &str) -> &Family {
         let id = model_id.to_lowercase();
-        self.families
-            .iter()
-            .find(|f| !f.matches.is_empty() && f.matches.iter().any(|m| id.contains(m.as_str())))
-            .or_else(|| self.families.iter().find(|f| f.matches.is_empty()))
-            .unwrap_or(&self.families[0])
+        self.families.iter().find(|f| !f.matches.is_empty() && f.matches.iter().any(|m| id.contains(m.as_str()))).or_else(|| self.families.iter().find(|f| f.matches.is_empty())).unwrap_or(&self.families[0])
     }
 
     /// Escolhe o harness para um modelo servido com `apis`. `installed` diz se o CLI existe.
@@ -108,6 +104,13 @@ mod tests {
         assert_eq!(r.resolve("deepseek-v3", &[Api::Openai], &all).harness, Some(HarnessKind::OpenCode));
         // Gemma: Gemini CLI não fala OpenAI → OpenCode.
         assert_eq!(r.resolve("gemma-3-27b", &[Api::Openai], &all).harness, Some(HarnessKind::OpenCode));
+        // ...e com um gateway que fala a API do Gemini, o Gemini CLI.
+        assert_eq!(r.resolve("gemma-3-27b", &[Api::Gemini], &all).harness, Some(HarnessKind::GeminiCli));
+        // LM Studio (OpenAI + Anthropic): Qwen → Qwen Code; outros → OpenCode, depois Goose.
+        let lms = [Api::Openai, Api::Anthropic];
+        assert_eq!(r.resolve("qwen3-coder-30b-a3b-instruct", &lms, &all).harness, Some(HarnessKind::QwenCode));
+        assert_eq!(r.resolve("llama-3.3-70b", &lms, &all).harness, Some(HarnessKind::OpenCode));
+        assert_eq!(r.resolve("llama-3.3-70b", &lms, &|h| h == HarnessKind::Goose).harness, Some(HarnessKind::Goose));
         // gpt-oss → Codex.
         assert_eq!(r.resolve("gpt-oss:20b", &[Api::Openai], &all).harness, Some(HarnessKind::Codex));
         assert!(Registry::parse(r#"{"version":1,"families":[{"family":"x","match":[],"harnesses":["nada"]}]}"#).is_err());

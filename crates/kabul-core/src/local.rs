@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
-use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LocalModel {
@@ -77,14 +76,14 @@ pub trait LocalRuntime: Send + Sync {
 }
 
 pub fn http_get(url: &str) -> Option<String> {
-    let o = Command::new("curl").args(["-sf", "-m", "2", url]).output().ok()?;
+    let o = crate::shell::command("curl").args(["-sf", "-m", "2", url]).output().ok()?;
     o.status.success().then(|| String::from_utf8_lossy(&o.stdout).into_owned())
 }
 
 /// `POST /v1/messages` vazio: 404 = sem API Anthropic; qualquer outra resposta HTTP = existe.
 pub fn probe_anthropic(base: &str) -> bool {
     let url = format!("{}/v1/messages", base.trim_end_matches('/'));
-    Command::new("curl")
+    crate::shell::command("curl")
         .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "-m", "2", "-X", "POST", "-H", "content-type: application/json", "-d", "{}", &url])
         .output()
         .ok()
@@ -165,24 +164,46 @@ fn mark_loaded(mut v: Vec<LocalModel>, base: &str) -> Vec<LocalModel> {
 
 pub struct Ollama;
 impl LocalRuntime for Ollama {
-    fn id(&self) -> &'static str { "ollama" }
-    fn name(&self) -> &'static str { "Ollama" }
-    fn default_url(&self) -> String { "http://127.0.0.1:11434".into() }
-    fn binary(&self) -> Option<&'static str> { Some("ollama") }
+    fn id(&self) -> &'static str {
+        "ollama"
+    }
+    fn name(&self) -> &'static str {
+        "Ollama"
+    }
+    fn default_url(&self) -> String {
+        "http://127.0.0.1:11434".into()
+    }
+    fn binary(&self) -> Option<&'static str> {
+        Some("ollama")
+    }
     fn list_models(&self, base: &str) -> Vec<LocalModel> {
         http_get(&format!("{base}/api/tags")).map(|j| parse_ollama_tags(&j)).unwrap_or_default()
     }
-    fn start_command(&self) -> Option<CmdSpec> { Some(CmdSpec::new("ollama", ["serve"])) }
-    fn pull_command(&self, m: &str) -> Option<CmdSpec> { Some(CmdSpec::new("ollama", ["pull", m])) }
-    fn pull_hint(&self) -> &'static str { "ex.: qwen3-coder:30b, gpt-oss:20b, deepseek-r1:14b" }
+    fn start_command(&self) -> Option<CmdSpec> {
+        Some(CmdSpec::new("ollama", ["serve"]))
+    }
+    fn pull_command(&self, m: &str) -> Option<CmdSpec> {
+        Some(CmdSpec::new("ollama", ["pull", m]))
+    }
+    fn pull_hint(&self) -> &'static str {
+        "ex.: qwen3-coder:30b, gpt-oss:20b, deepseek-r1:14b"
+    }
 }
 
 pub struct LmStudio;
 impl LocalRuntime for LmStudio {
-    fn id(&self) -> &'static str { "lmstudio" }
-    fn name(&self) -> &'static str { "LM Studio" }
-    fn default_url(&self) -> String { "http://127.0.0.1:1234".into() }
-    fn binary(&self) -> Option<&'static str> { Some("lms") }
+    fn id(&self) -> &'static str {
+        "lmstudio"
+    }
+    fn name(&self) -> &'static str {
+        "LM Studio"
+    }
+    fn default_url(&self) -> String {
+        "http://127.0.0.1:1234".into()
+    }
+    fn binary(&self) -> Option<&'static str> {
+        Some("lms")
+    }
     fn list_models(&self, base: &str) -> Vec<LocalModel> {
         let cli = CmdSpec::new("lms", ["ls", "--json"]).command().output().ok().filter(|o| o.status.success()).map(|o| parse_lms_ls(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default();
         if cli.is_empty() {
@@ -191,10 +212,18 @@ impl LocalRuntime for LmStudio {
             mark_loaded(cli, base)
         }
     }
-    fn start_command(&self) -> Option<CmdSpec> { Some(CmdSpec::new("lms", ["server", "start"])) }
-    fn load_command(&self, m: &str) -> Option<CmdSpec> { Some(CmdSpec::new("lms", ["load", m, "-y"])) }
-    fn pull_command(&self, m: &str) -> Option<CmdSpec> { Some(CmdSpec::new("lms", ["get", m, "-y"])) }
-    fn pull_hint(&self) -> &'static str { "ex.: qwen/qwen3-coder-30b, openai/gpt-oss-20b" }
+    fn start_command(&self) -> Option<CmdSpec> {
+        Some(CmdSpec::new("lms", ["server", "start"]))
+    }
+    fn load_command(&self, m: &str) -> Option<CmdSpec> {
+        Some(CmdSpec::new("lms", ["load", m, "-y"]))
+    }
+    fn pull_command(&self, m: &str) -> Option<CmdSpec> {
+        Some(CmdSpec::new("lms", ["get", m, "-y"]))
+    }
+    fn pull_hint(&self) -> &'static str {
+        "ex.: qwen/qwen3-coder-30b, openai/gpt-oss-20b"
+    }
 }
 
 /// Servidores OpenAI-compatíveis que não têm CLI de catálogo (llama.cpp, MLX, vLLM).
@@ -206,16 +235,28 @@ pub struct OpenAiServer {
     pub hint: &'static str,
 }
 impl LocalRuntime for OpenAiServer {
-    fn id(&self) -> &'static str { self.id }
-    fn name(&self) -> &'static str { self.name }
-    fn default_url(&self) -> String { self.url.into() }
-    fn binary(&self) -> Option<&'static str> { Some(self.bin) }
+    fn id(&self) -> &'static str {
+        self.id
+    }
+    fn name(&self) -> &'static str {
+        self.name
+    }
+    fn default_url(&self) -> String {
+        self.url.into()
+    }
+    fn binary(&self) -> Option<&'static str> {
+        Some(self.bin)
+    }
     fn list_models(&self, base: &str) -> Vec<LocalModel> {
         http_get(&format!("{base}/v1/models")).map(|j| parse_openai_models(&j, self.id)).unwrap_or_default()
     }
     /// Baixa do Hugging Face (`hf download <repo>`); o servidor é iniciado pelo usuário com o modelo.
-    fn pull_command(&self, m: &str) -> Option<CmdSpec> { Some(CmdSpec::new("hf", ["download", m])) }
-    fn pull_hint(&self) -> &'static str { self.hint }
+    fn pull_command(&self, m: &str) -> Option<CmdSpec> {
+        Some(CmdSpec::new("hf", ["download", m]))
+    }
+    fn pull_hint(&self) -> &'static str {
+        self.hint
+    }
 }
 
 pub fn runtimes() -> Vec<Box<dyn LocalRuntime>> {
@@ -279,7 +320,20 @@ pub fn discover(endpoints: &[CustomEndpoint]) -> Vec<SourceStatus> {
     for e in endpoints {
         let base = e.base_url.trim_end_matches('/').to_string();
         let models = http_get(&format!("{base}/v1/models")).map(|j| parse_openai_models(&j, &e.id)).unwrap_or_default();
-        out.push(SourceStatus { id: e.id.clone(), name: e.name.clone(), kind: "endpoint".into(), running: !models.is_empty(), base_url: base, installed: true, apis: e.apis.clone(), models, can_start: false, can_pull: false, pull_hint: String::new(), custom: true });
+        out.push(SourceStatus {
+            id: e.id.clone(),
+            name: e.name.clone(),
+            kind: "endpoint".into(),
+            running: !models.is_empty(),
+            base_url: base,
+            installed: true,
+            apis: e.apis.clone(),
+            models,
+            can_start: false,
+            can_pull: false,
+            pull_hint: String::new(),
+            custom: true,
+        });
     }
     out
 }
@@ -307,10 +361,15 @@ pub fn prepare(source: &SourceStatus, model: &LocalModel, api_key: Option<String
     Ok(Endpoint { base_url: source.base_url.clone(), apis: source.apis.clone(), api_key, model: model.id.clone(), context: model.context })
 }
 
-/// Memória do Mac (Apple Silicon: unificada = RAM e VRAM).
+/// Memória total (no Mac com Apple Silicon é unificada: RAM e VRAM). macOS: `sysctl`; resto: `sysinfo`.
 pub fn total_memory() -> Option<u64> {
-    let o = Command::new("sysctl").args(["-n", "hw.memsize"]).output().ok()?;
-    String::from_utf8_lossy(&o.stdout).trim().parse().ok()
+    if cfg!(target_os = "macos") {
+        let o = crate::shell::command("sysctl").args(["-n", "hw.memsize"]).output().ok()?;
+        return String::from_utf8_lossy(&o.stdout).trim().parse().ok();
+    }
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    Some(sys.total_memory()).filter(|m| *m > 0)
 }
 
 /// Cabe se pesos + ~20% (KV cache, overhead) ficam abaixo de 75% da memória.

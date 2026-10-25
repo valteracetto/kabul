@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Floating } from "./Floating";
 import { api, type PrCheck, type PrComment, type Workspace } from "../api";
 import { IChevronDown, IPR } from "../icons";
 import { usePopover } from "./useDismiss";
@@ -42,13 +43,13 @@ export function GitButton({ git, onAction, compact }: { git: GitState; onAction:
       </button>
       <button className="btn caret-btn" title="Ações do git" onClick={pop.toggle} data-testid="git-menu"><IChevronDown size={12} /></button>
       {pop.open && (
-        <div className="popover status-pop git-pop" data-testid="git-pop">
+        <Floating className="status-pop git-pop" placement="bottom-end" testid="git-pop">
           {MENU.map((a) => (
             <div key={a} className={"pop-row" + (av[a] ? " disabled" : "")} title={av[a] ?? undefined} onClick={() => !av[a] && (pop.close(), onAction(a))} data-testid={`git-${a}`}>
               {ACTION_LABEL[a][0]}<span className="grow" /><KBD k={ACTION_LABEL[a][1]} />
             </div>
           ))}
-        </div>
+        </Floating>
       )}
     </div>
   );
@@ -68,7 +69,7 @@ export function PrPill({ git, onOpen }: { git: GitState; onOpen: () => void }) {
     <span className="picker" ref={pop.ref}>
       <button className={"pr-pill pr-" + cls} onClick={pop.toggle} title="Detalhes do PR" data-testid="pr-pill">#{pr.number} {st} {glyph}</button>
       {pop.open && (
-        <div className="popover status-pop pr-details" data-testid="pr-details">
+        <Floating className="status-pop pr-details" placement="bottom-start" testid="pr-details">
           <div className="pop-title">{pr.title}</div>
           <div className="row"><span className="dim">Estado</span><span className="grow" />{st}</div>
           <div className="row"><span className="dim">Merge</span><span className="grow" />{mergeLabel(pr.mergeable, pr.merge_state)}</div>
@@ -77,7 +78,7 @@ export function PrPill({ git, onOpen }: { git: GitState; onOpen: () => void }) {
           <div className="row"><span className="dim">Branches</span><span className="grow" /><code>{pr.head}</code> → <code>{pr.base}</code></div>
           <div className="pop-sep" />
           <div className="pop-row" onClick={() => (pop.close(), onOpen())}>Abrir PR <span className="grow" /><KBD k="⌘⇧G" /></div>
-        </div>
+        </Floating>
       )}
     </span>
   );

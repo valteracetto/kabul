@@ -1,3 +1,4 @@
+import { comboFromEvent, conflict, editable, effectiveKeys, formatCombo, overrides, setOverride } from "../components/keymap";
 import { confirmDialog } from "../components/Confirm";
 import { RemotePanel } from "../components/RemotePanel";
 import { LoginFlow, reduceLogin, MAX_RESTARTS, type LoginState } from "../components/LoginFlow";
@@ -144,11 +145,36 @@ function RepoSettings({ repos, repoId, onError, onRoute }: { repos: Repo[]; repo
   );
 }
 
-/** Atalhos: tabela gerada do registro único (`i18n/shortcuts.json`), com busca. */
+/** Atalhos: tabela gerada do registro único (`i18n/shortcuts.json`), com busca. Os atalhos com modificador
+ *  podem ser gravados de novo (aviso de conflito, "Restaurar"); os de contexto (↵, ⌫, setas, 1–9) são fixos. */
 function Shortcuts() {
   const [q, setQ] = useState("");
+  const [rec, setRec] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ id: string; text: string } | null>(null);
+  const [, bump] = useState(0);
   const n = q.toLowerCase();
-  const rows = SHORTCUTS.filter((x) => !n || `${x.keys} ${x[lang()]}`.toLowerCase().includes(n));
+  const rows = SHORTCUTS.filter((x) => !n || `${effectiveKeys(x)} ${x[lang()]}`.toLowerCase().includes(n));
+  const ov = overrides();
+  useEffect(() => {
+    if (!rec) return;
+    const h = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.key === "Escape" && !e.metaKey && !e.ctrlKey) return setRec(null);
+      const c = comboFromEvent(e);
+      if (!c) return;
+      if (!c.meta && !c.ctrl && !c.alt) return setMsg({ id: rec, text: "Use ⌘, ⌃ ou ⌥ junto com a tecla." });
+      const other = conflict(c, rec);
+      if (other) return setMsg({ id: rec, text: `Já usado por “${other[lang()]}”.` });
+      const s = SHORTCUTS.find((x) => x.id === rec)!;
+      setOverride(rec, formatCombo(c) === s.keys ? null : formatCombo(c));
+      setMsg(null);
+      setRec(null);
+      bump((x) => x + 1);
+    };
+    window.addEventListener("keydown", h, true);
+    return () => window.removeEventListener("keydown", h, true);
+  }, [rec]);
   return (
     <div data-testid="shortcuts">
       <input {...noSuggest} autoComplete="off" autoFocus placeholder={t("shortcuts.search")} value={q} onChange={(e) => setQ(e.target.value)} data-testid="shortcuts-search" style={{ width: "100%", marginBottom: 10 }} />
@@ -157,7 +183,19 @@ function Shortcuts() {
         return list.length ? (
           <div key={c}>
             <h3>{t(`cat.${c}` as Key)}</h3>
-            <table className="shortcuts"><tbody>{list.map((x) => <tr key={x.id}><td><kbd>{x.keys}</kbd></td><td>{x[lang()]}</td></tr>)}</tbody></table>
+            <table className="shortcuts"><tbody>{list.map((x) => (
+              <tr key={x.id} data-testid={`sc-${x.id}`}>
+                <td>
+                  {editable(x) ? (
+                    <button className={"kbd-btn" + (rec === x.id ? " rec" : "")} title="Clique e digite o novo atalho (Esc cancela)" onClick={() => (setRec(rec === x.id ? null : x.id), setMsg(null))} data-testid="sc-record">
+                      <kbd>{rec === x.id ? "Digite o atalho…" : effectiveKeys(x)}</kbd>
+                    </button>
+                  ) : <kbd title="Atalho fixo">{x.keys}</kbd>}
+                </td>
+                <td>{x[lang()]}{msg?.id === x.id && <div className="error small" data-testid="sc-conflict">{msg.text}</div>}</td>
+                <td className="sc-actions">{ov[x.id] && <button className="text-btn small" onClick={() => (setOverride(x.id, null), bump((v) => v + 1))} data-testid="sc-reset">Restaurar ({x.keys})</button>}{!editable(x) && <span className="dim small">fixo</span>}</td>
+              </tr>
+            ))}</tbody></table>
           </div>
         ) : null;
       })}

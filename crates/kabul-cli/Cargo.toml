@@ -13,3 +13,10 @@ anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 serde.workspace = true
+# `kabul loadtest`: sobe o kabuld de verdade num processo filho e mede pelo WebSocket.
+kabuld = { path = "../kabuld" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+tokio-tungstenite = "0.29"
+futures-util = "0.3"
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+flate2 = "1"

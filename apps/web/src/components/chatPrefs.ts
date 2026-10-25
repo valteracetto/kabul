@@ -12,5 +12,14 @@ export const pendingFork: Record<string, PendingFork> = {};
 export const pendingForkWs: Record<string, { chatId: string }> = {};
 /** Workspaces com a tela montada (recebem eventos como kabul:fork-tab na hora). */
 export const mountedWs = new Set<string>();
+/** Conversa a trazer para a frente quando o workspace montar (painel Agentes, notificação). */
+export const pendingActivate: Record<string, string> = {};
 /** Modelo pedido para uma aba nova (ex.: "Modelo da revisão"). */
 export const pendingModel: Record<string, string> = {};
+
+/** Preset do terminal grande (Configurações › Aparência): o comando que roda ao abrir a aba. */
+export const TERM_PRESETS: Record<string, string> = { none: "", claude: "claude", codex: "codex", agy: "agy", opencode: "opencode" };
+export const termPreset = () => {
+  const k = localStorage.getItem("kabul.bigTerminal.preset") ?? "none";
+  return k === "custom" ? localStorage.getItem("kabul.bigTerminal.command") ?? "" : TERM_PRESETS[k] ?? "";
+};

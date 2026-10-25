@@ -5,10 +5,9 @@ use kabul_core::agent::{self, AgentKind};
 use kabul_core::harness::strip_ansi;
 use kabul_core::runs_on::RunsOn;
 use kabul_core::store::{Repo, Workspace};
-use kabul_core::tmux;
+use kabul_core::term;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -49,40 +48,35 @@ pub struct LiveSession {
     pub preview: String,
 }
 
-const WAITING: &[&str] = &[
-    "do you want to",
-    "would you like to",
-    "❯ 1. yes",
-    "allow command",
-    "allow this",
-    "approve",
-    "(y/n)",
-    "[y/n]",
-    "(yes/no)",
-    "press enter to continue",
-    "waiting for your input",
-    "waiting for input",
-    "deseja continuar",
-];
+const WAITING: &[&str] = &["do you want to", "would you like to", "❯ 1. yes", "allow command", "allow this", "approve", "(y/n)", "[y/n]", "(yes/no)", "press enter to continue", "waiting for your input", "waiting for input", "deseja continuar"];
 const WORKING: &[&str] = &["to interrupt", "esc to cancel", "ctrl+c to stop"];
 
 /// Status a partir da tela visível (sem cores) e de há quantos segundos o pane não imprime nada.
 pub fn detect_status(agent: &str, screen: &str, idle_secs: u64) -> (Status, Option<String>) {
+    screen_status(screen).unwrap_or_else(|| idle_status(agent, idle_secs))
+}
+
+/// O que a tela sozinha diz (trabalhando / pede decisão); `None` = decide pela atividade.
+pub fn screen_status(screen: &str) -> Option<(Status, Option<String>)> {
     let lines: Vec<&str> = screen.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     let tail = &lines[lines.len().saturating_sub(18)..];
     for l in tail.iter().rev() {
         let low = l.to_lowercase();
         if WORKING.iter().any(|p| low.contains(p)) {
-            return (Status::Working, None);
+            return Some((Status::Working, None));
         }
     }
     // A pergunta costuma vir antes das opções: a primeira linha que casa vira o detalhe.
     for l in tail.iter() {
         let low = l.to_lowercase();
         if WAITING.iter().any(|p| low.contains(p)) {
-            return (Status::Waiting, Some(cut(l.trim_start_matches(['│', '╭', '╰', '|', ' ']), 90)));
+            return Some((Status::Waiting, Some(cut(l.trim_start_matches(['│', '╭', '╰', '|', ' ']), 90))));
         }
     }
+    None
+}
+
+fn idle_status(agent: &str, idle_secs: u64) -> (Status, Option<String>) {
     let threshold = if agent == "shell" { 3 } else { 2 };
     if idle_secs < threshold {
         (Status::Working, None)
@@ -136,9 +130,32 @@ fn within_raw(path: &str, root: &str) -> bool {
     !root.is_empty() && (path == root || path.starts_with(&format!("{root}/")))
 }
 
+/// Caminho real de cada raiz, guardado: a varredura compara cada pane com todos os workspaces e o
+/// `canonicalize` (uma chamada ao sistema) por par custava pane × workspace a cada 1,5 s. Raiz que
+/// ainda não existe é tentada de novo depois de 30 s.
+fn canonical(root: &str) -> Option<String> {
+    use std::sync::Mutex;
+    use std::time::Instant;
+    type Canon = HashMap<String, (Option<String>, Instant)>;
+    static CACHE: Mutex<Option<Canon>> = Mutex::new(None);
+    let mut g = CACHE.lock().unwrap();
+    let m = g.get_or_insert_with(HashMap::new);
+    if let Some((v, at)) = m.get(root) {
+        if v.is_some() || at.elapsed().as_secs() < 30 {
+            return v.clone();
+        }
+    }
+    let v = std::fs::canonicalize(root).ok().map(|r| r.to_string_lossy().into_owned()).filter(|r| r != root);
+    if m.len() > 4096 {
+        m.clear();
+    }
+    m.insert(root.to_string(), (v.clone(), Instant::now()));
+    v
+}
+
 /// Compara também pelo caminho real (no macOS o tmux reporta `/private/var/...` para `/var/...`).
 fn within(path: &str, root: &str) -> bool {
-    within_raw(path, root) || std::fs::canonicalize(root).ok().map(|r| within_raw(path, &r.to_string_lossy())).unwrap_or(false)
+    within_raw(path, root) || canonical(root).map(|r| within_raw(path, &r)).unwrap_or(false)
 }
 
 fn base(p: &str) -> String {
@@ -161,26 +178,21 @@ pub fn group_for(path: &str, repos: &[Repo], workspaces: &[Workspace], git_root:
     Group { key: "outras".into(), repo: "Outras sessões".into(), workspace: None, workspace_id: None }
 }
 
-/// Atividade e tamanho dos panes (`#{window_activity}` em segundos Unix).
-pub fn pane_extras() -> HashMap<String, (u64, u16, u16)> {
-    let out = Command::new("tmux").args(["list-panes", "-a", "-F", "#{pane_id}\t#{window_activity}\t#{pane_width}\t#{pane_height}"]).output();
-    let Ok(o) = out else { return HashMap::new() };
-    String::from_utf8_lossy(&o.stdout)
-        .lines()
-        .filter_map(|l| {
-            let f: Vec<&str> = l.split('\t').collect();
-            Some((f.first()?.to_string(), (f.get(1)?.parse().ok()?, f.get(2)?.parse().ok()?, f.get(3)?.parse().ok()?)))
-        })
-        .collect()
+/// Tela já analisada de um pane: só captura de novo quando a janela teve saída (ou a cada 10 s).
+#[derive(Debug, Clone)]
+struct Seen {
+    activity: u64,
+    at: u64,
+    screen: Option<(Status, Option<String>)>,
+    preview: String,
 }
 
-fn plain_screen(pane: &str) -> String {
-    Command::new("tmux").args(["capture-pane", "-p", "-t", pane]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
-}
-
-/// Varredura completa: uma chamada ao `ps` e uma captura por pane ativo de cada sessão.
+/// Varredura pelo backend de terminal: UMA listagem (com atividade e tamanho), UMA leitura da tabela de
+/// processos e UMA captura em lote só dos panes que imprimiram algo desde a última vez. Antes: duas
+/// listagens e uma captura por pane. (No tmux, listagem e captura são um processo cada; no PTY, memória.)
 pub struct Scanner {
     git_roots: HashMap<String, Option<String>>,
+    seen: HashMap<String, Seen>,
 }
 
 impl Default for Scanner {
@@ -189,47 +201,60 @@ impl Default for Scanner {
     }
 }
 
+/// Recaptura de segurança mesmo sem atividade (tela limpa/redimensionada sem saída nova).
+const RECAPTURE_SECS: u64 = 10;
+
 impl Scanner {
     pub fn new() -> Self {
-        Self { git_roots: HashMap::new() }
+        Self { git_roots: HashMap::new(), seen: HashMap::new() }
     }
 
     pub fn scan(&mut self, repos: &[Repo], workspaces: &[Workspace]) -> Vec<LiveSession> {
-        let panes = tmux::list_panes().unwrap_or_default();
+        let b = term::backend();
+        let panes = b.list_ext().unwrap_or_default();
         if panes.is_empty() {
+            self.seen.clear();
             return vec![];
         }
-        let ps = Command::new("ps").args(["-A", "-o", "pid=,ppid=,command="]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
-        let extras = pane_extras();
+        let idx = agent::ProcIndex::current();
         let now = crate::auth::now();
+        // Uma linha por sessão: o primeiro pane ativo (ou o primeiro pane).
+        let mut chosen: Vec<term::PaneExt> = vec![];
+        for p in panes {
+            match chosen.iter_mut().find(|c| c.pane.session == p.pane.session) {
+                Some(c) if p.pane.active && !c.pane.active => *c = p,
+                Some(_) => {}
+                None => chosen.push(p),
+            }
+        }
+        self.seen.retain(|id, _| chosen.iter().any(|c| &c.pane.pane_id == id));
+        let need: Vec<&str> = chosen.iter().filter(|c| self.seen.get(&c.pane.pane_id).map(|s| s.activity != c.activity || now.saturating_sub(s.at) >= RECAPTURE_SECS).unwrap_or(true)).map(|c| c.pane.pane_id.as_str()).collect();
+        for (pane, raw) in b.capture_many(&need) {
+            let screen = strip_ansi(&raw);
+            let preview = screen.lines().map(str::trim).rfind(|l| !l.is_empty()).map(|l| cut(l, 120)).unwrap_or_default();
+            let activity = chosen.iter().find(|c| c.pane.pane_id == pane).map(|c| c.activity).unwrap_or(now);
+            self.seen.insert(pane, Seen { activity, at: now, screen: screen_status(&screen), preview });
+        }
         let roots = &mut self.git_roots;
         let mut git_root = |p: &str| -> Option<String> {
             roots
                 .entry(p.to_string())
                 .or_insert_with(|| {
-                    let o = Command::new("git").args(["-C", p, "rev-parse", "--show-toplevel"]).output().ok()?;
+                    let o = kabul_core::shell::command("git").args(["-C", p, "rev-parse", "--show-toplevel"]).output().ok()?;
                     o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
                 })
                 .clone()
         };
-        // Uma linha por sessão: o primeiro pane ativo (ou o primeiro pane).
-        let mut chosen: Vec<tmux::Pane> = vec![];
-        for p in panes {
-            match chosen.iter_mut().find(|c| c.session == p.session) {
-                Some(c) if p.active && !c.active => *c = p,
-                Some(_) => {}
-                None => chosen.push(p),
-            }
-        }
-        let mut out: Vec<LiveSession> = vec![];
-        for p in chosen {
-            let desc = agent::descendants_from_ps(&ps, p.pid);
+        let mut out: Vec<LiveSession> = Vec::with_capacity(chosen.len());
+        for c in chosen {
+            let p = c.pane;
+            let desc = idx.descendants(p.pid);
             let agent = detect_agent(&p.command, &desc);
-            let (activity, cols, rows) = extras.get(&p.pane_id).copied().unwrap_or((now, 80, 24));
-            let idle = now.saturating_sub(activity);
-            let screen = strip_ansi(&plain_screen(&p.pane_id));
-            let (status, detail) = detect_status(&agent, &screen, idle);
-            let preview = screen.lines().map(str::trim).rfind(|l| !l.is_empty()).map(|l| cut(l, 120)).unwrap_or_default();
+            // Backend sem atividade conhecida (0): conta como agora.
+            let idle = if c.activity == 0 { 0 } else { now.saturating_sub(c.activity) };
+            let seen = self.seen.get(&p.pane_id);
+            let (status, detail) = seen.and_then(|s| s.screen.clone()).unwrap_or_else(|| idle_status(&agent, idle));
+            let preview = seen.map(|s| s.preview.clone()).unwrap_or_default();
             let group = group_for(&p.path, repos, workspaces, &mut git_root);
             out.push(LiveSession {
                 id: format!("tmux:{}", p.session),
@@ -242,8 +267,8 @@ impl Scanner {
                 group,
                 path: p.path,
                 pane: Some(p.pane_id),
-                cols,
-                rows,
+                cols: c.cols,
+                rows: c.rows,
                 idle_secs: idle,
                 preview,
             });

@@ -1,43 +1,207 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { transport } from "../transport";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ConnState } from "../transport/websocket";
 import { clearCred, deviceName, pairWith, parsePairLink, saveCred } from "../transport/credentials";
-import { RepoMark } from "../icons";
-import type { ExternalSessions, Model, Workspace } from "../api";
-import { ago, modelFor, workspaceFor } from "../components/external";
-import { AGENT_LABEL, canWrite, isOwner, k, me, ws, type Device, type LiveSession, type Ticket } from "./kabuld";
-import { AgentIcon, RunsOnLabel, Sheet, StatusPill, TicketCard, useCountdown } from "./ui";
+import { isOwner, ws } from "./kabuld";
+import { I, PLATFORM, haptic } from "./ui";
 import { SessionView } from "./SessionView";
-import { enablePush, pushBlocker, pushEnabled, registerSW } from "./push";
+import { MobileUsage } from "./MobileUsage";
+import { FilesScreen, filesRoute } from "./preview";
+import { Home } from "./Home";
+import { NewWorkspace } from "./NewWorkspace";
+import { Settings, SettingsPage } from "./Settings";
+import { Usage } from "./Usage";
+import { useKabul } from "./data";
+import { back, navDir, onRoute, parseRoute, setNavDir, type Route } from "./nav";
+import { registerSW } from "./push";
+import { UpdateBanner } from "../components/Updates";
 import "./mobile.css";
 
-const hashParams = () => new URLSearchParams(location.hash.slice(1));
-const sessionFromHash = () => hashParams().get("s");
+export type Tab = "home" | "usage" | "settings";
+const TAB_KEY = "kabul.m.tab";
 
-/** PWA do celular: pareamento, lista de sessões de todos os agentes e a sessão aberta. */
+/** Altura visível de verdade (o teclado do iPhone encolhe o visualViewport, não o layout). */
+function useVisualViewport() {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const root = document.documentElement;
+    root.dataset.mobile = "1";
+    root.dataset.platform = PLATFORM;
+    if (!vv) return;
+    const upd = () => {
+      root.style.setProperty("--m-vvh", `${Math.round(vv.height)}px`);
+      root.classList.toggle("m-kb", window.innerHeight - vv.height > 120);
+      // O Safari rola a página para mostrar o campo; a tela é fixa, então volta para o topo.
+      if (window.scrollY) window.scrollTo(0, 0);
+    };
+    upd();
+    vv.addEventListener("resize", upd);
+    vv.addEventListener("scroll", upd);
+    return () => (vv.removeEventListener("resize", upd), vv.removeEventListener("scroll", upd));
+  }, []);
+}
+
+/** Android: ondulação (ripple) no ponto do toque, como nos componentes Material. */
+const RIPPLE = ".m-row.tappable, .m-round, .m-cta, .m-fab, .m-pill, .m-chip-btn, .m-icon-btn, .m-composer-round, .m-composer-icon, .m-keys button, .m-segmented button, .m-swipe-btn, .m-model-chip, .m-plan-chip";
+function useRipple() {
+  useEffect(() => {
+    if (PLATFORM !== "android") return;
+    const h = (e: PointerEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest<HTMLElement>(RIPPLE);
+      if (!el || (el as HTMLButtonElement).disabled) return;
+      const r = el.getBoundingClientRect();
+      const d = Math.max(r.width, r.height) * 2.2;
+      const s = document.createElement("span");
+      s.className = "m-ripple";
+      s.style.cssText = `width:${d}px;height:${d}px;left:${e.clientX - r.left - d / 2}px;top:${e.clientY - r.top - d / 2}px`;
+      el.appendChild(s);
+      setTimeout(() => s.remove(), 600);
+    };
+    document.addEventListener("pointerdown", h, { passive: true });
+    return () => document.removeEventListener("pointerdown", h);
+  }, []);
+}
+
+/** Cor da barra de status/tema do navegador acompanha o tema. */
+function useThemeColor() {
+  useEffect(() => {
+    const upd = () => {
+      const c = getComputedStyle(document.documentElement).getPropertyValue("--m-bg").trim() || "#0c0a09";
+      document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", c));
+    };
+    upd();
+    window.addEventListener("kabul:theme", upd);
+    return () => window.removeEventListener("kabul:theme", upd);
+  }, []);
+}
+
+/** PWA do celular: pareamento, abas (Workspaces, Uso, Configurações) e a pilha de telas por cima. */
 export function MobileApp() {
   const [conn, setConn] = useState<ConnState>(ws()?.state() ?? "open");
   const [connErr, setConnErr] = useState<string | null>(null);
-  const [route, setRoute] = useState<string | null>(sessionFromHash);
+  const [route, setRoute] = useState<Route>(() => parseRoute());
   const [pair, setPair] = useState(() => parsePairLink(location.hash));
+  // Arquivos do workspace e o app rodando (`#f=<ws>`): tela própria, com a navegação dela (preview/).
+  const [files, setFiles] = useState(() => filesRoute());
+  useVisualViewport();
+  useThemeColor();
+  useRipple();
   useEffect(() => {
     void registerSW();
     const t = ws();
     const off = t?.onState((s, e) => (setConn(s), setConnErr(e ?? null)));
     // O hello pode ter respondido antes deste efeito.
     if (t) (setConn(t.state()), setConnErr(t.lastError()));
-    const onHash = () => (setRoute(sessionFromHash()), setPair(parsePairLink(location.hash)));
-    window.addEventListener("hashchange", onHash);
-    return () => (off?.(), window.removeEventListener("hashchange", onHash));
-  }, []);
-  const open = useCallback((id: string | null) => {
-    location.hash = id ? `s=${encodeURIComponent(id)}` : "";
+    const offRoute = onRoute(() => (setRoute(parseRoute()), setPair(parsePairLink(location.hash)), setFiles(filesRoute())));
+    return () => (off?.(), offRoute());
   }, []);
 
   if (pair) return <PairScreen token={pair.token} invite={!!pair.workspace} />;
+  if (conn === "incompatible") return <Incompatible reason={connErr} />;
   if (conn === "unauthorized" || conn === "revoked") return <NeedPairing reason={connErr} revoked={conn === "revoked"} />;
-  if (route) return <SessionView id={route} onBack={() => open(null)} />;
-  return <SessionList conn={conn} onOpen={open} />;
+  if (files) return <FilesScreen route={files} />;
+  return <Shell conn={conn} route={route} />;
+}
+
+/** O kabuld recusou este app por ser antigo demais (handshake de versão). */
+function Incompatible({ reason }: { reason: string | null }) {
+  return (
+    <div className="m-app m-onboard" data-testid="m-incompatible">
+      <div className="m-onboard-body">
+        <h1>Atualize o Kabul</h1>
+        <p className="dim">{reason ?? "Este app e o kabuld do computador estão em versões que não se entendem."}</p>
+        <button className="m-cta" onClick={() => location.reload()}>Tentar de novo</button>
+      </div>
+    </div>
+  );
+}
+
+function Shell({ conn, route }: { conn: ConnState; route: Route }) {
+  const [tab, setTabState] = useState<Tab>(() => (localStorage.getItem(TAB_KEY) as Tab) || "home");
+  const setTab = (t: Tab) => {
+    setNavDir("tab");
+    localStorage.setItem(TAB_KEY, t);
+    setTabState(t);
+  };
+  const snap = useKabul();
+  const waiting = snap.list.filter((s) => s.status === "waiting").length;
+  let top: ReactNode = null;
+  if (route.kind === "session") top = <SessionView id={route.id} onBack={back} />;
+  else if (route.kind === "new") top = <NewWorkspace onBack={back} />;
+  else if (route.kind === "settings") top = <SettingsPage sub={route.sub} conn={conn} onBack={back} />;
+  // Custos e limites (uso.jsonl, limites por conta): só o dono, como no kabuld.
+  else if (route.kind === "usage" && isOwner()) top = <MobileUsage onBack={back} />;
+  const topKey = route.kind === "session" ? `s:${route.id}` : route.kind === "settings" ? `v:${route.sub}` : route.kind;
+  // Ao voltar, a tela de cima sai deslizando para a direita (mesma instância, só ganha a classe de saída).
+  const last = useRef<{ key: string; node: ReactNode } | null>(null);
+  const [leaving, setLeaving] = useState<{ key: string; node: ReactNode } | null>(null);
+  useEffect(() => {
+    if (top) {
+      last.current = { key: topKey, node: top };
+      setLeaving(null);
+      return;
+    }
+    if (!last.current) return;
+    setLeaving(last.current);
+    last.current = null;
+    const t = setTimeout(() => setLeaving(null), 320);
+    return () => clearTimeout(t);
+  }, [topKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = top ? { key: topKey, node: top } : leaving;
+  return (
+    <div className="m-app">
+      <UpdateBanner />
+      <div className={"m-stack" + (top ? " covered" : "")} aria-hidden={!!top}>
+        <Screen key={tab} anim={navDir() === "tab" ? "fade" : "none"}>
+          {tab === "home" && <Home conn={conn} onSettings={() => setTab("settings")} />}
+          {tab === "usage" && <Usage />}
+          {tab === "settings" && <Settings conn={conn} />}
+        </Screen>
+        <TabBar tab={tab} onTab={setTab} waiting={waiting} />
+      </div>
+      {shown && (
+        <Screen key={shown.key} anim={navDir() === "pop" ? "none" : "push"} top leaving={!top}>
+          {shown.node}
+        </Screen>
+      )}
+    </div>
+  );
+}
+
+/** Tela com transição de entrada (empurrar da direita, voltar, troca de aba). */
+function Screen({ children, anim, top, leaving }: { children: ReactNode; anim: "push" | "pop" | "fade" | "none"; top?: boolean; leaving?: boolean }) {
+  const [cls] = useState(() => (anim === "none" ? "" : ` m-anim-${anim}`));
+  return <div className={"m-screen" + (top ? " top" : "") + (leaving ? " leaving" : cls)}>{children}</div>;
+}
+
+function TabBar({ tab, onTab, waiting }: { tab: Tab; onTab: (t: Tab) => void; waiting: number }) {
+  const items: { t: Tab; label: string; icon: ReactNode }[] = [
+    { t: "home", label: "Workspaces", icon: <I.stack /> },
+    { t: "usage", label: "Uso", icon: <I.chart /> },
+    { t: "settings", label: "Configurações", icon: <I.gear /> },
+  ];
+  return (
+    <nav className="m-tabbar" data-testid="m-tabbar">
+      {items.map((i) => (
+        <button key={i.t} className={tab === i.t ? "on" : ""} onClick={(e) => (haptic(e.currentTarget), onTab(i.t))} data-testid={`m-tab-${i.t}`} aria-current={tab === i.t ? "page" : undefined}>
+          <span className="m-tab-icon">
+            {i.icon}
+            {i.t === "home" && waiting > 0 && <span className="m-tab-badge">{waiting}</span>}
+          </span>
+          <span className="m-tab-label">{i.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+// ---------------- pareamento ----------------
+
+function Brand() {
+  return (
+    <div className="m-brand" aria-hidden="true">
+      <img src="/icon-192.png" alt="" width={72} height={72} />
+    </div>
+  );
 }
 
 function PairScreen({ token, invite }: { token: string; invite: boolean }) {
@@ -60,14 +224,21 @@ function PairScreen({ token, invite }: { token: string; invite: boolean }) {
     }
   };
   return (
-    <div className="m-app m-center" data-testid="m-pair">
-      <div className="m-card">
+    <div className="m-app m-onboard" data-testid="m-pair">
+      <div className="m-onboard-body">
+        <Brand />
         <h1>{invite ? "Convite para colaborar" : "Parear este aparelho"}</h1>
-        <p className="dim">{invite ? "Você vai acompanhar um workspace do Kabul ao vivo com quem te convidou." : "Depois de parear, este aparelho vê e opera as sessões do computador pela sua tailnet."}</p>
-        <label>Seu nome<input value={user} onChange={(e) => setUser(e.target.value)} placeholder="Como os outros te veem" data-testid="m-pair-user" autoComplete="name" /></label>
-        <label>Aparelho<input value={device} onChange={(e) => setDevice(e.target.value)} data-testid="m-pair-device" /></label>
+        <p>{invite ? "Você vai acompanhar um workspace do Kabul ao vivo com quem te convidou." : "Depois de parear, este aparelho vê e opera as sessões do computador pela sua tailnet."}</p>
+        <div className="m-grp">
+          <div className="m-grp-body">
+            <label className="m-field"><span>Seu nome</span><input value={user} onChange={(e) => setUser(e.target.value)} placeholder="Como os outros te veem" data-testid="m-pair-user" autoComplete="name" /></label>
+            <label className="m-field"><span>Aparelho</span><input value={device} onChange={(e) => setDevice(e.target.value)} data-testid="m-pair-device" /></label>
+          </div>
+        </div>
         {err && <div className="m-error" data-testid="m-pair-error">{err}</div>}
-        <button className="m-btn primary big" disabled={busy || !user.trim()} onClick={go} data-testid="m-pair-go">{busy ? "Pareando…" : invite ? "Entrar" : "Parear"}</button>
+      </div>
+      <div className="m-onboard-foot">
+        <button className="m-cta" disabled={busy || !user.trim()} onClick={go} data-testid="m-pair-go">{busy ? "Pareando…" : invite ? "Entrar" : "Parear"}</button>
       </div>
     </div>
   );
@@ -77,233 +248,21 @@ function NeedPairing({ reason, revoked }: { reason: string | null; revoked: bool
   const [link, setLink] = useState("");
   const parsed = parsePairLink(link);
   return (
-    <div className="m-app m-center" data-testid="m-need-pairing">
-      <div className="m-card">
+    <div className="m-app m-onboard" data-testid="m-need-pairing">
+      <div className="m-onboard-body">
+        <Brand />
         <h1>{revoked ? "Acesso revogado" : "Pareie este aparelho"}</h1>
-        <p className="dim">{revoked ? "O dono da máquina removeu este aparelho. Peça um novo QR ou convite." : "No computador, abra Kabul › Configurações › Celular e remoto e aponte a câmera para o QR. Ou cole aqui o link de pareamento."}</p>
-        {reason && !revoked && <div className="dim small">{reason}</div>}
-        <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="Link de pareamento ou convite" data-testid="m-pair-link" />
-        <button className="m-btn primary big" disabled={!parsed} onClick={() => (clearCred(), (location.hash = link.slice(link.indexOf("#") + 1)), location.reload())}>Continuar</button>
-      </div>
-    </div>
-  );
-}
-
-type Filter = "all" | "waiting";
-
-function SessionList({ conn, onOpen }: { conn: ConnState; onOpen: (id: string) => void }) {
-  const [list, setList] = useState<LiveSession[]>([]);
-  const [machine, setMachine] = useState<string>(ws()?.machine() ?? "");
-  const [os, setOs] = useState<string>("");
-  const [filter, setFilter] = useState<Filter>("all");
-  const [err, setErr] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<null | { kind: "menu" } | { kind: "invite"; ws: string; name: string } | { kind: "devices" } | { kind: "chat"; ws: string; name: string }>(null);
-  const [push, setPush] = useState(false);
-  const load = useCallback(() => k.live().then((r) => (setList(r.sessions), setMachine(r.machine), setOs(r.os), setErr(null)), (e) => setErr(String(e))), []);
-  useEffect(() => {
-    load();
-    void pushEnabled().then(setPush);
-    const t = setInterval(load, 4000);
-    let pend: number | null = null;
-    const soon = () => {
-      if (pend) return;
-      pend = window.setTimeout(() => ((pend = null), load()), 250);
-    };
-    const offs = ["sessions-changed", "session-status", "chat-state"].map((c) => transport.subscribe(c, soon));
-    return () => (clearInterval(t), offs.forEach((o) => o()));
-  }, [load]);
-  const waiting = list.filter((s) => s.status === "waiting").length;
-  const groups = useMemo(() => {
-    const shown = filter === "waiting" ? list.filter((s) => s.status === "waiting") : list;
-    const m = new Map<string, { key: string; repo: string; workspace: string | null; wsId: string | null; items: LiveSession[] }>();
-    for (const s of shown) {
-      const g = m.get(s.group.key) ?? { key: s.group.key, repo: s.group.repo, workspace: s.group.workspace, wsId: s.group.workspace_id, items: [] };
-      g.items.push(s);
-      m.set(s.group.key, g);
-    }
-    const rank = (g: { items: LiveSession[] }) => (g.items.some((s) => s.status === "waiting") ? 0 : g.items.some((s) => s.status === "working") ? 1 : 2);
-    return [...m.values()].sort((a, b) => rank(a) - rank(b) || a.repo.localeCompare(b.repo) || (a.workspace ?? "").localeCompare(b.workspace ?? ""));
-  }, [list, filter]);
-  const who = me();
-  return (
-    <div className="m-app" data-testid="m-list">
-      <header className="m-top">
-        <div className="m-top-title">
-          <b>Kabul</b>
-          <span className="dim small" data-testid="m-machine">{machine}</span>
-        </div>
-        <span className={`m-conn m-conn-${conn}`} title={conn === "open" ? "Conectado" : "Reconectando…"} data-testid="m-conn" />
-        <button className="m-btn ghost" onClick={() => setSheet({ kind: "menu" })} data-testid="m-menu" aria-label="Menu">•••</button>
-      </header>
-      <div className="m-tabs">
-        <button className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>Todas <span className="dim">{list.length}</span></button>
-        <button className={filter === "waiting" ? "on" : ""} onClick={() => setFilter("waiting")} data-testid="m-filter-waiting">Esperando você {waiting > 0 && <span className="m-count">{waiting}</span>}</button>
-      </div>
-      {err && <div className="m-error">{err}</div>}
-      <main className="m-scroll">
-        {groups.length === 0 && <div className="m-empty dim" data-testid="m-empty">{filter === "waiting" ? "Nenhum agente esperando você." : "Nenhuma sessão rodando. Sessões novas aparecem aqui sozinhas."}</div>}
-        {groups.map((g) => (
-          <section key={g.key} className="m-group" data-testid="m-group" data-repo={g.repo}>
-            <div className="m-group-head">
-              <RepoMark name={g.repo || "?"} size={18} />
-              <span className="m-group-name">{g.repo}{g.workspace && <span className="dim"> › {g.workspace}</span>}</span>
-              <span className="grow" />
-              {g.wsId && canWrite() && <button className="m-btn small" onClick={() => setSheet({ kind: "chat", ws: g.wsId!, name: g.workspace ?? g.repo })} data-testid="m-new-chat">+ Chat</button>}
-              {g.wsId && isOwner() && <button className="m-btn small" onClick={() => setSheet({ kind: "invite", ws: g.wsId!, name: g.workspace ?? g.repo })} data-testid="m-invite">Convidar</button>}
-            </div>
-            {g.items.map((s) => (
-              <button key={s.id} className={`m-session m-session-${s.status}`} onClick={() => onOpen(s.id)} data-testid="m-session" data-id={s.id}>
-                <AgentIcon agent={s.agent} />
-                <span className="m-session-main">
-                  <b className="m-session-name">{s.name}</b>
-                  <span className="m-session-line">
-                    <RunsOnLabel r={s.runs_on} machine={s.machine ?? machine} os={os} />
-                    <span className="m-session-sub dim">{s.status === "waiting" && s.detail ? s.detail : s.kind === "chat" ? s.preview : `${AGENT_LABEL[s.agent] ?? s.agent} · ${s.preview}`}</span>
-                  </span>
-                </span>
-                <StatusPill status={s.status} detail={s.detail} />
-              </button>
-            ))}
-          </section>
-        ))}
-        {isOwner() && filter === "all" && <ExternalSection onOpen={onOpen} />}
-      </main>
-      {sheet?.kind === "menu" && (
-        <Sheet title={who ? `${who.user} · ${who.device}` : "Este computador"} onClose={() => setSheet(null)} testid="m-menu-sheet">
-          <div className="m-sheet-list">
-            <PushRow on={push} onOn={() => setPush(true)} />
-            {isOwner() && <button className="m-row" onClick={() => setSheet({ kind: "devices" })} data-testid="m-devices">Aparelhos pareados</button>}
-            {who && who.id !== "local" && <button className="m-row danger" onClick={() => (clearCred(), location.reload())}>Sair deste aparelho</button>}
-            {who && <div className="dim small m-pad">Papel: {who.role === "owner" ? "dono" : who.role === "editor" ? "editor" : "observador"}{who.scope.kind === "workspace" ? " · um workspace" : ""}</div>}
+        <p>{revoked ? "O dono da máquina removeu este aparelho. Peça um novo QR ou convite." : "No computador, abra Kabul › Configurações › Celular e remoto e aponte a câmera para o QR. Ou cole aqui o link de pareamento."}</p>
+        {reason && !revoked && <p className="m-onboard-why">{reason}</p>}
+        <div className="m-grp">
+          <div className="m-grp-body">
+            <label className="m-field"><input value={link} onChange={(e) => setLink(e.target.value)} placeholder="Link de pareamento ou convite" data-testid="m-pair-link" autoCapitalize="off" autoCorrect="off" /></label>
           </div>
-        </Sheet>
-      )}
-      {sheet?.kind === "invite" && <InviteSheet ws={sheet.ws} name={sheet.name} onClose={() => setSheet(null)} />}
-      {sheet?.kind === "devices" && <DevicesSheet onClose={() => setSheet(null)} />}
-      {sheet?.kind === "chat" && <NewChatSheet ws={sheet.ws} name={sheet.name} onClose={() => setSheet(null)} onOpen={onOpen} />}
-    </div>
-  );
-}
-
-function PushRow({ on, onOn }: { on: boolean; onOn: () => void }) {
-  const [msg, setMsg] = useState<string | null>(pushBlocker());
-  const [busy, setBusy] = useState(false);
-  if (on) return <div className="m-row" data-testid="m-push-on">Notificações ligadas <button className="m-btn small" onClick={() => k.pushTest().catch(() => {})}>Testar</button></div>;
-  return (
-    <div className="m-row-col">
-      <button className="m-row" disabled={busy || !!pushBlocker()} onClick={() => (setBusy(true), enablePush().then(onOn, (e) => setMsg(String(e.message ?? e))).finally(() => setBusy(false)))} data-testid="m-push">Avisar quando um agente esperar por mim</button>
-      {msg && <div className="dim small m-pad" data-testid="m-push-why">{msg}</div>}
-    </div>
-  );
-}
-
-function InviteSheet({ ws: wsId, name, onClose }: { ws: string; name: string; onClose: () => void }) {
-  const [role, setRole] = useState<"editor" | "observer">("editor");
-  const [t, setT] = useState<Ticket | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const left = useCountdown(t?.expires_at ?? null);
-  const make = () => k.invite(wsId, role).then(setT, (e) => setErr(String(e)));
-  return (
-    <Sheet title={`Convidar para ${name}`} onClose={onClose} testid="m-invite-sheet">
-      <p className="dim small m-pad">Quem abrir o link (pela sua tailnet) entra só neste workspace: vê o stream, a conversa e o terminal. Editor também manda mensagens, aprova e digita.</p>
-      <div className="m-seg">
-        <button className={role === "editor" ? "on" : ""} onClick={() => (setRole("editor"), setT(null))} data-testid="m-role-editor">Editor</button>
-        <button className={role === "observer" ? "on" : ""} onClick={() => (setRole("observer"), setT(null))} data-testid="m-role-observer">Observador</button>
-      </div>
-      {!t && <button className="m-btn primary big" onClick={make} data-testid="m-invite-go">Gerar convite</button>}
-      {t && <TicketCard svg={t.qr_svg} url={t.url} left={left} onRegen={make} />}
-      {err && <div className="m-error">{err}</div>}
-    </Sheet>
-  );
-}
-
-function DevicesSheet({ onClose }: { onClose: () => void }) {
-  const [list, setList] = useState<Device[]>([]);
-  const [confirm, setConfirm] = useState<string | null>(null);
-  const load = () => k.devices().then(setList, () => {});
-  useEffect(() => void load(), []);
-  const mine = me()?.id;
-  return (
-    <Sheet title="Aparelhos pareados" onClose={onClose} testid="m-devices-sheet">
-      {list.length === 0 && <div className="dim m-pad">Nenhum aparelho.</div>}
-      {list.map((d) => (
-        <div key={d.id} className="m-row" data-testid="m-device">
-          <span className="m-avatar" style={{ background: d.color, width: 24, height: 24 }}>{d.user.slice(0, 1).toUpperCase()}</span>
-          <span className="grow">{d.user} · {d.name}<span className="dim small"> {d.role === "owner" ? "dono" : d.role}{d.id === mine ? " (este)" : ""}</span></span>
-          {confirm === d.id ? (
-            <button className="m-btn small danger" onClick={() => k.revoke(d.id).then(() => (setConfirm(null), load()))} data-testid="m-revoke-confirm">Confirmar</button>
-          ) : (
-            <button className="m-btn small" onClick={() => setConfirm(d.id)} data-testid="m-revoke">Revogar</button>
-          )}
         </div>
-      ))}
-    </Sheet>
-  );
-}
-
-function NewChatSheet({ ws: wsId, name, onClose, onOpen }: { ws: string; name: string; onClose: () => void; onOpen: (id: string) => void }) {
-  const [models, setModels] = useState<Model[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => void k.models().then((m) => setModels(m.filter((x) => !x.local)), (e) => setErr(String(e))), []);
-  const start = (m: Model) => {
-    setBusy(true);
-    k.chatStart(wsId, m).then((c) => (onClose(), onOpen(`chat:${c.id}`)), (e) => (setErr(String(e)), setBusy(false)));
-  };
-  return (
-    <Sheet title={`Nova conversa em ${name}`} onClose={onClose} testid="m-chat-sheet">
-      {!models && !err && <div className="dim m-pad">Carregando modelos…</div>}
-      <div className="m-sheet-list">
-        {models?.slice(0, 12).map((m) => (
-          <button key={m.key} className="m-row" disabled={busy} onClick={() => start(m)} data-testid="m-model">
-            <AgentIcon agent={m.harness} size={20} /> <span className="grow">{m.label}</span><span className="dim small">{AGENT_LABEL[m.harness] ?? m.harness}</span>
-          </button>
-        ))}
       </div>
-      {err && <div className="m-error">{err}</div>}
-    </Sheet>
-  );
-}
-
-/** Agentes e sessões de fora do Kabul (só o dono vê): mesma lista do Painel do desktop. */
-function ExternalSection({ onOpen }: { onOpen: (id: string) => void }) {
-  const [ext, setExt] = useState<ExternalSessions | null>(null);
-  const [wss, setWss] = useState<Workspace[]>([]);
-  const [models, setModels] = useState<Model[]>([]);
-  const [err, setErr] = useState<string | null>(null);
-  useEffect(() => {
-    const load = () => k.external().then(setExt, () => {});
-    load();
-    k.workspaces().then(setWss, () => {});
-    k.models().then(setModels, () => {});
-    const t = setInterval(load, 15000);
-    return () => clearInterval(t);
-  }, []);
-  if (!ext || (!ext.running.length && !ext.recent.length)) return null;
-  const now = Date.now() / 1000;
-  const cont = async (agent: string, id: string | null, cwd: string | null) => {
-    const w = workspaceFor(cwd, wss);
-    // A lista de modelos pode demorar (o Codex lista pelo app-server): espera aqui se ainda não chegou.
-    const m = modelFor(agent, models.length ? models : await k.models().catch(() => []));
-    if (!w || !id || !m) return setErr(!w ? "Nenhum workspace do Kabul nesta pasta." : !id ? "Id da sessão ainda desconhecido." : `Sem modelo do ${agent}.`);
-    k.chatStart(w.id, m, id).then((c) => onOpen(`chat:${c.id}`), (e) => setErr(String(e)));
-  };
-  const row = (key: string, agent: string, title: string, sub: string, id: string | null, cwd: string | null, testid: string) => (
-    <div key={key} className="m-session m-external" data-testid={testid}>
-      <AgentIcon agent={agent} />
-      <span className="m-session-main">
-        <b className="m-session-name">{title}</b>
-        <span className="m-session-sub dim">{sub}</span>
-      </span>
-      <button className="m-btn small" disabled={!id || !workspaceFor(cwd, wss)} onClick={() => cont(agent, id, cwd)} data-testid="m-external-continue">Continuar</button>
+      <div className="m-onboard-foot">
+        <button className="m-cta" disabled={!parsed} onClick={() => (clearCred(), (location.hash = link.slice(link.indexOf("#") + 1)), location.reload())}>Continuar</button>
+      </div>
     </div>
-  );
-  return (
-    <section className="m-group" data-testid="m-external">
-      <div className="m-group-head"><span className="m-group-name">Fora do Kabul</span></div>
-      {err && <div className="m-error">{err}</div>}
-      {ext.running.map((r) => row(`r${r.pid}`, r.agent, `${AGENT_LABEL[r.agent] ?? r.agent} · ${r.repo ?? "?"}`, `${r.terminal ?? "outro terminal"} · ${ago(r.running_secs)}${r.branch ? ` · ${r.branch}` : ""}`, r.session_id, r.cwd, "m-external-running"))}
-      {ext.recent.slice(0, 10).map((r) => row(`h${r.agent}${r.id}`, r.agent, r.title, `${AGENT_LABEL[r.agent] ?? r.agent} · ${r.repo ?? "?"} · há ${ago(now - r.updated)}`, r.id, r.cwd, "m-external-recent"))}
-    </section>
   );
 }

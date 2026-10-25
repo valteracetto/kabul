@@ -47,7 +47,7 @@ test("configurações: Geral (som com Testar, contexto, colagem longa, absolutel
   // Efeitos no chat: plano por padrão, frase escondida, revisão com outro modelo
   await page.getByTestId("ws-row").click();
   await host(page).getByTestId("new-tab").click();
-  await host(page).getByTestId("new-chat").click();
+  await page.getByTestId("new-chat").click();
   await expect(host(page).locator(".composer.plan")).toBeVisible();
   await chat(page).getByTestId("composer").press("Shift+Tab");
   await chat(page).getByTestId("composer").fill("você está certo?");

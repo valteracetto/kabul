@@ -1,0 +1,25 @@
+{
+  "about": "Orçamentos do teste de carga (kabul loadtest) no CI. Cada limite lê um caminho do relatório JSON: max = teto, min = piso. Referência local (Mac, debaixo de carga) em docs/perf/loadtest-depois*.json; os tetos têm folga para a variação das máquinas do CI.",
+  "scenario": {
+    "workspaces": 100,
+    "agents": 30,
+    "rate": 20,
+    "duration": 20,
+    "warmup": 3,
+    "clients": 3,
+    "tmux": 10
+  },
+  "limits": {
+    "cpu_media": { "path": "server.cpu_pct.avg", "max": 30 },
+    "cpu_p95": { "path": "server.cpu_pct.p95", "max": 60 },
+    "memoria_max": { "path": "server.rss_mb.max", "max": 150 },
+    "latencia_p95": { "path": "latency_ms.p95", "max": 25 },
+    "latencia_p99": { "path": "latency_ms.p99", "max": 60 },
+    "entrega": { "path": "delivery_ratio", "min": 0.99 },
+    "rpc_live_sessions_p95": { "path": "rpc_ms.live_sessions.p95", "max": 50 },
+    "rpc_workspaces_list_p95": { "path": "rpc_ms.workspaces_list.p95", "max": 50 },
+    "rpc_chat_list_p95": { "path": "rpc_ms.chat_list.p95", "max": 50 },
+    "rpc_sessions_list_p95": { "path": "rpc_ms.sessions_list.p95", "max": 300 },
+    "subida_ms": { "path": "startup_ms", "max": 5000 }
+  }
+}

@@ -6,11 +6,13 @@
 pub mod auth;
 pub mod bus;
 pub mod chat;
+pub mod files;
 pub mod hub;
 pub mod machines;
 pub mod net;
 pub mod policy;
 pub mod presence;
+pub mod proxy;
 pub mod push;
 pub mod secrets;
 pub mod server;
@@ -104,6 +106,7 @@ pub fn start(cfg: Config) -> Result<Server> {
     let srv = server::Srv::new(hub.clone());
     let web = cfg.web_dir.clone();
     let assets = cfg.assets.clone();
+    let proxy_hub = Arc::downgrade(&hub);
     let thread = std::thread::Builder::new()
         .name("kabuld".into())
         .spawn(move || {
@@ -115,6 +118,11 @@ pub fn start(cfg: Config) -> Result<Server> {
                 }
             };
             rt.block_on(async move {
+                // Proxy do Run: listeners no mesmo runtime; credencial conferida no hub (sem ciclo).
+                if let Some(h) = proxy_hub.upgrade() {
+                    let w = proxy_hub.clone();
+                    h.proxy.attach(tokio::runtime::Handle::current(), Arc::new(move |id: &str| w.upgrade().map(|h| h.auth.is_active(id)).unwrap_or(false)));
+                }
                 let mut bound = vec![];
                 let mut listeners = vec![];
                 for a in addrs {

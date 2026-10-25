@@ -17,7 +17,8 @@ const hasAgy = (() => {
     return false;
   }
 })();
-const PORT = 7793;
+// Desloca junto com a porta do Vite (KABUL_E2E_PORT) para worktrees em paralelo não dividirem o servidor.
+const PORT = 7793 + (Number(process.env.KABUL_E2E_PORT ?? 5174) - 5174);
 let srv: ChildProcess;
 let dir: string;
 
@@ -36,14 +37,14 @@ test.beforeAll(async () => {
   execSync(`mkdir -p ${repo} && cd ${repo} && git init -q -b main && echo oi > a.txt && git add . && git -c user.name=t -c user.email=t@t commit -qm i`);
   srv = spawn(KABUL, ["serve", "--port", String(PORT), "--home", join(dir, "home")], { stdio: "inherit", env: { ...process.env, KABUL_PICK_FOLDER: repo } });
   for (let i = 0; i < 300; i++) {
-    try { await fetch(`http://127.0.0.1:${PORT}/rpc`, { method: "POST", body: "{}" }); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+    try { await fetch(`http://127.0.0.1:${PORT}/rpc`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
   }
 });
 test.afterAll(() => srv?.kill());
 
 test("agy real: comando negado vira cartão; permitir uma vez grava a regra no projeto, continua e tira a regra", async ({ page }) => {
   test.setTimeout(600_000);
-  const models = (await (await fetch(`http://127.0.0.1:${PORT}/rpc`, { method: "POST", body: JSON.stringify({ command: "models_list", args: {} }) })).json()).value as { key: string; harness: string }[];
+  const models = (await (await fetch(`http://127.0.0.1:${PORT}/rpc`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ command: "models_list", args: {} }) })).json()).value as { key: string; harness: string }[];
   const agy = models.filter((m) => m.harness === "antigravity");
   const key = (agy.find((m) => /flash/.test(m.key)) ?? agy[0])?.key;
   test.skip(!key, "sem modelos do agy");

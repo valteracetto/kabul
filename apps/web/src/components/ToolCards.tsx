@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Markdown } from "./Markdown";
-import { IThink, ITool } from "../icons";
+import type { DockerContainer, Leftover } from "../api";
+import { IBrain, IGlobe, IList, IMinus, IPencil, IPlug, IPlus, ISearch, ISend, ITerminal, ITool } from "../icons";
 
 type O = Record<string, any>;
 const short = (s: string, n = 120) => (s.length > n ? s.slice(0, n) + "…" : s);
@@ -20,14 +21,14 @@ function editLines(name: string, input: O): { sign: string; text: string }[] {
 }
 
 /** Card por ferramenta: Bash, Edit/Write (diff), Read/Glob/Grep, TodoWrite, Task (subagente), Web, MCP. */
-export function ToolCard({ name, input, output, error, onOpenFile }: { name: string; input: unknown; output?: string; error?: boolean; onOpenFile?: (p: string) => void }) {
+export function ToolCard({ name, input, output, error, interrupted, onOpenFile }: { name: string; input: unknown; output?: string; error?: boolean; interrupted?: boolean; onOpenFile?: (p: string) => void }) {
   const i = (input ?? {}) as O;
-  const pending = output === undefined;
+  const pending = output === undefined && !interrupted;
   const [open, setOpen] = useState(false);
   const mcp = /^mcp__([^_]+(?:_[^_]+)*)__(.+)$/.exec(name);
   let title = name, sub = "", body: React.ReactNode = null, badge: string | null = null;
   if (name === "Bash") {
-    title = i.description || "Bash";
+    title = i.description || "Comando";
     sub = i.command ?? "";
     if (i.run_in_background) badge = "segundo plano";
     body = <><pre className="tc-cmd">$ {i.command}</pre>{output !== undefined && <pre className="tc-out">{short(output, 6000)}</pre>}</>;
@@ -72,22 +73,47 @@ export function ToolCard({ name, input, output, error, onOpenFile }: { name: str
   }
   // Todo e edição abertos por padrão (o conteúdo é o que interessa).
   useEffect(() => void ((name === "TodoWrite" || ["Edit", "MultiEdit", "Write"].includes(name)) && setOpen(true)), [name]);
+  const Icon = stepIcon(name, !!mcp);
+  // Comando, caminho e padrão em monoespaçada; descrição e parâmetros soltos em texto normal.
+  const mono = ["Bash", "Edit", "MultiEdit", "Write", "Read", "Glob", "Grep", "LS", "WebFetch"].includes(name);
   return (
-    <div className={"tool-card" + (error ? " err" : "") + (pending ? " pending" : "")} data-testid="tool-card" data-tool={name}>
-      <div className="tc-head" onClick={() => setOpen(!open)}>
-        <ITool size={13} /><span className="tc-title">{title}</span>{badge && <span className="tc-badge">{badge}</span>}<span className="chip">{sub}</span>{pending && <span className="spinner tiny" />}{error && <span className="error small">falhou</span>}
+    <div className={"step" + (error ? " err" : "") + (pending ? " pending" : "") + (interrupted ? " stopped" : "") + (open ? " open" : "")} data-testid="tool-card" data-tool={name} data-state={interrupted ? "interrupted" : pending ? "running" : "done"}>
+      <div className={"step-head" + (body ? " has-body" : "")} onClick={() => body && setOpen(!open)} title={sub || undefined}>
+        <span className="step-ico"><Icon size={14} className="si-kind" />{body ? (open ? <IMinus size={14} className="si-hover" /> : <IPlus size={14} className="si-hover" />) : null}</span>
+        <span className="step-label">{title}</span>
+        {badge && <span className="tc-badge">{badge}</span>}
+        {sub && <span className={"step-chip" + (mono ? " mono" : "")}>{sub}</span>}
+        {pending && <span className="spinner tiny" />}
+        {interrupted && <span className="step-state" data-testid="step-interrupted">Interrompido</span>}
+        {error && <span className="error small">falhou</span>}
       </div>
-      {open && body && <div className="tc-body">{body}</div>}
+      {open && body && <div className="step-body">{body}</div>}
     </div>
   );
+}
+
+/** Ícone do passo pelo tipo de ferramenta (o mesmo para todos os harnesses, que já chegam normalizados). */
+function stepIcon(name: string, mcp: boolean) {
+  if (name === "Bash") return ITerminal;
+  if (["Edit", "MultiEdit", "Write"].includes(name)) return IPencil;
+  if (["Read", "Glob", "Grep", "LS", "ToolSearch"].includes(name)) return ISearch;
+  if (name === "WebFetch" || name === "WebSearch") return IGlobe;
+  if (name === "TodoWrite") return IList;
+  if (name === "Task" || name === "Agent" || name === "SendMessage") return ISend;
+  if (mcp) return IPlug;
+  return ITool;
 }
 
 export function ThinkingCard({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="tool-card thinking" data-testid="thinking">
-      <div className="tc-head" onClick={() => setOpen(!open)}><IThink size={13} /><span className="tc-title">Pensando</span>{!open && <span className="chip">{short(text, 90)}</span>}</div>
-      {open && <div className="tc-body"><Markdown text={text} /></div>}
+    <div className={"step thinking" + (open ? " open" : "")} data-testid="thinking">
+      <div className="step-head has-body" onClick={() => setOpen(!open)}>
+        <span className="step-ico"><IBrain size={14} className="si-kind" />{open ? <IMinus size={14} className="si-hover" /> : <IPlus size={14} className="si-hover" />}</span>
+        <span className="step-label">Pensando</span>
+        {!open && <span className="step-chip">{short(text.replace(/\s+/g, " ").trim(), 140)}</span>}
+      </div>
+      {open && <div className="step-body"><Markdown text={text} /></div>}
     </div>
   );
 }
@@ -182,6 +208,52 @@ export function QuestionCard({ input, decided, onSubmit, onSkip }: { input: unkn
             <button className="btn primary" disabled={!Object.keys(ans).length} onClick={() => onSubmit(ans)} data-testid="q-submit">Enviar <kbd>↵</kbd></button>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+const age = (s: number) => (s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)} min` : `${Math.floor(s / 3600)} h`);
+
+/** Depois do Parar: "O agente deixou N processos rodando". Manter é o padrão; encerrar só os marcados
+ *  (SIGTERM e depois SIGKILL no grupo). Contêineres com -d aparecem com o ID e "docker stop". */
+export function LeftoversCard({ item, onDecide, onDockerStop }: {
+  item: { procs: Leftover[]; containers: DockerContainer[]; decided?: "kept" | "killed"; killed?: number[]; stopped?: string[] };
+  onDecide: (kill: Leftover[], keep: Leftover[], remember: "keep" | "kill" | null) => void;
+  onDockerStop: (id: string) => void;
+}) {
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const [remember, setRemember] = useState(false);
+  const n = item.procs.length;
+  const title = n ? `O agente deixou ${n} processo${n === 1 ? "" : "s"} rodando` : `O agente deixou ${item.containers.length} contêiner${item.containers.length === 1 ? "" : "es"} rodando`;
+  const pick = (kill: boolean) => {
+    const k = kill ? item.procs.filter((p) => sel.has(p.pid)) : [];
+    onDecide(k, item.procs.filter((p) => !k.includes(p)), remember ? (kill ? "kill" : "keep") : null);
+  };
+  return (
+    <div className="leftovers" data-testid="leftovers">
+      <div className="lo-head"><b>{title}</b>{item.decided && <span className="dim small" data-testid="leftovers-decided">{item.decided === "kept" ? "Mantidos rodando (veja em Recursos)" : "Encerrados"}</span>}</div>
+      {item.procs.map((p) => (
+        <label key={p.pid} className={"lo-row" + (item.killed?.includes(p.pid) ? " gone" : "")} data-testid="leftover-row">
+          {!item.decided && <input type="checkbox" checked={sel.has(p.pid)} onChange={(e) => setSel((s) => { const x = new Set(s); e.target.checked ? x.add(p.pid) : x.delete(p.pid); return x; })} data-testid="leftover-check" />}
+          <span className="lo-name">{p.name}</span>
+          <code className="lo-cmd" title={p.cmd}>{p.cmd}</code>
+          {p.ports.length > 0 && <span className="lo-port mono">:{p.ports.join(", :")}</span>}
+          <span className="dim small mono">{age(p.age)}</span>
+        </label>
+      ))}
+      {item.containers.map((c) => (
+        <div key={c.id} className="lo-row" data-testid="leftover-container">
+          <span className="lo-name">docker</span><code className="lo-cmd">{c.image} · {c.name} · {c.id}</code>
+          {item.stopped?.includes(c.id) ? <span className="dim small">parado</span> : <button className="btn small" onClick={() => onDockerStop(c.id)} data-testid="docker-stop">docker stop</button>}
+        </div>
+      ))}
+      {!item.decided && n > 0 && (
+        <div className="row lo-actions">
+          <button className="btn primary" onClick={() => pick(false)} data-testid="leftovers-keep">Manter rodando</button>
+          <button className="btn" disabled={!sel.size} onClick={() => pick(true)} data-testid="leftovers-kill">Encerrar selecionados</button>
+          <label className="check-row small"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} data-testid="leftovers-remember" /> Lembrar para este workspace</label>
+        </div>
       )}
     </div>
   );

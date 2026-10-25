@@ -3,7 +3,6 @@
 //! tem listagem no CLI e usa os aliases estáveis (`opus`, `sonnet`, `haiku`).
 use crate::harness::HarnessKind;
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 
 pub const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 
@@ -45,24 +44,23 @@ pub struct LocalRef {
 }
 
 fn m(h: HarnessKind, id: &str, label: &str, provider: &str, efforts: &[&str]) -> Model {
-    let context = Some(if provider == "anthropic" { 200_000 } else if provider == "openai" { 272_000 } else { 1_000_000 });
+    let context = Some(if provider == "anthropic" {
+        200_000
+    } else if provider == "openai" {
+        272_000
+    } else {
+        1_000_000
+    });
     Model { key: format!("{}:{id}", h.binary()), harness: h, id: id.into(), label: label.into(), provider: provider.into(), efforts: efforts.iter().map(|s| s.to_string()).collect(), effort_in_id: false, local: None, context }
 }
 
 pub fn claude_models() -> Vec<Model> {
-    vec![
-        m(HarnessKind::Claude, "opus", "Opus 5.5", "anthropic", EFFORTS),
-        m(HarnessKind::Claude, "sonnet", "Sonnet 5.5", "anthropic", EFFORTS),
-        m(HarnessKind::Claude, "haiku", "Haiku", "anthropic", &[]),
-    ]
+    vec![m(HarnessKind::Claude, "opus", "Opus 5.5", "anthropic", EFFORTS), m(HarnessKind::Claude, "sonnet", "Sonnet 5.5", "anthropic", EFFORTS), m(HarnessKind::Claude, "haiku", "Haiku", "anthropic", &[])]
 }
 
 /// Último recurso, sem `model/list` nem cache: ids que o Codex aceitava na última verificação.
 pub fn codex_models() -> Vec<Model> {
-    vec![
-        m(HarnessKind::Codex, "gpt-6-luna", "GPT-6-Luna", "openai", &["low", "medium", "high", "xhigh", "max"]),
-        m(HarnessKind::Codex, "gpt-5.6-terra", "GPT-5.6-Terra", "openai", &["low", "medium", "high", "xhigh", "max"]),
-    ]
+    vec![m(HarnessKind::Codex, "gpt-6-luna", "GPT-6-Luna", "openai", &["low", "medium", "high", "xhigh", "max"]), m(HarnessKind::Codex, "gpt-5.6-terra", "GPT-5.6-Terra", "openai", &["low", "medium", "high", "xhigh", "max"])]
 }
 
 /// Parse de `agy models`: linhas `id<TAB>Nome (Esforço)`. Agrupa variantes de esforço.
@@ -76,7 +74,15 @@ pub fn parse_agy_models(out: &str) -> Vec<Model> {
             _ => (id, None),
         };
         let label = name.split(" (").next().unwrap_or(name).to_string();
-        let provider = if base.starts_with("gemini") { "google" } else if base.starts_with("claude") { "anthropic" } else if base.starts_with("gpt") { "openai" } else { "outro" };
+        let provider = if base.starts_with("gemini") {
+            "google"
+        } else if base.starts_with("claude") {
+            "anthropic"
+        } else if base.starts_with("gpt") {
+            "openai"
+        } else {
+            "outro"
+        };
         let key = format!("agy:{base}");
         let entry = match v.iter_mut().find(|x| x.key == key) {
             Some(e) => e,
@@ -99,7 +105,7 @@ pub fn parse_agy_models(out: &str) -> Vec<Model> {
 
 pub fn agy_models() -> Vec<Model> {
     let bin = crate::harness::which("agy").map(|p| p.display().to_string()).unwrap_or_else(|| "agy".into());
-    Command::new(bin).arg("models").output().ok().filter(|o| o.status.success()).map(|o| parse_agy_models(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default()
+    crate::shell::command(bin).arg("models").output().ok().filter(|o| o.status.success()).map(|o| parse_agy_models(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default()
 }
 
 /// Parse da resposta de `model/list` do app-server do Codex (`result.data[]`).
@@ -129,7 +135,7 @@ pub fn parse_codex_model_list(v: &serde_json::Value) -> Vec<Model> {
 pub fn codex_list(env: &[(String, String)], timeout: std::time::Duration) -> Option<Vec<Model>> {
     use std::io::{BufRead, Write};
     let bin = crate::harness::which("codex")?;
-    let mut child = Command::new(bin).args(["app-server", "--listen", "stdio://"]).envs(env.iter().cloned()).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().ok()?;
+    let mut child = crate::shell::command(bin).args(["app-server", "--listen", "stdio://"]).envs(env.iter().cloned()).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().ok()?;
     let mut stdin = child.stdin.take()?;
     let stdout = child.stdout.take()?;
     let lines = [
@@ -253,10 +259,13 @@ mod tests {
 
     #[test]
     fn lista_do_codex() {
-        let v: serde_json::Value = serde_json::from_str(r#"{"id":2,"result":{"data":[
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"id":2,"result":{"data":[
             {"id":"gpt-5.6-terra","model":"gpt-5.6-terra","displayName":"GPT-5.6-Terra","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"ultra"},{"reasoningEffort":"high"},{"reasoningEffort":"low"}],"isDefault":false},
             {"id":"gpt-6-luna","model":"gpt-6-luna","displayName":"GPT-6-Luna","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"max"}],"isDefault":true},
-            {"id":"interno","model":"interno","displayName":"X","hidden":true,"supportedReasoningEfforts":[],"isDefault":false}]}}"#).unwrap();
+            {"id":"interno","model":"interno","displayName":"X","hidden":true,"supportedReasoningEfforts":[],"isDefault":false}]}}"#,
+        )
+        .unwrap();
         let m = parse_codex_model_list(&v);
         assert_eq!(m.iter().map(|x| x.key.as_str()).collect::<Vec<_>>(), ["codex:gpt-6-luna", "codex:gpt-5.6-terra"]);
         assert_eq!(m[1].efforts, ["low", "high", "ultra"]);

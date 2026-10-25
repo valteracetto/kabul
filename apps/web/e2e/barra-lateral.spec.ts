@@ -27,7 +27,7 @@ test("barra lateral: clique direito (lido R, fixar P, status, seção, renomear,
   await row(page, "Cusco").click({ button: "right" });
   await page.getByTestId("ctx-status").hover();
   await page.getByTestId("ctx-status-backlog").click();
-  await expect(row(page, "Cusco").locator(".st-icon")).toHaveClass(/st-backlog/);
+  await expect(row(page, "Cusco").locator(".ws-ico")).toHaveAttribute("data-status", "backlog");
   // Nova seção a partir do menu do workspace
   await row(page, "Cusco").click({ button: "right" });
   await page.getByTestId("ctx-section").hover();
@@ -116,4 +116,48 @@ test("repo: clique direito (criar, ocultar, remover); ⌘⌥↓ e ⌘⇧H; não 
   await page.getByTestId("feedback-text").fill("Gostei");
   await page.getByTestId("feedback-copy").click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/^Gostei\n\n---\nKabul v/);
+});
+
+test("referência: menu ··· do repo com ícones (Remover em vermelho), arquivados pela paleta, ícone de branch na linha, rodapé do turno e menu ··· enxuto, citar seleção", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/?mock");
+  await page.getByTestId("create-ws").click();
+  await addRepo(page, "/mock/repos/demo");
+  await page.getByTestId("create-go").click();
+  await expect(page.getByTestId("ws-row")).toHaveCount(1);
+  await expect(page.getByTestId("ws-row").locator(".ws-ico svg")).toHaveCount(1);
+  await expect(page.getByTestId("ws-row").locator(".st-icon")).toHaveCount(0);
+  await page.getByTestId("repo-demo").hover();
+  await page.getByTestId("repo-more-demo").click();
+  const menu = page.getByTestId("repo-ctx");
+  await expect(menu.locator(".pop-row")).toHaveText(["Criar workspace", "Criar a partir de…", "Configuração", "Ocultar repositório", "Remover repositório…"]);
+  await expect(menu.locator(".pop-row svg")).toHaveCount(5);
+  await expect(menu.getByTestId("repo-ctx-remove")).toHaveClass(/danger/);
+  const mb = (await menu.boundingBox())!;
+  expect(mb.x + mb.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  await page.keyboard.press("Escape");
+  // Rodapé do turno: "Ns · HH:MM", sem tokens; ··· só com os forks (com ícone).
+  const chat = page.locator(".ws-host:not([hidden]) .center-body:not([hidden])");
+  await chat.getByTestId("composer").fill("liste");
+  await chat.getByTestId("composer").press("Enter");
+  await expect(chat.getByTestId("turn-time")).toHaveText(/^\d+s · \d{2}:\d{2}$/);
+  await expect(chat.getByTestId("file-chip").locator("svg")).toHaveCount(1);
+  await chat.getByTestId("turn-more").click();
+  await expect(page.locator(".turn-pop .pop-row")).toHaveText(["Fork para nova aba", "Fork para novo workspace"]);
+  await expect(page.locator(".turn-pop .pop-row svg")).toHaveCount(2);
+  await page.keyboard.press("Escape");
+  // Citar: selecionar texto da resposta mostra "Citar".
+  await chat.locator(".msg-assistant p").first().selectText();
+  await chat.locator(".msg-assistant p").first().dispatchEvent("mouseup", { bubbles: true });
+  await page.getByTestId("quote-selection").click();
+  await expect(chat.getByTestId("composer")).toHaveValue(/^> Recebi/);
+  // Arquivados não ficam na barra lateral: pela paleta.
+  await page.getByTestId("ws-row").hover();
+  await page.getByTestId("archive").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("ws-row")).toHaveCount(0);
+  await expect(page.getByTestId("sidebar")).not.toContainText("Arquivados");
+  await page.getByTestId("group-menu").click();
+  await page.getByTestId("view-archived").click();
+  await expect(page.getByTestId("palette")).toContainText("arquivado");
 });

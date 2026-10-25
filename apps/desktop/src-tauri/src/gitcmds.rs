@@ -15,7 +15,7 @@ fn dry(app: &App, asked: Option<bool>) -> bool {
 #[tauri::command]
 pub async fn git_status(app: State<'_, App>, workspace_id: String) -> R<GitStatus> {
     let (w, r) = ws_repo(&app, &workspace_id)?;
-    gitops::status(&r, &w).map_err(e)
+    gitops::status_cached(&r, &w).map_err(e)
 }
 
 #[tauri::command]
@@ -45,7 +45,7 @@ pub async fn workspace_grep(app: State<'_, App>, workspace_id: String, query: St
 #[tauri::command]
 pub async fn pr_view(app: State<'_, App>, workspace_id: String) -> R<Option<PrInfo>> {
     let (w, _) = ws_repo(&app, &workspace_id)?;
-    let pr = gitops::pr_view(&w).map_err(e)?;
+    let pr = gitops::pr_view_cached(&w).map_err(e)?;
     // Guarda o link e acompanha o estado do PR no status do workspace.
     if let Some(p) = &pr {
         let status = match p.state.as_str() {

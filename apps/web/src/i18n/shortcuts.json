@@ -30,6 +30,7 @@
   { "id": "close-tab", "keys": "⌘W", "cat": "tabs", "pt": "Fechar aba", "en": "Close tab" },
   { "id": "reopen", "keys": "⌘⇧T", "cat": "tabs", "pt": "Reabrir a aba fechada (ou novo terminal)", "en": "Reopen closed tab (or new terminal)" },
   { "id": "tab-next", "keys": "⌃Tab / ⌃⇧Tab", "cat": "tabs", "pt": "Próxima / anterior aba (também ⌘⇧] / ⌘⇧[)", "en": "Next / previous tab (also ⌘⇧] / ⌘⇧[)" },
+  { "id": "split", "keys": "⌘D", "cat": "tabs", "pt": "Dividir com a próxima aba / desfazer a divisão", "en": "Split with the next tab / unsplit" },
   { "id": "send", "keys": "↵ / ⇧↵", "cat": "chat", "pt": "Enviar / nova linha (ou ⌘↵, nas configurações)", "en": "Send / new line (or ⌘↵, in settings)" },
   { "id": "focus", "keys": "⌘L", "cat": "chat", "pt": "Focar o campo de mensagem", "en": "Focus the composer" },
   { "id": "attach", "keys": "⌘U", "cat": "chat", "pt": "Anexar arquivo", "en": "Attach file" },

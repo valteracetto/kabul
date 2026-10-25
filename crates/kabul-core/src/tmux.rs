@@ -56,7 +56,7 @@ fn parse_line(line: &str) -> Option<Pane> {
 /// `tmux -u`: força UTF-8. Sem locale (app aberto pelo Dock), o tmux troca o TAB do `-F` por "_"
 /// e o parse das listas quebra ("pane não encontrado").
 pub fn cmd() -> Command {
-    let mut c = Command::new(crate::harness::which("tmux").unwrap_or_else(|| "tmux".into()));
+    let mut c = crate::shell::command(crate::harness::which("tmux").unwrap_or_else(|| "tmux".into()));
     c.arg("-u");
     c
 }
@@ -88,6 +88,95 @@ pub fn capture_pane(target: &str, history: u32) -> Result<String> {
     tmux(&["capture-pane", "-p", "-e", "-J", "-t", target, "-S", &start])
 }
 
+/// Pane com atividade e tamanho, numa única chamada ao tmux (antes eram duas listagens).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneExt {
+    pub pane: Pane,
+    /// `#{window_activity}` (segundos Unix da última saída na janela).
+    pub activity: u64,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+/// Formato de [`list_panes_ext`]: atividade e tamanho antes dos campos de [`LIST_FORMAT`] (o título,
+/// que pode ter TAB, continua por último).
+pub fn ext_format() -> String {
+    format!("#{{window_activity}}\t#{{pane_width}}\t#{{pane_height}}\t{LIST_FORMAT}")
+}
+
+pub fn parse_list_panes_ext(out: &str) -> Vec<PaneExt> {
+    out.lines()
+        .filter_map(|l| {
+            let mut it = l.splitn(4, SEP);
+            let activity = it.next()?.parse().ok()?;
+            let cols = it.next()?.parse().ok()?;
+            let rows = it.next()?.parse().ok()?;
+            Some(PaneExt { pane: parse_line(it.next()?)?, activity, cols, rows })
+        })
+        .collect()
+}
+
+pub fn list_panes_ext() -> Result<Vec<PaneExt>> {
+    let out = cmd().args(["list-panes", "-a", "-F", &ext_format()]).output().context("falha ao executar tmux")?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        if err.contains("no server running") || err.contains("No such file") || err.contains("error connecting") {
+            return Ok(vec![]);
+        }
+        bail!("tmux list-panes: {}", err.trim());
+    }
+    Ok(parse_list_panes_ext(&String::from_utf8_lossy(&out.stdout)))
+}
+
+const CAPTURE_MARK: &str = "@@kabul-captura@@";
+
+/// Argumentos de [`capture_many`]: `capture-pane ; display-message <marca> ; capture-pane ...` num
+/// único processo do tmux.
+pub fn capture_many_args(panes: &[&str]) -> Vec<String> {
+    let mut a = vec![];
+    for (i, p) in panes.iter().enumerate() {
+        if i > 0 {
+            a.push(";".into());
+        }
+        // Só o índice na marca: o display-message expande `%` como strftime (o `%3` do pane sumiria).
+        a.extend(["display-message".into(), "-p".into(), format!("{CAPTURE_MARK}{i}")]);
+        a.extend([";".into(), "capture-pane".into(), "-p".into(), "-t".into(), (*p).to_string()]);
+    }
+    a
+}
+
+/// Separa a saída de [`capture_many_args`] por pane (na ordem de `panes`).
+pub fn parse_capture_many(panes: &[&str], out: &str) -> std::collections::HashMap<String, String> {
+    let mut m = std::collections::HashMap::new();
+    for chunk in out.split(CAPTURE_MARK).skip(1) {
+        let (i, body) = chunk.split_once('\n').unwrap_or((chunk, ""));
+        if let Some(p) = i.trim().parse::<usize>().ok().and_then(|i| panes.get(i)) {
+            m.insert(p.to_string(), body.to_string());
+        }
+    }
+    m
+}
+
+/// Tela visível (sem cores) de vários panes com UM processo do tmux (antes era um por pane).
+pub fn capture_many(panes: &[&str]) -> std::collections::HashMap<String, String> {
+    if panes.is_empty() {
+        return Default::default();
+    }
+    let args = capture_many_args(panes);
+    let mut m = match cmd().args(&args).output() {
+        Ok(o) => parse_capture_many(panes, &String::from_utf8_lossy(&o.stdout)),
+        Err(_) => Default::default(),
+    };
+    // Um pane que sumiu no meio interrompe a sequência: os que faltaram saem um a um.
+    let missing: Vec<&str> = panes.iter().copied().filter(|p| !m.contains_key(*p)).collect();
+    for p in missing {
+        if let Ok(t) = tmux(&["capture-pane", "-p", "-t", p]) {
+            m.insert(p.to_string(), t);
+        }
+    }
+    m
+}
+
 /// Envia texto literal (`-l`) para o pane. Se `enter`, envia Enter depois.
 pub fn send_text(target: &str, text: &str, enter: bool) -> Result<()> {
     tmux(&["send-keys", "-t", target, "-l", text])?;
@@ -113,6 +202,7 @@ pub fn send_bytes_args(target: &str, data: &[u8]) -> Vec<String> {
 
 /// Envia bytes crus (teclas, sequências de escape, colagens) para o pane.
 pub fn send_bytes(target: &str, data: &[u8]) -> Result<()> {
+    anyhow::ensure!(!target.starts_with('-'), "alvo inválido: {target:?}");
     for chunk in data.chunks(512) {
         let args = send_bytes_args(target, chunk);
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -157,6 +247,12 @@ pub fn new_session(name: &str, cwd: Option<&str>, command: Option<&str>) -> Resu
     let args = new_session_args(name, cwd, command);
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     tmux(&refs).map(|_| ())
+}
+
+/// Id de pane do tmux (`%3`). É o único alvo aceito no modo de controle, onde a linha vira comando do
+/// tmux: um "pane" com espaço, `;` ou quebra de linha injetaria comandos (ex.: `run-shell`).
+pub fn is_pane_id(s: &str) -> bool {
+    s.len() > 1 && s.len() <= 12 && s.starts_with('%') && s[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Alvo exato de sessão (`=nome`): sem isso o tmux casa por prefixo (`kabul-x` acharia `kabul-x-setup`).
@@ -212,6 +308,42 @@ mod tests {
     fn bytes_e_frame() {
         assert_eq!(send_bytes_args("%1", b"a\r\x1b"), vec!["send-keys", "-t", "%1", "-H", "61", "0d", "1b"]);
         assert_eq!(frame("a\nb\n", "3,1"), "a\r\nb\x1b[2;4H");
+    }
+
+    #[test]
+    fn lista_estendida_e_captura_em_lote() {
+        let out = "1700000000\t120\t40\tkabul-x\t0\tzsh\t0\t%7\t42\tzsh\t/tmp\t1\ttítulo\twith tab\n";
+        let v = parse_list_panes_ext(out);
+        assert_eq!((v[0].activity, v[0].cols, v[0].rows, v[0].pane.pane_id.as_str(), v[0].pane.title.as_str()), (1700000000, 120, 40, "%7", "título\twith tab"));
+        let a = capture_many_args(&["%1", "%2"]);
+        assert_eq!(a.iter().filter(|x| *x == ";").count(), 3);
+        let m = parse_capture_many(&["%1", "%2"], "@@kabul-captura@@0\nolá\n$ \n@@kabul-captura@@1\noutra\n");
+        assert_eq!((m["%1"].as_str(), m["%2"].as_str()), ("olá\n$ \n", "outra\n"));
+    }
+
+    /// Captura em lote com tmux real (pula sem tmux).
+    #[test]
+    fn captura_em_lote_real() {
+        if crate::harness::which("tmux").is_none() {
+            return;
+        }
+        let names: Vec<String> = (0..2).map(|i| format!("kabul-test-perf-cap-{}-{i}", std::process::id())).collect();
+        for (i, n) in names.iter().enumerate() {
+            new_session(n, Some("/tmp"), Some(&format!("sh -c 'echo marca-{i}; sleep 30'"))).unwrap();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let panes: Vec<PaneExt> = list_panes_ext().unwrap().into_iter().filter(|p| names.contains(&p.pane.session)).collect();
+        let ids: Vec<&str> = panes.iter().map(|p| p.pane.pane_id.as_str()).collect();
+        let m = capture_many(&ids);
+        for n in &names {
+            let _ = kill_session(n);
+        }
+        assert_eq!(panes.len(), 2);
+        assert!(panes.iter().all(|p| p.activity > 0 && p.cols > 0));
+        for (i, p) in panes.iter().enumerate() {
+            let want = format!("marca-{}", names.iter().position(|n| *n == p.pane.session).unwrap());
+            assert!(m.get(&p.pane.pane_id).is_some_and(|t| t.contains(&want)), "{i}: {m:?}");
+        }
     }
 
     #[test]
@@ -271,13 +403,7 @@ pub mod stream {
 
     impl TermStream {
         pub fn attach(session: &str) -> Result<Self> {
-            let mut child = crate::tmux::cmd()
-                .args(["-C", "attach-session", "-t", &crate::tmux::exact(session)])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()
-                .context("tmux -C")?;
+            let mut child = crate::tmux::cmd().args(["-C", "attach-session", "-t", &crate::tmux::exact(session)]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().context("tmux -C")?;
             let stdin = child.stdin.take().context("stdin")?;
             let out = child.stdout.take().context("stdout")?;
             let (tx, rx) = channel();
@@ -302,6 +428,7 @@ pub mod stream {
             self.cmd(&format!("refresh-client -C {cols}x{rows}"))
         }
         pub fn input(&mut self, pane: &str, data: &[u8]) -> Result<()> {
+            anyhow::ensure!(crate::tmux::is_pane_id(pane), "pane inválido: {pane:?}");
             for chunk in data.chunks(256) {
                 let hex: Vec<String> = chunk.iter().map(|b| format!("{b:02x}")).collect();
                 self.cmd(&format!("send-keys -t {pane} -H {}", hex.join(" ")))?;
@@ -352,6 +479,32 @@ pub mod stream {
             drop(t);
             let _ = crate::tmux::cmd().args(["kill-session", "-t", &name]).status();
             assert!(String::from_utf8_lossy(&got).contains("kabul-42"), "{}", String::from_utf8_lossy(&got));
+        }
+
+        /// Segurança: o "pane" vai para a linha de comando do tmux -C; texto com `;` ou quebra de linha
+        /// não pode virar comando (ex.: `run-shell`). Com tmux real, confere que nada rodou.
+        #[test]
+        fn pane_nao_injeta_comandos_no_modo_de_controle() {
+            assert!(crate::tmux::is_pane_id("%0") && crate::tmux::is_pane_id("%123"));
+            for bad in ["", "%", "0", "%1 ", "%1;run-shell x", "%1\nrun-shell x", "-t", "%1a", "sess:0.1"] {
+                assert!(!crate::tmux::is_pane_id(bad), "{bad:?}");
+            }
+            if crate::harness::which("tmux").is_none() {
+                return;
+            }
+            let name = format!("kabul-test-inj-{}", std::process::id());
+            let marker = std::env::temp_dir().join(format!("kabul-inj-{}", std::process::id()));
+            let _ = std::fs::remove_file(&marker);
+            crate::tmux::new_session(&name, None, Some("sh")).unwrap();
+            let pane = crate::tmux::list_panes().unwrap().into_iter().find(|p| p.session == name).unwrap().pane_id;
+            let mut t = TermStream::attach(&name).unwrap();
+            for evil in [format!("{pane} -H 61 ; run-shell 'touch {}'", marker.display()), format!("{pane}\nrun-shell 'touch {}'", marker.display())] {
+                assert!(t.input(&evil, b"x").is_err(), "{evil:?}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            drop(t);
+            let _ = crate::tmux::cmd().args(["kill-session", "-t", &name]).status();
+            assert!(!marker.exists(), "comando injetado rodou");
         }
     }
 }

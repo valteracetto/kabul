@@ -5,6 +5,7 @@ import { pairWith, parsePairLink } from "../transport/credentials";
 import { k, type Device, type FoundMachine, type RemoteStatus, type Ticket } from "../mobile/kabuld";
 import { TicketCard, useCountdown } from "../mobile/ui";
 import { machines, normalizeUrl, saveMachines } from "./machines";
+import { RemoteHttps } from "./RemoteHttps";
 import "../mobile/mobile.css";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -64,7 +65,8 @@ export function RemotePanel({ onError }: { onError: (e: string) => void }) {
       {running && (
         <>
           <h3>Parear um celular</h3>
-          <PairQr />
+          {/* Endereço novo (ex.: HTTPS ligado): QR novo já com ele. */}
+          <PairQr key={st?.base_url ?? ""} />
           <h3>Dispositivos pareados</h3>
           <Devices onError={onError} />
           <h3>Convidar alguém para um workspace</h3>
@@ -77,7 +79,7 @@ export function RemotePanel({ onError }: { onError: (e: string) => void }) {
   );
 }
 
-function NetRow({ st, onChange, onError }: { st: RemoteStatus; onChange: () => void; onError: (e: string) => void }) {
+function NetRow({ st, onChange }: { st: RemoteStatus; onChange: () => Promise<void> | void; onError: (e: string) => void }) {
   const ts = st.net;
   const tailnet = ts.kind === "tailscale" && ts.up;
   return (
@@ -89,15 +91,7 @@ function NetRow({ st, onChange, onError }: { st: RemoteStatus; onChange: () => v
         </div>
         <span className={"badge" + (tailnet ? " ok" : "")} data-testid="remote-net-badge">{tailnet ? "conectado" : "só local"}</span>
       </div>
-      {tailnet && (
-        <div className="set-row">
-          <div>
-            <div>HTTPS pelo Tailscale</div>
-            <div className="dim small">No iPhone, notificações, ditado e "Adicionar à Tela de Início" exigem HTTPS. Liga o <code>tailscale serve</code> apontando para o kabuld (só na sua tailnet).</div>
-          </div>
-          <button className="btn" onClick={() => k.https(!ts.https_url).then(onChange, (e) => onError(String(e)))} data-testid="remote-https">{ts.https_url ? "Desligar HTTPS" : "Ligar HTTPS"}</button>
-        </div>
-      )}
+      {tailnet && <RemoteHttps net={ts} onChange={onChange} />}
       <div className="dim small">Credenciais guardadas em: {st.secrets === "keyring" ? "cofre do sistema" : st.secrets}. Notificações ativas: {st.push}.</div>
     </>
   );

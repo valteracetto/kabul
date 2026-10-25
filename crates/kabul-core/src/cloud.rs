@@ -1,7 +1,7 @@
-//! Sessões do Claude na nuvem e espelhamento (remote-control), rodando no tmux.
+//! Sessões do Claude na nuvem e espelhamento (remote-control), rodando num terminal do Kabul.
 //! `claude --cloud` exige terminal interativo (confirmado: "requires an interactive terminal"),
-//! por isso roda numa sessão tmux e a saída é lida por capture-pane.
-use crate::harness::{find_urls, shell_quote, strip_ansi, ClaudeCode, Harness};
+//! por isso roda numa sessão do backend de terminal (tmux ou PTY) e a saída é lida pela captura.
+use crate::harness::{find_urls, strip_ansi, ClaudeCode, CmdSpec, Harness};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Default)]
@@ -15,22 +15,35 @@ pub struct CloudInfo {
     pub runs_on: Option<crate::runs_on::RunsOn>,
 }
 
-/// Linha de shell para criar a sessão de nuvem.
+/// Comando que cria a sessão de nuvem (cada backend de terminal põe as aspas do seu shell).
+pub fn cloud_spec(prompt: &str, environment: Option<&str>) -> CmdSpec {
+    ClaudeCode.cloud_run(prompt, environment).unwrap_or_else(|| CmdSpec::new("claude", ["--cloud", prompt]))
+}
+
+/// Linha de shell (sh) para criar a sessão de nuvem.
 pub fn cloud_line(prompt: &str, environment: Option<&str>) -> String {
-    ClaudeCode.cloud_run(prompt, environment).map(|c| c.shell_line()).unwrap_or_default()
+    cloud_spec(prompt, environment).shell_line()
+}
+
+pub fn teleport_spec(id: &str) -> CmdSpec {
+    CmdSpec::new("claude", ["--teleport", id])
 }
 
 pub fn teleport_line(id: &str) -> String {
-    format!("claude --teleport {}", shell_quote(id))
+    teleport_spec(id).shell_line()
 }
 
 /// Sessão interativa espelhada em claude.ai/code e no app do celular.
-pub fn remote_control_line(name: &str, resume: Option<&str>) -> String {
-    let mut s = format!("claude --remote-control {}", shell_quote(name));
+pub fn remote_control_spec(name: &str, resume: Option<&str>) -> CmdSpec {
+    let mut a = vec!["--remote-control".to_string(), name.to_string()];
     if let Some(r) = resume {
-        s.push_str(&format!(" --resume {}", shell_quote(r)));
+        a.extend(["--resume".to_string(), r.to_string()]);
     }
-    s
+    CmdSpec::new("claude", a)
+}
+
+pub fn remote_control_line(name: &str, resume: Option<&str>) -> String {
+    remote_control_spec(name, resume).shell_line()
 }
 
 /// Lê a saída do `claude --cloud` (capturada do tmux).

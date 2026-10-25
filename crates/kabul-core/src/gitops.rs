@@ -8,10 +8,9 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
-use std::process::Command;
 
 fn run(dir: &Path, bin: &str, args: &[&str]) -> Result<(bool, String, String)> {
-    let o = Command::new(bin).args(args).current_dir(dir).output().with_context(|| format!("falha ao executar {bin}"))?;
+    let o = crate::shell::command(bin).args(args).current_dir(dir).output().with_context(|| format!("falha ao executar {bin}"))?;
     Ok((o.status.success(), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned()))
 }
 
@@ -59,7 +58,21 @@ fn sequence(dir: &Path, steps: &[(&str, Vec<&str>)], dry_run: bool) -> Result<Ou
 /// Remote do repo (Configurações › Git › Remote; padrão `origin`).
 pub fn remote(repo: &Repo) -> String {
     let (s, _) = crate::settings::load(Path::new(&repo.path), &repo.default_branch);
-    s.remote.filter(|r| !r.trim().is_empty()).unwrap_or_else(|| "origin".into())
+    // Vem do settings.toml versionado do repo: nome com `-` na frente viraria opção do git.
+    s.remote.filter(|r| valid_remote(r)).unwrap_or_else(|| "origin".into())
+}
+
+pub fn valid_remote(r: &str) -> bool {
+    !r.is_empty() && r.len() <= 100 && !r.starts_with('-') && r.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+}
+
+/// Caminho relativo dentro do workspace (sem `..`, absoluto ou opção). Arquivos de fora nunca entram
+/// no diff (no kabuld, convidados chamam `workspace_file_diff`).
+pub fn safe_rel(file: &str) -> Result<&str> {
+    let p = Path::new(file);
+    let ok = !file.is_empty() && !file.starts_with('-') && !file.contains('\0') && p.is_relative() && p.components().all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir));
+    anyhow::ensure!(ok, "caminho inválido: {file:?}");
+    Ok(file)
 }
 
 /// Remotes configurados no repo (`git remote`).
@@ -154,7 +167,13 @@ pub fn pr_checks(ws: &Workspace) -> Result<(Vec<Value>, Option<String>)> {
         }
         Err(_) => {
             let e = err.trim().to_string();
-            let msg = if e.contains("no pull requests found") || e.contains("no default remote") || e.contains("not a git repository") || e.contains("none of the git remotes") { "Sem PR aberto para esta branch.".to_string() } else if e.is_empty() { "Sem checks.".into() } else { e };
+            let msg = if e.contains("no pull requests found") || e.contains("no default remote") || e.contains("not a git repository") || e.contains("none of the git remotes") {
+                "Sem PR aberto para esta branch.".to_string()
+            } else if e.is_empty() {
+                "Sem checks.".into()
+            } else {
+                e
+            };
             Ok((vec![], Some(msg)))
         }
     }
@@ -226,6 +245,7 @@ pub fn changes(repo: &Repo, ws: &Workspace, scope: Scope) -> Result<Vec<FileChan
 
 /// Diff de um arquivo no escopo. `ignore_ws` = "Hide whitespace changes" (`-w`).
 pub fn file_diff(repo: &Repo, ws: &Workspace, file: &str, scope: Scope, ignore_ws: bool) -> Result<String> {
+    let file = safe_rel(file)?;
     let p = Path::new(&ws.path);
     let r = range(repo, ws, scope)?;
     let mut args = vec!["diff", "--no-color"];
@@ -244,8 +264,9 @@ pub fn file_diff(repo: &Repo, ws: &Workspace, file: &str, scope: Scope, ignore_w
 
 /// Descarta as mudanças de um arquivo: rastreado volta ao HEAD; não rastreado é apagado.
 pub fn discard(ws: &Workspace, file: &str) -> Result<()> {
+    let _inv = Invalidate(&ws.path);
     let p = Path::new(&ws.path);
-    anyhow::ensure!(!file.contains("..") && !file.starts_with('/'), "caminho inválido");
+    let file = safe_rel(file)?;
     let tracked = git(p, &["ls-files", "--error-unmatch", "--", file]).is_ok();
     if tracked {
         git(p, &["checkout", "HEAD", "--", file])?;
@@ -296,20 +317,12 @@ pub fn status(repo: &Repo, ws: &Workspace) -> Result<GitStatus> {
             conflicts = out.lines().skip(1).filter(|l| !l.is_empty()).map(String::from).collect();
         }
     }
-    Ok(GitStatus {
-        branch,
-        target: target(repo, ws),
-        upstream,
-        dirty: porcelain.lines().filter(|l| !l.is_empty()).count() as u32,
-        ahead,
-        behind,
-        behind_target: count(&format!("HEAD..{tref}")),
-        conflicts,
-    })
+    Ok(GitStatus { branch, target: target(repo, ws), upstream, dirty: porcelain.lines().filter(|l| !l.is_empty()).count() as u32, ahead, behind, behind_target: count(&format!("HEAD..{tref}")), conflicts })
 }
 
 /// Traz os commits da própria branch no remote (não da alvo).
 pub fn pull(ws: &Workspace, remote: &str, dry_run: bool) -> Result<Outcome> {
+    let _inv = Invalidate(&ws.path);
     let p = Path::new(&ws.path);
     let branch = git(p, &["branch", "--show-current"]).unwrap_or_else(|_| ws.branch.clone());
     sequence(p, &[("git", vec!["pull", "--no-rebase", "--no-edit", remote, branch.as_str()])], dry_run)
@@ -317,6 +330,7 @@ pub fn pull(ws: &Workspace, remote: &str, dry_run: bool) -> Result<Outcome> {
 
 /// `git push [-u] <remote> HEAD` (o `-u` vem de Configurações › Git › "Set upstream").
 pub fn push(ws: &Workspace, remote: &str, set_upstream: bool, dry_run: bool) -> Result<Outcome> {
+    let _inv = Invalidate(&ws.path);
     let mut args = vec!["push"];
     if set_upstream {
         args.push("-u");
@@ -397,8 +411,15 @@ fn st(v: &Value, k: &str) -> String {
 pub fn parse_pr(json: &str) -> Option<PrInfo> {
     let v: Value = serde_json::from_str(json).ok()?;
     let author = |c: &Value| c.get("author").and_then(|a| a.get("login")).and_then(Value::as_str).unwrap_or("").to_string();
-    let mut comments: Vec<PrComment> = v.get("comments").and_then(Value::as_array).into_iter().flatten().map(|c| PrComment { author: author(c), body: st(c, "body"), url: Some(st(c, "url")).filter(|s| !s.is_empty()), kind: "comment".into(), ..Default::default() }).collect();
-    comments.extend(v.get("reviews").and_then(Value::as_array).into_iter().flatten().filter(|r| !st(r, "body").trim().is_empty() || st(r, "state") == "CHANGES_REQUESTED" || st(r, "state") == "APPROVED").map(|r| PrComment { author: author(r), body: st(r, "body"), kind: "review".into(), state: Some(st(r, "state")), ..Default::default() }));
+    let mut comments: Vec<PrComment> =
+        v.get("comments").and_then(Value::as_array).into_iter().flatten().map(|c| PrComment { author: author(c), body: st(c, "body"), url: Some(st(c, "url")).filter(|s| !s.is_empty()), kind: "comment".into(), ..Default::default() }).collect();
+    comments.extend(v.get("reviews").and_then(Value::as_array).into_iter().flatten().filter(|r| !st(r, "body").trim().is_empty() || st(r, "state") == "CHANGES_REQUESTED" || st(r, "state") == "APPROVED").map(|r| PrComment {
+        author: author(r),
+        body: st(r, "body"),
+        kind: "review".into(),
+        state: Some(st(r, "state")),
+        ..Default::default()
+    }));
     Some(PrInfo {
         number: v.get("number")?.as_u64()? as u32,
         title: st(&v, "title"),
@@ -458,6 +479,7 @@ pub fn pr_view(ws: &Workspace) -> Result<Option<PrInfo>> {
 
 /// `squash` (padrão), `merge` ou `rebase`.
 pub fn pr_merge(ws: &Workspace, method: &str, delete_branch: bool, dry_run: bool) -> Result<Outcome> {
+    let _inv = Invalidate(&ws.path);
     let mut args = vec!["pr", "merge", merge_flag(method)];
     if delete_branch {
         args.push("--delete-branch");
@@ -466,15 +488,18 @@ pub fn pr_merge(ws: &Workspace, method: &str, delete_branch: bool, dry_run: bool
 }
 
 pub fn pr_ready(ws: &Workspace, dry_run: bool) -> Result<Outcome> {
+    let _inv = Invalidate(&ws.path);
     sequence(Path::new(&ws.path), &[("gh", vec!["pr", "ready"])], dry_run)
 }
 
 pub fn pr_edit(ws: &Workspace, title: &str, body: &str, dry_run: bool) -> Result<Outcome> {
+    let _inv = Invalidate(&ws.path);
     sequence(Path::new(&ws.path), &[("gh", vec!["pr", "edit", "--title", title, "--body", body])], dry_run)
 }
 
 /// Fecha o PR (usado em "Archive and close PR").
 pub fn pr_close(ws: &Workspace, dry_run: bool) -> Result<Outcome> {
+    let _inv = Invalidate(&ws.path);
     sequence(Path::new(&ws.path), &[("gh", vec!["pr", "close"])], dry_run)
 }
 
@@ -492,6 +517,7 @@ pub fn run_job(link: &str) -> Option<(String, Option<String>)> {
 
 /// Re-roda os jobs que falharam nos runs dos links dados (um `gh run rerun --failed` por run).
 pub fn checks_rerun(ws: &Workspace, links: &[String], dry_run: bool) -> Result<Outcome> {
+    let _inv = Invalidate(&ws.path);
     let mut runs: Vec<String> = links.iter().filter_map(|l| run_job(l).map(|(r, _)| r)).collect();
     runs.sort();
     runs.dedup();
@@ -528,12 +554,69 @@ pub fn tail(s: &str, n: usize) -> String {
     lines[lines.len().saturating_sub(n)..].join("\n")
 }
 
+// ---------------- cache (TTL) ----------------
+
+/// `git status` são ~7 processos git; com o frontend consultando vários workspaces, o mesmo
+/// resultado serve por alguns segundos (e o watcher de arquivos invalida antes, quando houver).
+pub const STATUS_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+/// `gh pr view` / `gh pr checks` vão à rede: 30 s / 20 s (ações do Kabul invalidam na hora).
+pub const PR_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+pub const CHECKS_TTL: std::time::Duration = std::time::Duration::from_secs(20);
+
+static STATUS: crate::cache::TtlCache<GitStatus> = crate::cache::TtlCache::new(2048);
+static PR: crate::cache::TtlCache<Option<PrInfo>> = crate::cache::TtlCache::new(2048);
+static CHECKS: crate::cache::TtlCache<(Vec<Value>, Option<String>)> = crate::cache::TtlCache::new(2048);
+
+fn key(ws: &Workspace, what: &str) -> String {
+    format!("{}\u{0}{}\u{0}{what}", ws.path, ws.branch)
+}
+
+/// Esquece o que estiver guardado do workspace (arquivos mudaram, push, merge...).
+pub fn invalidate(ws_path: &str) {
+    let prefix = format!("{ws_path}\u{0}");
+    STATUS.invalidate(&prefix);
+    PR.invalidate(&prefix);
+    CHECKS.invalidate(&prefix);
+}
+
+/// Invalida ao sair da função (depois da escrita, para não guardar o estado de antes).
+struct Invalidate<'a>(&'a str);
+impl Drop for Invalidate<'_> {
+    fn drop(&mut self) {
+        invalidate(self.0);
+    }
+}
+
+pub fn status_cached(repo: &Repo, ws: &Workspace) -> Result<GitStatus> {
+    STATUS.get_or(&key(ws, "status"), STATUS_TTL, || status(repo, ws))
+}
+
+pub fn pr_view_cached(ws: &Workspace) -> Result<Option<PrInfo>> {
+    PR.get_or(&key(ws, "pr"), PR_TTL, || pr_view(ws))
+}
+
+pub fn pr_checks_cached(ws: &Workspace) -> Result<(Vec<Value>, Option<String>)> {
+    CHECKS.get_or(&key(ws, "checks"), CHECKS_TTL, || pr_checks(ws))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn caminhos_e_remotes_seguros() {
+        for ok in ["a.txt", "src/main.rs", "./x/y", "com espaço.md"] {
+            assert!(super::safe_rel(ok).is_ok(), "{ok}");
+        }
+        for bad in ["", "/etc/passwd", "../x", "a/../../b", "-x", "--output=/tmp/x"] {
+            assert!(super::safe_rel(bad).is_err(), "{bad}");
+        }
+        assert!(super::valid_remote("origin") && super::valid_remote("upstream-2"));
+        assert!(!super::valid_remote("--upload-pack=x") && !super::valid_remote("a b") && !super::valid_remote(""));
+    }
+
     use super::*;
 
     fn g(d: &Path, a: &[&str]) {
-        let o = Command::new("git").arg("-C").arg(d).args(["-c", "user.name=dev", "-c", "user.email=dev@example.com"]).args(a).output().unwrap();
+        let o = crate::shell::command("git").arg("-C").arg(d).args(["-c", "user.name=dev", "-c", "user.email=dev@example.com"]).args(a).output().unwrap();
         assert!(o.status.success(), "{a:?}: {}", String::from_utf8_lossy(&o.stderr));
     }
 
@@ -672,7 +755,28 @@ mod tests {
         assert_eq!(run_job("https://github.com/dev/demo/actions/runs/123/job/456"), Some(("123".into(), Some("456".into()))));
         assert_eq!(run_job("https://github.com/dev/demo/actions/runs/99?pr=1"), Some(("99".into(), None)));
         assert_eq!(run_job("https://vercel.com/x"), None);
-        let ws = Workspace { id: "w".into(), repo_id: "r".into(), name: "kabul".into(), branch: "dev/kabul".into(), path: std::env::temp_dir().display().to_string(), archived: false, created_at: 0, title: None, status: "in-progress".into(), state: "ready".into(), pinned: false, notes: String::new(), port: 41000, target_branch: None, pr_url: None, archive_checkpoint: None, user_set_branch: false, files_copied: 0, linear: None, ..Default::default() };
+        let ws = Workspace {
+            id: "w".into(),
+            repo_id: "r".into(),
+            name: "kabul".into(),
+            branch: "dev/kabul".into(),
+            path: std::env::temp_dir().display().to_string(),
+            archived: false,
+            created_at: 0,
+            title: None,
+            status: "in-progress".into(),
+            state: "ready".into(),
+            pinned: false,
+            notes: String::new(),
+            port: 41000,
+            target_branch: None,
+            pr_url: None,
+            archive_checkpoint: None,
+            user_set_branch: false,
+            files_copied: 0,
+            linear: None,
+            ..Default::default()
+        };
         let o = checks_rerun(&ws, &["https://github.com/dev/demo/actions/runs/123/job/1".into(), "https://github.com/dev/demo/actions/runs/123/job/2".into(), "https://github.com/dev/demo/actions/runs/124/job/3".into()], true).unwrap();
         assert_eq!(o.commands, ["gh run rerun 123 --failed", "gh run rerun 124 --failed"]);
         assert_eq!(pr_merge(&ws, "squash", true, true).unwrap().commands, ["gh pr merge --squash --delete-branch"]);

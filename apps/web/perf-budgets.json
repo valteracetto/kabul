@@ -1,0 +1,20 @@
+{
+  "_comment": "Orçamentos do npm run perf (100 workspaces, 30 agentes de carga, conversa de 2.000 mensagens; docs/escala.md). Tempos em ms, CPU em % de um núcleo, memória em MB, JS em KB gzip. Métricas com 'fps' são mínimos; as outras, máximos. Passar de qualquer um reprova.",
+  "ttu_ms": 1000,
+  "idle_cpu_pct": 2,
+  "load_cpu_pct": 30,
+  "load_fps": 50,
+  "load_jank_pct": 5,
+  "load_commits_per_s": 70,
+  "load_renders_per_s": 1500,
+  "switch_p50_ms": 100,
+  "switch_p95_ms": 150,
+  "typing_p95_ms": 33,
+  "typing_max_ms": 50,
+  "long_chat_open_ms": 250,
+  "scroll_fps_min": 50,
+  "scroll_jank_pct": 5,
+  "heap_mb": 60,
+  "dom_nodes": 15000,
+  "main_js_kb_gz": 200
+}

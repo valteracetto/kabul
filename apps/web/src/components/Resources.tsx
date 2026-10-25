@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { KeptProcesses } from "./KeptProcesses";
 import { createPortal } from "react-dom";
 import { api, type ResourceNode, type ResourceSnapshot, type Workspace } from "../api";
 import { useDismiss } from "./useDismiss";
@@ -128,6 +129,7 @@ export function ResourcesChip({ workspaces, onOpen }: { workspaces: Workspace[];
             })}
           </div>
           {rows.length > FIRST && <button className="res-all" onClick={() => setAll(!all)} data-testid="res-all">{all ? "Mostrar menos" : `Mostrar tudo (${rows.length})`}</button>}
+          <KeptProcesses every={2000} wsName={wsName} />
         </div>,
         document.body,
       )}

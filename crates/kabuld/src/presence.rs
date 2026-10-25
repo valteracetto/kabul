@@ -42,7 +42,10 @@ impl Presence {
         let old_ws = {
             let mut m = self.conns.lock().unwrap();
             let old = m.get(&conn).and_then(|p| p.workspace.clone());
-            m.insert(conn, Present { conn, id: who.id.clone(), name: who.user.clone(), device: who.device.clone(), color: who.color.clone(), role: who.role, workspace: workspace.clone(), target, typing, typing_until: if typing { now_ms() + 5000 } else { 0 } });
+            m.insert(
+                conn,
+                Present { conn, id: who.id.clone(), name: who.user.clone(), device: who.device.clone(), color: who.color.clone(), role: who.role, workspace: workspace.clone(), target, typing, typing_until: if typing { now_ms() + 5000 } else { 0 } },
+            );
             old
         };
         if old_ws != workspace {

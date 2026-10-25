@@ -4,7 +4,6 @@ use anyhow::{bail, Result};
 use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
-use std::process::Command;
 
 const SERVICE: &str = "kabul-github";
 
@@ -38,33 +37,29 @@ pub fn parse_status(json: &str) -> Vec<GhAccount> {
 }
 
 pub fn status() -> Vec<GhAccount> {
-    Command::new(crate::harness::which("gh").unwrap_or_else(|| "gh".into())).args(["auth", "status", "--json", "hosts"]).output().map(|o| parse_status(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default()
+    crate::shell::command(crate::harness::which("gh").unwrap_or_else(|| "gh".into())).args(["auth", "status", "--json", "hosts"]).output().map(|o| parse_status(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default()
 }
 
 pub fn switch(login: &str) -> Result<()> {
-    let o = Command::new("gh").args(["auth", "switch", "-h", "github.com", "-u", login]).output()?;
+    let o = crate::shell::command(crate::harness::which("gh").unwrap_or_else(|| "gh".into())).args(["auth", "switch", "-h", "github.com", "-u", login]).output()?;
     if !o.status.success() {
         bail!("gh auth switch: {}", String::from_utf8_lossy(&o.stderr).trim());
     }
     Ok(())
 }
 
+/// Token no cofre do sistema (Keychain, Credential Manager, Secret Service).
 pub fn get_token() -> Option<String> {
-    let o = Command::new("security").args(["find-generic-password", "-s", SERVICE, "-w"]).output().ok()?;
-    let k = String::from_utf8_lossy(&o.stdout).trim().to_string();
-    (o.status.success() && !k.is_empty()).then_some(k)
+    crate::secrets::get(SERVICE)
 }
 
+/// Grava o token sem passá-lo na linha de comando ([`crate::secrets`]; no macOS, [`crate::keychain`]).
 pub fn set_token(token: &str) -> Result<()> {
-    let o = Command::new("security").args(["add-generic-password", "-U", "-s", SERVICE, "-a", "kabul", "-w", token.trim()]).output()?;
-    if !o.status.success() {
-        bail!("Keychain: {}", String::from_utf8_lossy(&o.stderr).trim());
-    }
-    Ok(())
+    crate::secrets::set(SERVICE, token)
 }
 
 pub fn clear_token() {
-    let _ = Command::new("security").args(["delete-generic-password", "-s", SERVICE]).output();
+    crate::secrets::delete(SERVICE)
 }
 
 /// `owner/repo` a partir da URL do remote origin (https ou ssh).
@@ -86,11 +81,11 @@ pub struct RepoAccess {
 
 /// Verifica se a conta ativa enxerga o repo (`gh repo view --json viewerPermission`).
 pub fn repo_access(repo: &Path) -> RepoAccess {
-    let remote = Command::new("git").arg("-C").arg(repo).args(["remote", "get-url", "origin"]).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let remote = crate::shell::command("git").arg("-C").arg(repo).args(["remote", "get-url", "origin"]).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
     let Some(slug) = remote.as_deref().and_then(slug_from_remote) else {
         return RepoAccess { slug: None, ok: false, permission: None, message: Some(if remote.is_some() { "O remote origin não é do GitHub.".into() } else { "O repositório não tem remote origin.".into() }) };
     };
-    let o = Command::new("gh").args(["repo", "view", &slug, "--json", "viewerPermission", "-q", ".viewerPermission"]).output();
+    let o = crate::shell::command("gh").args(["repo", "view", &slug, "--json", "viewerPermission", "-q", ".viewerPermission"]).output();
     match o {
         Ok(o) if o.status.success() => {
             let p = String::from_utf8_lossy(&o.stdout).trim().to_string();

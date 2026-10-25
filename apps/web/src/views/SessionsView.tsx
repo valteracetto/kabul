@@ -1,7 +1,9 @@
+import { KeptProcesses } from "../components/KeptProcesses";
 import { useEffect, useState } from "react";
 import { api, type ExternalSessions, type Model, type Sessions, type Workspace } from "../api";
 import { RunsOnBadge, cloudList, cloudRunsOn } from "../components/RunsOn";
 import { ago, HARNESS_OF, modelFor, workspaceFor } from "../components/external";
+import { LazyChunks } from "../components/LazyChunks";
 import { mountedWs, pendingFork, pendingForkWs, type PendingFork } from "../components/chatPrefs";
 import type { Route } from "../App";
 
@@ -53,11 +55,12 @@ export function SessionsView({ onError, onRoute }: { onError: (e: string) => voi
   return (
     <section className="page">
       <header className="page-head" data-tauri-drag-region><h2>Painel</h2><span className="dim">atualiza a cada 3 s</span></header>
+      <KeptProcesses wsName={Object.fromEntries(wss.map((w) => [w.id, w.title || w.name]))} onError={onError} />
       <h3>tmux <span className="count">{s?.tmux.length ?? 0}</span></h3>
       <table>
         <thead><tr><th>pane</th><th>agente</th><th>sessão</th><th>comando</th><th>pasta</th></tr></thead>
-        <tbody>
-          {s?.tmux.map((p) => (
+        {/* Centenas de panes com muitos workspaces: blocos de linhas desenhados perto da área visível. */}
+        <LazyChunks table={5} count={s?.tmux.length ?? 0} chunk={100} rowPx={34} render={(a, b) => s!.tmux.slice(a, b).map((p) => (
             <tr key={p.pane_id}>
               <td><code>{p.pane_id}</code></td>
               <td><span className={"agent ag-" + p.agent}>{p.agent}</span></td>
@@ -65,9 +68,8 @@ export function SessionsView({ onError, onRoute }: { onError: (e: string) => voi
               <td>{p.command}</td>
               <td className="path">{p.path}</td>
             </tr>
-          ))}
-          {s && s.tmux.length === 0 && <tr><td colSpan={5} className="dim">Nenhum servidor tmux rodando.</td></tr>}
-        </tbody>
+          ))} />
+        {s && s.tmux.length === 0 && <tbody><tr><td colSpan={5} className="dim">Nenhum servidor tmux rodando.</td></tr></tbody>}
       </table>
 
       <h3>Fora do Kabul <span className="count">{ext?.running.length ?? 0}</span></h3>
@@ -137,8 +139,7 @@ export function SessionsView({ onError, onRoute }: { onError: (e: string) => voi
       {s?.imported_error && <div className="dim">indisponível: {s.imported_error}</div>}
       <table>
         <thead><tr><th>status</th><th>agente</th><th>modelo</th><th>título</th><th>workspace</th></tr></thead>
-        <tbody>
-          {s?.imported_sessions.slice(0, 200).map((c) => (
+        <LazyChunks table={5} count={s?.imported_sessions.length ?? 0} chunk={100} rowPx={34} render={(a, b) => s!.imported_sessions.slice(a, b).map((c) => (
             <tr key={c.id}>
               <td><span className={"status " + (c.status ?? "")}><i />{c.status ?? "—"}</span></td>
               <td><span className={"agent ag-" + (c.agent_type ?? "claude")}>{c.agent_type ?? "claude"}</span></td>
@@ -146,8 +147,7 @@ export function SessionsView({ onError, onRoute }: { onError: (e: string) => voi
               <td>{c.title ?? ""}</td>
               <td className="path">{wsName(c.workspace_id)}</td>
             </tr>
-          ))}
-        </tbody>
+          ))} />
       </table>
     </section>
   );

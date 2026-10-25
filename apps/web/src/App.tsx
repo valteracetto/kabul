@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { cronMatches, loadRoutines, parseCron, PR_EVENTS, saveRoutines, type Routine } from "./components/routines";
+import { lastNotify, parseKabulLink } from "./components/links";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api, wsTitle, type Repo, type Workspace } from "./api";
 import { Sidebar } from "./views/Sidebar";
-import { ConfirmHost, confirmDialog } from "./components/Confirm";
+import { ConfirmHost, confirmClosing, liveChats } from "./components/Confirm";
 import { Resizer, usePanelSize } from "./components/Resizer";
 import { WorkspaceView } from "./views/WorkspaceView";
-import { SessionsView } from "./views/SessionsView";
-import { SettingsView } from "./views/SettingsView";
-import { LocalModelsView } from "./views/LocalModelsView";
 import { LinearPicker } from "./components/LinearPicker";
 import { CreateModal } from "./components/CreateModal";
 import { IBranch } from "./icons";
@@ -14,11 +13,35 @@ import { cycleTheme } from "./theme";
 import { CloneDialog, QuickStartDialog } from "./components/CloneDialog";
 import { HelpMenu } from "./components/HelpMenu";
 import { FeedbackDialog } from "./components/Feedback";
-import { DiagnosticsView } from "./views/DiagnosticsView";
 import { touchWorkspace, workspaceLink } from "./views/Sidebar";
 import { Palette } from "./components/Palette";
+import { chatStore, statusOf, useWorkspaceAgents, type WsAgent } from "./components/chatStore";
+import { UpdateBanner } from "./components/Updates";
 
-export type AgentState = "working" | "waiting";
+// Telas fora do caminho principal: carregadas sob demanda (o JS inicial fica só com barra lateral e workspace).
+const SessionsView = lazy(() => import("./views/SessionsView").then((m) => ({ default: m.SessionsView })));
+const SettingsView = lazy(() => import("./views/SettingsView").then((m) => ({ default: m.SettingsView })));
+const LocalModelsView = lazy(() => import("./views/LocalModelsView").then((m) => ({ default: m.LocalModelsView })));
+const DiagnosticsView = lazy(() => import("./views/DiagnosticsView").then((m) => ({ default: m.DiagnosticsView })));
+const DashboardView = lazy(() => import("./views/DashboardView").then((m) => ({ default: m.DashboardView })));
+const RoutinesView = lazy(() => import("./views/RoutinesView").then((m) => ({ default: m.RoutinesView })));
+const AgentsView = lazy(() => import("./views/AgentsView").then((m) => ({ default: m.AgentsView })));
+const UsageView = lazy(() => import("./views/UsageView").then((m) => ({ default: m.UsageView })));
+
+export type AgentState = WsAgent;
+
+/** Mesmo objeto quando nada mudou: listas novas do backend não re-renderizam linhas e workspaces iguais. */
+function share<T extends { id: string }>(prev: T[], next: T[]): T[] {
+  const old = new Map(prev.map((x) => [x.id, x]));
+  let same = prev.length === next.length;
+  const out = next.map((n, i) => {
+    const o = old.get(n.id);
+    const keep = o && JSON.stringify(o) === JSON.stringify(n) ? o : n;
+    if (keep !== prev[i]) same = false;
+    return keep;
+  });
+  return same ? prev : out;
+}
 
 export type Route =
   | { kind: "workspace"; id: string }
@@ -26,6 +49,10 @@ export type Route =
   | { kind: "settings"; tab?: string; repoId?: string }
   | { kind: "local" }
   | { kind: "diagnostics" }
+  | { kind: "dashboard" }
+  | { kind: "routines" }
+  | { kind: "usage" }
+  | { kind: "agents" }
   | { kind: "home" };
 
 /** Zoom do app: 50% a 300% em passos de 10% (⌘+, ⌘−, ⌘0). Guardado no aparelho. */
@@ -38,6 +65,8 @@ export function applyZoom(step: number) {
 }
 
 export function App() {
+  // Uma inscrição só nos eventos dos agentes, antes de qualquer conversa começar.
+  useState(() => chatStore.init());
   const [repos, setRepos] = useState<Repo[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [stats, setStats] = useState<Record<string, [number, number]>>({});
@@ -50,9 +79,9 @@ export function App() {
     setToasts((t) => (t.some((x) => x.text === e) ? t : [...t, { id, text: e }].slice(-4)));
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 10000);
   }, []);
-  const [palette, setPalette] = useState(false);
+  const [palette, setPalette] = useState<boolean | "archived">(false);
   const [linear, setLinear] = useState(false);
-  const [creating, setCreating] = useState<null | { from?: "prs" | "branches" | "issues"; repo?: string; add?: boolean }>(null);
+  const [creating, setCreating] = useState<null | { from?: "prs" | "branches" | "issues"; repo?: string; add?: boolean; text?: string }>(null);
   const [sidebar, setSidebar] = useState(true);
   const [help, setHelp] = useState(false);
   const [zen, setZen] = useState(false);
@@ -78,18 +107,21 @@ export function App() {
     }
   };
   const side = usePanelSize("sidebar", Math.round(Math.min(420, Math.max(240, window.innerWidth * 0.22))), 200, 520);
-  const [opened, setOpened] = useState<string[]>([]);
-  const [agents, setAgents] = useState<Record<string, AgentState | undefined>>({});
+  // Workspaces montados além do visível: só enquanto uma rotina começa a conversa em segundo plano.
+  const [bg, setBg] = useState<string[]>([]);
+  // Estado dos agentes por workspace vem do registro de conversas (vale com o workspace desmontado).
+  const agents = useWorkspaceAgents();
   const routeRef = useRef<Route>({ kind: "home" });
   sidebarRef.current = sidebar;
   // Fim de turno num workspace que não está na tela: fica "não lido" (negrito na barra lateral).
-  const onAgent = useCallback((id: string, st: AgentState | undefined) => setAgents((a) => {
-    if (a[id] === st) return a;
-    if (st) touchWorkspace(id);
+  const prevAgents = useRef(agents);
+  useEffect(() => {
+    const prev = prevAgents.current;
+    prevAgents.current = agents;
     const r = routeRef.current;
-    if (a[id] && !st && !(r.kind === "workspace" && r.id === id)) api.updateWorkspace(id, { unread: true }).then(() => api.workspaces().then(setWorkspaces), () => {});
-    return { ...a, [id]: st };
-  }), []);
+    for (const id of Object.keys(agents)) if (prev[id] !== agents[id]) touchWorkspace(id);
+    for (const id of Object.keys(prev)) if (!agents[id] && !(r.kind === "workspace" && r.id === id)) api.updateWorkspace(id, { unread: true }).then(() => api.workspaces().then((w) => setWorkspaces((o) => share(o, w))), () => {});
+  }, [agents]);
   // Histórico de navegação (voltar/avançar).
   const [hist, setHist] = useState<{ stack: Route[]; i: number }>({ stack: [{ kind: "home" }], i: 0 });
   const go = useCallback((r: Route) => {
@@ -99,20 +131,25 @@ export function App() {
   const back = () => hist.i > 0 && (setRoute(hist.stack[hist.i - 1]), setHist({ ...hist, i: hist.i - 1 }));
   const fwd = () => hist.i < hist.stack.length - 1 && (setRoute(hist.stack[hist.i + 1]), setHist({ ...hist, i: hist.i + 1 }));
 
+  const setStatsShared = useCallback((n: Record<string, [number, number]>) => setStats((o) => (JSON.stringify(o) === JSON.stringify(n) ? o : n)), []);
   const reload = useCallback(async () => {
     try {
       const [r, w] = await Promise.all([api.repos(), api.workspaces()]);
-      setRepos(r);
-      setWorkspaces(w);
-      api.stats().then(setStats, () => {});
+      setRepos((o) => share(o, r));
+      setWorkspaces((o) => share(o, w));
+      api.stats().then(setStatsShared, () => {});
     } catch (e) {
       setError(String(e));
     }
   }, []);
+  // Com o app ocioso, já baixa o terminal (xterm), para o primeiro workspace abrir sem espera.
+  useEffect(() => void setTimeout(() => void import("./views/TerminalLazy").then((m) => m.loadTerminal()), 1500), []);
   useEffect(() => {
     reload();
-    const t = setInterval(() => api.stats().then(setStats, () => {}), 8000);
-    const off = api.onWorkspaceState(() => reload());
+    const t = setInterval(() => api.stats().then(setStatsShared, () => {}), 8000);
+    // Rajada de mudanças de estado (vários workspaces terminando o setup juntos): uma recarga só.
+    let soon: ReturnType<typeof setTimeout> | null = null;
+    const off = api.onWorkspaceState(() => void (soon ??= setTimeout(() => ((soon = null), void reload()), 60)));
     const openLinear = () => setLinear(true);
     const route = (e: Event) => go((e as CustomEvent).detail);
     const url = (e: Event) => void api.openExternal((e as CustomEvent).detail).catch(() => {});
@@ -138,6 +175,13 @@ export function App() {
     });
     // ⌘Q: com agentes rodando, pergunta antes de sair.
     const offQuit = api.onQuitRequested(() => void quitRef.current());
+    // Barra do Kabul (popover e menu do ícone): mesmas ações dos atalhos; "pausar" = Parar em cada conversa.
+    const offTray = api.onTrayAction(({ action, workspace_id }) => {
+      if (action === "open-workspace" && workspace_id) go({ kind: "workspace", id: workspace_id });
+      else if (action === "new-workspace") setCreating({});
+      else if (action === "usage") go({ kind: "usage" });
+      else if (action === "pause-all") window.dispatchEvent(new CustomEvent("kabul:stop-all", { detail: "*" }));
+    });
     const misc: [string, (e: Event) => void][] = [
       ["kabul:cycle-theme", () => void cycleTheme()],
       ["kabul:toggle-sidebar", () => setSidebar((s) => !s)],
@@ -152,7 +196,7 @@ export function App() {
     window.addEventListener("kabul:open-url", url);
     window.addEventListener("kabul:route", route);
     window.addEventListener("kabul:linear", openLinear);
-    return () => (clearInterval(t), off(), window.removeEventListener("kabul:linear", openLinear), window.removeEventListener("kabul:route", route), window.removeEventListener("kabul:open-url", url), window.removeEventListener("kabul:devtools", devtools), misc.forEach(([n, h]) => window.removeEventListener(n, h)), offMenu(), offQuit());
+    return () => (clearInterval(t), off(), window.removeEventListener("kabul:linear", openLinear), window.removeEventListener("kabul:route", route), window.removeEventListener("kabul:open-url", url), window.removeEventListener("kabul:devtools", devtools), misc.forEach(([n, h]) => window.removeEventListener(n, h)), offMenu(), offQuit(), offTray());
   }, [reload]);
   // Ao abrir, volta à última rota (se o workspace ainda existir e não estiver arquivado).
   const restored = useRef(false);
@@ -169,12 +213,87 @@ export function App() {
   useEffect(() => {
     if (restored.current) localStorage.setItem("kabul.lastRoute", JSON.stringify(route));
     routeRef.current = route;
-    if (route.kind === "workspace" && !opened.includes(route.id)) setOpened((o) => [...o, route.id]);
     if (route.kind === "workspace" && workspaces.find((w) => w.id === route.id)?.unread) api.updateWorkspace(route.id, { unread: false }).then(reload, () => {});
-  }, [route, opened, workspaces]);
+  }, [route, workspaces]);
+  // Workspace em foco ganha prioridade na fila de agentes (backend com limite; sem o comando, ignora).
+  const focusOk = useRef(true);
+  useEffect(() => void (route.kind === "workspace" && focusOk.current && api.agentsFocus(route.id).catch(() => (focusOk.current = false))), [route]);
 
 
   const current = route.kind === "workspace" ? workspaces.find((w) => w.id === route.id && !w.archived) : undefined;
+
+  // Links kabul:// (do sistema ou colados): abrir workspace/conversa, criar workspace, configurações.
+  const openLink = useRef((_: string) => {});
+  openLink.current = (url: string) => {
+    const l = parseKabulLink(url);
+    if (!l) return setError(`Link do Kabul inválido: ${url}`);
+    if (l.kind === "workspace") {
+      if (!workspaces.some((w) => w.id === l.id && !w.archived)) return setError("Workspace do link não encontrado (arquivado?)");
+      go({ kind: "workspace", id: l.id });
+      if (l.session) setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:activate-tab", { detail: l.session })), 150);
+    } else if (l.kind === "settings") go({ kind: "settings", tab: l.tab ?? "geral" });
+    else {
+      const r = repos.find((x) => (l.repo && (x.id === l.repo || x.name === l.repo)) || (l.path && x.path === l.path));
+      setCreating({ repo: r?.id, text: [l.prompt, l.branch && `(branch base: ${l.branch})`, l.linear && `Issue ${l.linear}`].filter(Boolean).join("\n") || undefined });
+    }
+  };
+  useEffect(() => {
+    const off = api.onDeepLink((u) => openLink.current(u));
+    const paste = (e: Event) => openLink.current((e as CustomEvent).detail);
+    window.addEventListener("kabul:open-link", paste);
+    const pal = (e: Event) => setPalette((e as CustomEvent).detail === "archived" ? "archived" : true);
+    window.addEventListener("kabul:palette", pal);
+    // Clique na notificação: o app volta para a frente e abre a conversa que avisou (até 10 min depois).
+    const focus = () => {
+      if (!lastNotify.at || Date.now() - lastNotify.at > 600_000) return;
+      const { ws, session } = lastNotify;
+      lastNotify.at = 0;
+      openLink.current(`kabul://workspace?id=${ws}&session=${session}`);
+    };
+    window.addEventListener("focus", focus);
+    return () => (off(), window.removeEventListener("kabul:open-link", paste), window.removeEventListener("focus", focus), window.removeEventListener("kabul:palette", pal));
+  }, []);
+  // Rotinas locais: cada execução abre uma conversa nova no workspace (montado em segundo plano, sem trocar de tela).
+  const runRoutine = useRef((_r: Routine, _why: string) => {});
+  runRoutine.current = (r, why) => {
+    if (!workspaces.some((w) => w.id === r.workspace && !w.archived)) return setError(`Rotina "${r.name}": o workspace não existe mais`);
+    // Monta o workspace por alguns segundos (se não estiver na tela) só para abrir a conversa; depois ela segue no registro.
+    setBg((o) => (o.includes(r.workspace) ? o : [...o, r.workspace]));
+    setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:new-chat-with", { detail: { ws: r.workspace, text: r.prompt, title: r.name } })), 500);
+    setTimeout(() => setBg((o) => o.filter((x) => x !== r.workspace)), 8000);
+    saveRoutines(loadRoutines().map((x) => (x.id === r.id ? { ...x, runs: [...x.runs, { at: Date.now(), why }].slice(-50) } : x)));
+  };
+  useEffect(() => {
+    let last = "";
+    const cron = () => {
+      const now = new Date();
+      const key = `${now.toDateString()} ${now.getHours()}:${now.getMinutes()}`;
+      if (key === last) return;
+      last = key;
+      for (const r of loadRoutines()) if (r.enabled && r.trigger.kind === "cron") { const c = parseCron(r.trigger.cron); if (c && cronMatches(c, now)) runRoutine.current(r, "horário"); }
+    };
+    // Eventos do PR: compara com o que já viu (a primeira leitura só guarda o estado).
+    const pr = async () => {
+      for (const r of loadRoutines().filter((x) => x.enabled && x.trigger.kind === "pr")) {
+        const t = r.trigger as Extract<Routine["trigger"], { kind: "pr" }>;
+        const info = await api.prView(r.workspace).catch(() => null);
+        if (!info) continue;
+        const checks = t.event === "checks_failed" ? await api.prChecks(r.workspace).catch(() => null) : null;
+        const now = { failing: checks?.checks.filter((c) => c.bucket === "fail").length, state: info.state, comments: info.comments.length };
+        const seen = r.seen;
+        const fire = !!seen && (t.event === "checks_failed" ? (now.failing ?? 0) > 0 && !(seen.failing ?? 0) : t.event === "merged" ? now.state === "MERGED" && seen.state !== "MERGED" : now.comments > (seen.comments ?? 0));
+        saveRoutines(loadRoutines().map((x) => (x.id === r.id ? { ...x, seen: { ...x.seen, ...now } } : x)));
+        if (fire) runRoutine.current(r, PR_EVENTS[t.event]);
+      }
+    };
+    const every = (window as unknown as { __routinePoll?: number }).__routinePoll ?? 60_000;
+    const a = setInterval(cron, 15_000), b = setInterval(pr, every);
+    void pr();
+    return () => (clearInterval(a), clearInterval(b));
+  }, []);
+  // Badge no ícone do app: workspaces com novidade não lida.
+  const unreadCount = workspaces.filter((w) => w.unread && !w.archived).length;
+  useEffect(() => void api.badgeSet(unreadCount).catch(() => {}), [unreadCount]);
 
   /** Arquivar com confirmação: avisa de agentes rodando ("parar e arquivar") e oferece fechar o PR. */
   const archive = useCallback(async (id: string) => {
@@ -182,9 +301,10 @@ export function App() {
     if (!w || w.archived) return;
     const running = agents[id];
     const msg = `Arquivar ${wsTitle(w)}? As mudanças ficam num checkpoint e dá para desarquivar.${running ? "\n\nHá um agente rodando neste workspace: ele será parado." : ""}`;
-    const ok = await confirmDialog(msg, { ok: running ? "Parar agentes e arquivar" : "Arquivar", danger: true, checkbox: w.pr_url ? { key: "kabul.archive.closePr", label: "Fechar o PR também" } : undefined });
+    const chats = [...liveChats.values()].filter((c) => c.ws === id).map((c) => c.chat);
+    const ok = await confirmClosing(chats, msg, { ok: running ? "Parar agentes e arquivar" : "Arquivar", danger: true, ask: true, workspaceId: id, checkbox: w.pr_url ? { key: "kabul.archive.closePr", label: "Fechar o PR também" } : undefined });
     if (!ok) return;
-    if (running) window.dispatchEvent(new CustomEvent("kabul:stop-all", { detail: id }));
+    if (running) await chatStore.stopWorkspace(id);
     try {
       await api.archiveWorkspace(id, !!w.pr_url && localStorage.getItem("kabul.archive.closePr") === "1");
       reload();
@@ -246,10 +366,12 @@ export function App() {
   }, [workspaces, repos, current, reload, hist, archive, agents]);
 
   const onError = useCallback((e: string) => setError(e), []);
+  const openRepoSettings = useCallback((repoId: string) => go({ kind: "settings", tab: "repo", repoId }), [go]);
   const quitRef = useRef(async () => {});
   quitRef.current = async () => {
-    const running = Object.values(agents).filter(Boolean).length;
-    if (running && !(await confirmDialog(`Sair do Kabul? ${running === 1 ? "Há 1 agente rodando; ele será parado" : `Há ${running} agentes rodando; eles serão parados`}.`, { ok: "Parar agentes e sair", danger: true }))) return;
+    const running = chatStore.all().filter((c) => statusOf(c) !== "idle").length;
+    const chats = [...liveChats.values()].map((c) => c.chat);
+    if (!(await confirmClosing(chats, running ? `Sair do Kabul? ${running === 1 ? "Há 1 agente rodando; ele será parado" : `Há ${running} agentes rodando; eles serão parados`}.` : "Sair do Kabul?", { ok: running ? "Parar agentes e sair" : "Sair", danger: true, ask: !!running }))) return;
     api.appQuit().catch(() => {});
   };
 
@@ -258,17 +380,25 @@ export function App() {
       {sidebar && <Sidebar repos={repos} workspaces={workspaces} stats={stats} agents={agents} route={route} onRoute={go} onBack={hist.i > 0 ? back : undefined} onFwd={hist.i < hist.stack.length - 1 ? fwd : undefined} onChange={reload} onError={onError} onSearch={() => setPalette(true)} onCollapse={() => setSidebar(false)} onLinear={() => setLinear(true)} onCreate={(repo, from) => setCreating({ repo, from: from ? "prs" : undefined })} onAddProject={() => setCreating({ add: true })} onHelp={() => setHelp(true)} />}
       {sidebar && <Resizer axis="x" dir={1} {...side} onSize={side.setSize} onCollapse={() => setSidebar(false)} testid="resize-sidebar" />}
       <main className="main">
+        <UpdateBanner />
         {toasts.length > 0 && <div className="toasts">{toasts.map((t) => <div key={t.id} className="toast" role="alert" onClick={() => setToasts((x) => x.filter((y) => y.id !== t.id))}>{t.text}</div>)}</div>}
-        {opened.map((id) => {
+        {/* Só o workspace visível fica montado; os outros guardam o estado (abas, rascunho, rolagem, terminal) e remontam iguais. */}
+        {[...new Set([...(route.kind === "workspace" ? [route.id] : []), ...bg])].map((id) => {
           const w = workspaces.find((x) => x.id === id && !x.archived);
           const r = w && repos.find((x) => x.id === w.repo_id);
           const on = route.kind === "workspace" && route.id === id;
-          return w && r ? <div key={id} className="ws-host" hidden={!on}><WorkspaceView ws={w} repo={r} active={on} sidebarHidden={!sidebar} onAgent={onAgent} onError={onError} onChange={reload} onOpenSettings={(repoId) => go({ kind: "settings", tab: "repo", repoId })} /></div> : null;
+          return w && r ? <div key={id} className="ws-host" hidden={!on} data-host={id}><WorkspaceView ws={w} repo={r} active={on} sidebarHidden={!sidebar} onError={onError} onChange={reload} onOpenSettings={openRepoSettings} /></div> : null;
         })}
+        <Suspense fallback={null}>
         {route.kind === "sessions" && <SessionsView onError={onError} onRoute={go} />}
+        {route.kind === "agents" && <AgentsView workspaces={workspaces} repos={repos} onRoute={go} />}
+        {route.kind === "dashboard" && <DashboardView workspaces={workspaces} repos={repos} stats={stats} onOpen={(id) => go({ kind: "workspace", id })} onChange={reload} onError={onError} />}
+        {route.kind === "routines" && <RoutinesView workspaces={workspaces} onRun={(r, why) => runRoutine.current(r, why)} />}
         {route.kind === "settings" && <SettingsView key={route.tab + (route.repoId ?? "")} tab={route.tab ?? "geral"} repoId={route.repoId} repos={repos} onError={onError} onRoute={go} />}
         {route.kind === "local" && <LocalModelsView onError={onError} />}
         {route.kind === "diagnostics" && <DiagnosticsView onError={onError} />}
+        {route.kind === "usage" && <UsageView onError={onError} onRoute={go} />}
+        </Suspense>
         {(route.kind === "home" || (route.kind === "workspace" && !current)) && <Home repos={repos} workspaces={workspaces} onRoute={go} onOpen={openProject} onClone={() => setAddDialog("clone")} onQuick={() => setAddDialog("quick")} />}
         {!sidebar && <button className="icon-btn sidebar-reopen" title="Mostrar barra lateral (⌘B)" onClick={() => setSidebar(true)}>☰</button>}
       </main>
@@ -278,7 +408,7 @@ export function App() {
       {addDialog === "clone" && <CloneDialog onClose={() => setAddDialog(null)} onDone={(r) => (setAddDialog(null), void reload().then(() => setCreating({ repo: r.id })))} />}
       {addDialog === "quick" && <QuickStartDialog onClose={() => setAddDialog(null)} onDone={(r) => (setAddDialog(null), void reload().then(() => setCreating({ repo: r.id })))} />}
       {creating && (
-        <CreateModal repos={repos} defaultRepo={creating.repo ?? current?.repo_id} fromTab={creating.from} addMode={creating.add || repos.length === 0} onReposChanged={reload} onError={onError} onClose={() => setCreating(null)}
+        <CreateModal repos={repos} defaultRepo={creating.repo ?? current?.repo_id} fromTab={creating.from} addMode={creating.add || repos.length === 0} initialText={creating.text} onReposChanged={reload} onError={onError} onClose={() => setCreating(null)}
           onCreated={(w) => (setCreating(null), reload(), go({ kind: "workspace", id: w.id }))} />
       )}
       {linear && (
@@ -291,7 +421,7 @@ export function App() {
             setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:compose", { detail: { ws: w.id, text: `Trabalhe na issue ${i.identifier}: ${i.title} (${i.url}). Detalhes em .context/[LINEAR]-${i.identifier}.md` } })), 900);
           }} />
       )}
-      {palette && <Palette repos={repos} workspaces={workspaces} current={current} onClose={() => setPalette(false)} onRoute={(r) => (go(r), setPalette(false))} onCreate={(o) => setCreating(o)} onChange={reload} />}
+      {palette && <Palette repos={repos} workspaces={workspaces} current={current} archived={palette === "archived"} onClose={() => setPalette(false)} onRoute={(r) => (go(r), setPalette(false))} onCreate={(o) => setCreating(o)} onChange={reload} />}
     </div>
   );
 }

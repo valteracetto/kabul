@@ -38,7 +38,7 @@ pub enum HarnessKind {
     QwenCode,
     #[serde(rename = "gemini")]
     GeminiCli,
-    /// Só pelo ACP (`goose acp`); a confirmar.
+    /// Só pelo ACP (`goose acp`; confirmado com Goose 1.55).
     Goose,
     /// Cursor CLI pelo ACP (`cursor-agent acp`); a confirmar.
     Cursor,
@@ -113,20 +113,58 @@ impl HarnessKind {
     }
 }
 
-/// Procura um executável no PATH e em pastas de instalação conhecidas.
+/// Procura um executável no PATH e em pastas de instalação conhecidas. No Windows tenta as extensões
+/// do `PATHEXT` (`claude.cmd` do npm, `gh.exe`...): o `Command` do Rust só acha `.exe` sozinho.
 pub fn which(bin: &str) -> Option<std::path::PathBuf> {
     if let Some(p) = std::env::var_os(bin_override_var(bin)).map(std::path::PathBuf::from).filter(|p| p.is_file()) {
         return Some(p);
     }
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
-    let extra = [home.join(".opencode/bin"), home.join(".lmstudio/bin"), home.join(".local/bin"), "/opt/homebrew/bin".into(), "/usr/local/bin".into()];
-    std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
-        .unwrap_or_default()
-        .into_iter()
-        .chain(extra)
-        .map(|d| d.join(bin))
-        .find(|p| p.is_file())
+    let names = exe_names(bin, cfg!(windows), std::env::var("PATHEXT").ok().as_deref());
+    std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default().into_iter().chain(extra_bin_dirs()).flat_map(|d| names.iter().map(move |n| d.join(n))).find(|p| p.is_file())
+}
+
+/// Pastas onde instaladores costumam pôr CLIs (fora do PATH de um app aberto pelo Dock/Explorer).
+pub fn extra_bin_dirs() -> Vec<std::path::PathBuf> {
+    let home = crate::paths::home();
+    let mut v = vec![home.join(".opencode").join("bin"), home.join(".lmstudio").join("bin"), home.join(".local").join("bin")];
+    if cfg!(windows) {
+        let env = |k: &str| std::env::var_os(k).map(std::path::PathBuf::from);
+        v.push(home.join(".cargo").join("bin"));
+        v.push(home.join("scoop").join("shims"));
+        if let Some(a) = env("APPDATA") {
+            v.push(a.join("npm"));
+        }
+        if let Some(l) = env("LOCALAPPDATA") {
+            v.push(l.join("Microsoft").join("WindowsApps"));
+            v.push(l.join("Programs").join("Microsoft VS Code").join("bin"));
+        }
+        for pf in ["ProgramFiles", "ProgramFiles(x86)"].iter().filter_map(|k| env(k)) {
+            v.push(pf.join("nodejs"));
+            v.push(pf.join("Git").join("cmd"));
+            v.push(pf.join("GitHub CLI"));
+            v.push(pf.join("Tailscale"));
+        }
+    } else {
+        v.extend(["/opt/homebrew/bin".into(), "/usr/local/bin".into()]);
+    }
+    v
+}
+
+/// Nomes a tentar para `bin`. No Windows, sem extensão conhecida, só as do `PATHEXT` (o npm deixa ao lado
+/// do `claude.cmd` um `claude` sem extensão que é script de sh e não roda no Windows).
+pub fn exe_names(bin: &str, windows: bool, pathext: Option<&str>) -> Vec<String> {
+    if !windows {
+        return vec![bin.to_string()];
+    }
+    let exts: Vec<String> = pathext.unwrap_or(".COM;.EXE;.BAT;.CMD").split(';').filter(|e| !e.is_empty()).map(|e| e.to_ascii_lowercase()).collect();
+    let lower = bin.to_ascii_lowercase();
+    if exts.iter().any(|e| lower.ends_with(e.as_str())) {
+        return vec![bin.to_string()];
+    }
+    // `.exe` primeiro (binário nativo ganha do atalho .cmd).
+    let mut order: Vec<String> = vec![".exe".into()];
+    order.extend(exts.into_iter().filter(|e| e != ".exe"));
+    order.into_iter().map(|e| format!("{bin}{e}")).collect()
 }
 
 /// API que um endpoint fala.
@@ -165,26 +203,67 @@ impl Endpoint {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     /// Sessão/conversa/thread iniciada (id para retomar).
-    SessionStarted { session_id: String, model: Option<String> },
+    SessionStarted {
+        session_id: String,
+        model: Option<String>,
+    },
     /// Texto completo de uma mensagem do agente.
-    Text { text: String },
+    Text {
+        text: String,
+    },
     /// Pedaço de texto em streaming.
-    TextDelta { text: String },
-    Reasoning { text: String },
-    ToolUse { id: String, name: String, input: Value },
-    ToolResult { id: String, output: String, is_error: bool },
+    TextDelta {
+        text: String,
+    },
+    Reasoning {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    ToolResult {
+        id: String,
+        output: String,
+        is_error: bool,
+    },
     /// O agente pede aprovação; responder com [`Protocol::approval`].
-    ApprovalRequest { request_id: String, tool: String, input: Value },
+    ApprovalRequest {
+        request_id: String,
+        tool: String,
+        input: Value,
+    },
     /// Detalhe de tokens do turno (popover do tempo): entrada nova, saída, cache lido e gravado.
-    Usage { input: Option<u64>, output: Option<u64>, cache_read: Option<u64>, cache_write: Option<u64>, duration_ms: Option<u64> },
+    Usage {
+        input: Option<u64>,
+        output: Option<u64>,
+        cache_read: Option<u64>,
+        cache_write: Option<u64>,
+        duration_ms: Option<u64>,
+    },
     /// Ferramentas e servidores MCP ativos na sessão (Claude: evento `init`).
-    SessionInfo { tools: Vec<String>, mcp_servers: Vec<McpStatus> },
-    TurnCompleted { result: Option<String>, input_tokens: Option<u64>, output_tokens: Option<u64>, cost_usd: Option<f64> },
-    Error { message: String },
+    SessionInfo {
+        tools: Vec<String>,
+        mcp_servers: Vec<McpStatus>,
+    },
+    TurnCompleted {
+        result: Option<String>,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+        cost_usd: Option<f64>,
+    },
+    Error {
+        message: String,
+    },
     /// Linha reconhecida como JSON mas sem mapeamento.
-    Raw { value: Value },
+    Raw {
+        value: Value,
+    },
     /// Linha que não é JSON (stderr misturado, logs).
-    Log { line: String },
+    Log {
+        line: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -216,8 +295,14 @@ pub struct SessionOptions {
     pub env: Vec<(String, String)>,
     /// Claude: arquivo `--mcp-config` (com `--strict-mcp-config`) só com os MCPs habilitados na sessão.
     pub mcp_config: Option<String>,
-    /// MCPs desligados nesta sessão (OpenCode/Codex aplicam por config).
+    /// Com `mcp_config`: só os servidores dele (`--strict-mcp-config`), quando algo foi desligado.
+    pub mcp_strict: bool,
+    /// MCPs nativos deste CLI desligados nesta sessão (OpenCode/Codex por config, Qwen/Gemini por flag).
     pub disabled_mcp: Vec<String>,
+    /// MCPs de outras IAs que esta sessão recebe (registro único, ver [`crate::mcp_share`]).
+    pub mcp_inject: Vec<crate::mcp_share::Server>,
+    /// MCPs nativos ligados (para listas de permitidos, como a do Gemini CLI).
+    pub mcp_keep: Vec<String>,
     /// Claude: JSON de `--settings` (ex.: `{"outputStyle":"Explanatory"}`).
     pub settings_json: Option<String>,
     /// Claude: `--append-system-prompt` (preferências gerais do repo).
@@ -256,7 +341,7 @@ impl CmdSpec {
     }
     pub fn command(&self) -> Command {
         let prog = which(&self.program).map(|p| p.display().to_string()).unwrap_or_else(|| self.program.clone());
-        let mut c = Command::new(prog);
+        let mut c = crate::shell::command(prog);
         c.envs(self.env.iter().map(|(k, v)| (k, v)));
         c.args(&self.args);
         if let Some(d) = &self.cwd {
@@ -277,6 +362,17 @@ pub fn shell_quote(s: &str) -> String {
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
     }
+}
+
+/// Como o plan mode chega ao agente.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanSupport {
+    /// Modo do próprio CLI (Claude `--permission-mode plan`, agy `--mode plan`, Codex `collaborationMode`
+    /// plan, ACP `session/set_mode` com o modo de planejamento que o agente anuncia).
+    Native,
+    /// O CLI não tem: o Kabul pede para só ler e planejar e nega edição e comandos (Goose, Cursor).
+    Emulated,
 }
 
 /// Grau de suporte de uma capacidade.
@@ -327,6 +423,10 @@ pub trait Harness: Send + Sync {
     fn app_approvals(&self) -> bool {
         true
     }
+    /// Plan mode: nativo do CLI ou emulado pelo Kabul (só leitura + instrução de planejar e esperar).
+    fn plan_support(&self) -> PlanSupport {
+        PlanSupport::Native
+    }
 
     /// Sessão em nuvem a partir de uma descrição.
     fn cloud_run(&self, _description: &str, _environment: Option<&str>) -> Option<CmdSpec> {
@@ -374,6 +474,16 @@ pub trait Protocol: Send {
     fn approval_ext(&mut self, request_id: &str, allow: bool, _tool: &str, _updated_input: Option<Value>, _always: bool) -> Vec<String> {
         self.approval(request_id, allow)
     }
+    /// Troca o modo no meio da sessão (ex.: sair do plan mode ao aprovar o plano) sem perder a conversa.
+    /// `None`: o protocolo não troca ao vivo; o Kabul reinicia retomando a sessão.
+    fn set_mode(&mut self, _mode: &str) -> Option<Vec<String>> {
+        None
+    }
+    /// Interrompe o turno atual pelo protocolo do agente (a sessão continua viva e retomável).
+    /// `None`: o protocolo não tem interrupção; o Kabul manda SIGINT só ao processo do agente.
+    fn interrupt(&mut self) -> Option<Vec<String>> {
+        None
+    }
     /// Fim do processo (modo por turno) sem `TurnCompleted` explícito.
     fn finish(&mut self) -> Event {
         Event::TurnCompleted { result: None, input_tokens: None, output_tokens: None, cost_usd: None }
@@ -390,11 +500,7 @@ pub fn parse_remote_generic(out: &str) -> RemoteHandle {
 /// Todas as URLs https do texto (remove sequências ANSI antes).
 pub fn find_urls(text: &str) -> Vec<String> {
     let clean = strip_ansi(text);
-    clean
-        .split(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '<' || c == '>' || c == ')' || c == '(')
-        .filter(|w| w.starts_with("https://"))
-        .map(|w| w.trim_end_matches(['.', ',', ';']).to_string())
-        .collect()
+    clean.split(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '<' || c == '>' || c == ')' || c == '(').filter(|w| w.starts_with("https://")).map(|w| w.trim_end_matches(['.', ',', ';']).to_string()).collect()
 }
 
 pub fn strip_ansi(s: &str) -> String {
@@ -437,6 +543,7 @@ pub(crate) fn s(v: &Value, k: &str) -> Option<String> {
     v.get(k).and_then(Value::as_str).map(String::from)
 }
 
+#[allow(clippy::large_enum_variant)]
 enum Mode {
     /// Sessão persistente: linhas JSON por stdin/stdout.
     Stdio { child: Child, stdin: Arc<Mutex<ChildStdin>>, protocol: Arc<Mutex<Box<dyn Protocol>>> },
@@ -448,6 +555,11 @@ enum Mode {
 pub struct Running {
     mode: Mode,
     pub events: Receiver<Event>,
+    /// Descendentes que já existiam quando a sessão ficou pronta (servidores MCP etc.): não contam como
+    /// "deixados pelo agente" ao parar.
+    base: Arc<Mutex<std::collections::HashSet<crate::procs::Key>>>,
+    /// Início do turno atual (segundos Unix), para achar contêineres criados nele.
+    turn_started: Arc<Mutex<u64>>,
 }
 
 fn write_lines(stdin: &Arc<Mutex<ChildStdin>>, lines: &[String]) -> Result<()> {
@@ -462,6 +574,7 @@ fn write_lines(stdin: &Arc<Mutex<ChildStdin>>, lines: &[String]) -> Result<()> {
 
 impl Running {
     pub fn send(&self, text: &str) -> Result<()> {
+        *self.turn_started.lock().unwrap() = crate::procs::now();
         match &self.mode {
             Mode::Stdio { stdin, protocol, .. } => {
                 let lines = protocol.lock().unwrap().user_message(text);
@@ -532,10 +645,72 @@ impl Running {
             Mode::PerTurn { .. } => anyhow::bail!("este harness não recebe aprovações pelo app"),
         }
     }
-    /// Interrompe o turno atual (ou a sessão inteira, no modo stdio).
+    /// Interrompe só o turno, pelo protocolo do agente (Claude `control_request` interrupt, Codex
+    /// `turn/interrupt`, ACP `session/cancel`); sem protocolo, SIGINT só no processo do agente. Os
+    /// filhos que o próprio CLI não encerrar continuam vivos (ver [`crate::procs`]).
+    pub fn interrupt(&mut self) -> Result<()> {
+        match &mut self.mode {
+            Mode::Stdio { child, stdin, protocol } => match protocol.lock().unwrap().interrupt() {
+                Some(lines) => write_lines(stdin, &lines),
+                None => {
+                    crate::procs::interrupt(child.id());
+                    Ok(())
+                }
+            },
+            Mode::PerTurn { child, .. } => {
+                if let Some(c) = child.lock().unwrap().as_ref() {
+                    crate::procs::interrupt(c.id());
+                }
+                Ok(())
+            }
+        }
+    }
+    /// Troca o modo ao vivo (`plan` ↔ `default`…). `false`: este agente não troca sem reiniciar.
+    pub fn set_mode(&mut self, mode: &str) -> Result<bool> {
+        match &mut self.mode {
+            Mode::Stdio { stdin, protocol, .. } => match protocol.lock().unwrap().set_mode(mode) {
+                Some(lines) => write_lines(stdin, &lines).map(|_| true),
+                None => Ok(false),
+            },
+            Mode::PerTurn { opts, .. } => {
+                opts.permission_mode = Some(mode.to_string());
+                Ok(true)
+            }
+        }
+    }
+    /// O processo da sessão continua vivo (modo stdio) / a sessão aceita turnos (modo por turno).
+    pub fn alive(&mut self) -> bool {
+        match &mut self.mode {
+            Mode::Stdio { child, .. } => matches!(child.try_wait(), Ok(None)),
+            Mode::PerTurn { tx, .. } => tx.is_some(),
+        }
+    }
+    /// Início do turno atual (segundos Unix).
+    pub fn turn_started(&self) -> u64 {
+        *self.turn_started.lock().unwrap()
+    }
+    /// Descendentes do agente que não existiam quando a sessão ficou pronta (só os topos).
+    pub fn extra_procs(&self, procs: &[crate::resources::Proc]) -> Vec<crate::resources::Proc> {
+        match self.pid() {
+            Some(pid) => crate::procs::extra(procs, pid, &self.base.lock().unwrap()),
+            None => vec![],
+        }
+    }
+    /// Interrompe o turno ou a sessão inteira (processo morto). Para "Parar", prefira [`Running::interrupt`].
     pub fn kill(&mut self) -> Result<()> {
         match &mut self.mode {
-            Mode::Stdio { child, .. } => child.kill().context("kill"),
+            Mode::Stdio { child, .. } => {
+                let r = child.kill().context("kill");
+                // O CLI pode ser um wrapper (o `codex` do npm é um Node que sobe o binário nativo): sem
+                // isso o binário fica órfão, vivo e segurando a thread ("already has an active writer" ao
+                // retomar). Só a linha de base (binário, MCPs), não o que o agente abriu depois: isso
+                // continua com a escolha "Manter rodando".
+                let base: Vec<crate::procs::Key> = self.base.lock().unwrap().iter().copied().collect();
+                if !base.is_empty() {
+                    crate::procs::kill_exact(&base);
+                }
+                r
+            }
             Mode::PerTurn { child, tx, .. } => {
                 *tx = None;
                 if let Some(c) = child.lock().unwrap().as_mut() {
@@ -573,16 +748,10 @@ pub fn spawn(h: &dyn Harness, opts: &SessionOptions) -> Result<Running> {
     if h.turn_command("", opts).is_some() {
         let (tx, rx) = channel();
         let session = Arc::new(Mutex::new(opts.resume.clone()));
-        return Ok(Running { mode: Mode::PerTurn { kind: h.kind(), opts: opts.clone(), session, child: Default::default(), tx: Some(tx) }, events: rx });
+        return Ok(Running { mode: Mode::PerTurn { kind: h.kind(), opts: opts.clone(), session, child: Default::default(), tx: Some(tx) }, events: rx, base: Default::default(), turn_started: Default::default() });
     }
     let spec = h.command(opts);
-    let mut child = spec
-        .command()
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("iniciando {}", spec.program))?;
+    let mut child = spec.command().stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().with_context(|| format!("iniciando {}", spec.program))?;
     let stdin = Arc::new(Mutex::new(child.stdin.take().context("stdin")?));
     let stdout = child.stdout.take().context("stdout")?;
     let stderr = child.stderr.take().context("stderr")?;
@@ -597,11 +766,19 @@ pub fn spawn(h: &dyn Harness, opts: &SessionOptions) -> Result<Running> {
     }
     write_lines(&stdin, &protocol.lock().unwrap().startup())?;
 
+    let base: Arc<Mutex<std::collections::HashSet<crate::procs::Key>>> = Default::default();
     {
         let (tx, protocol, stdin) = (tx.clone(), protocol.clone(), stdin.clone());
+        let (base, pid) = (base.clone(), child.id());
         std::thread::spawn(move || {
+            let mut based = false;
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 let (evs, replies) = protocol.lock().unwrap().on_line(&line);
+                // Sessão pronta (MCP já iniciados): linha de base dos descendentes.
+                if !based && evs.iter().any(|e| matches!(e, Event::SessionStarted { .. } | Event::SessionInfo { .. })) {
+                    based = true;
+                    *base.lock().unwrap() = crate::procs::baseline(pid);
+                }
                 if !replies.is_empty() && write_lines(&stdin, &replies).is_err() {
                     let _ = tx.send(Event::Error { message: "stdin fechado".into() });
                 }
@@ -620,7 +797,7 @@ pub fn spawn(h: &dyn Harness, opts: &SessionOptions) -> Result<Running> {
             }
         }
     });
-    Ok(Running { mode: Mode::Stdio { child, stdin, protocol }, events: rx })
+    Ok(Running { mode: Mode::Stdio { child, stdin, protocol }, events: rx, base, turn_started: Default::default() })
 }
 
 #[cfg(test)]
@@ -638,6 +815,14 @@ pub(crate) fn run_fixture(p: &mut dyn Protocol, text: &str) -> (Vec<Event>, Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nomes_de_executavel() {
+        assert_eq!(exe_names("claude", false, None), vec!["claude"]);
+        assert_eq!(exe_names("claude", true, Some(".COM;.EXE;.BAT;.CMD")), vec!["claude.exe", "claude.com", "claude.bat", "claude.cmd"]);
+        assert_eq!(exe_names("pwsh.exe", true, None), vec!["pwsh.exe"]);
+        assert_eq!(exe_names("npm.CMD", true, None), vec!["npm.CMD"]);
+    }
 
     #[test]
     fn ansi_e_urls() {

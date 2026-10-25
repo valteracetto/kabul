@@ -3,7 +3,6 @@ use crate::worktree;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct Repo {
@@ -142,6 +141,9 @@ impl Workspace {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct State {
+    /// Versão do formato (ver `crate::schema`); ausente = 0.
+    #[serde(default)]
+    pub schema_version: u32,
     pub repos: Vec<Repo>,
     pub workspaces: Vec<Workspace>,
     #[serde(default)]
@@ -151,10 +153,76 @@ pub struct State {
 }
 
 pub const CIDADES: &[&str] = &[
-    "kabul", "lisboa", "cusco", "quito", "oslo", "lima", "praga", "tunis", "sofia", "riga", "baku", "dakar", "hanoi", "kyoto", "porto", "recife", "belem", "natal", "manaus", "goiania",
-    "cairo", "accra", "nairobi", "lagos", "tbilisi", "yerevan", "almaty", "tashkent", "samarcanda", "bukhara", "herat", "mascate", "doha", "amman", "beirute", "esmirna", "split", "zagreb",
-    "ljubljana", "bratislava", "viena", "berna", "gante", "bruges", "leiden", "bergen", "tromso", "reykjavik", "dublin", "galway", "cork", "sevilha", "granada", "cadiz", "valparaiso",
-    "salta", "mendoza", "cordoba", "rosario", "montevideu", "assuncao", "lapaz", "sucre", "bogota", "cartagena", "medellin", "havana", "oaxaca", "merida", "puebla",
+    "kabul",
+    "lisboa",
+    "cusco",
+    "quito",
+    "oslo",
+    "lima",
+    "praga",
+    "tunis",
+    "sofia",
+    "riga",
+    "baku",
+    "dakar",
+    "hanoi",
+    "kyoto",
+    "porto",
+    "recife",
+    "belem",
+    "natal",
+    "manaus",
+    "goiania",
+    "cairo",
+    "accra",
+    "nairobi",
+    "lagos",
+    "tbilisi",
+    "yerevan",
+    "almaty",
+    "tashkent",
+    "samarcanda",
+    "bukhara",
+    "herat",
+    "mascate",
+    "doha",
+    "amman",
+    "beirute",
+    "esmirna",
+    "split",
+    "zagreb",
+    "ljubljana",
+    "bratislava",
+    "viena",
+    "berna",
+    "gante",
+    "bruges",
+    "leiden",
+    "bergen",
+    "tromso",
+    "reykjavik",
+    "dublin",
+    "galway",
+    "cork",
+    "sevilha",
+    "granada",
+    "cadiz",
+    "valparaiso",
+    "salta",
+    "mendoza",
+    "cordoba",
+    "rosario",
+    "montevideu",
+    "assuncao",
+    "lapaz",
+    "sucre",
+    "bogota",
+    "cartagena",
+    "medellin",
+    "havana",
+    "oaxaca",
+    "merida",
+    "puebla",
 ];
 
 /// Primeira cidade livre (nem workspace existente nem branch/pasta já usada).
@@ -168,7 +236,7 @@ pub fn pick_city(used: &dyn Fn(&str) -> bool) -> String {
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<String> {
-    let o = Command::new("git").arg("-C").arg(dir).args(args).output().context("falha ao executar git")?;
+    let o = crate::shell::command("git").arg("-C").arg(dir).args(args).output().context("falha ao executar git")?;
     if !o.status.success() {
         bail!("git {}: {}", args.join(" "), String::from_utf8_lossy(&o.stderr).trim());
     }
@@ -177,7 +245,11 @@ fn git(dir: &Path, args: &[&str]) -> Result<String> {
 
 /// `<prefixo>/<nome>`; prefixo vazio ("None") vira só o nome.
 pub fn prefixed(prefix: &str, name: &str) -> String {
-    if prefix.is_empty() { name.to_string() } else { format!("{prefix}/{name}") }
+    if prefix.is_empty() {
+        name.to_string()
+    } else {
+        format!("{prefix}/{name}")
+    }
 }
 
 pub fn now() -> u64 {
@@ -202,16 +274,30 @@ pub struct Store {
 }
 
 impl Store {
+    /// Estado em Application Support (macOS), `%APPDATA%\kabul` (Windows) ou `~/.local/share/kabul`;
+    /// worktrees em `~/kabul/workspaces`.
     pub fn default_paths() -> (PathBuf, PathBuf) {
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-        (home.join("Library/Application Support/kabul/state.json"), home.join("kabul/workspaces"))
+        let home = crate::paths::home();
+        (crate::paths::state_dir().join("state.json"), home.join("kabul").join("workspaces"))
     }
 
     pub fn open(file: PathBuf, root: PathBuf, branch_prefix: String) -> Result<Self> {
-        let state = match std::fs::read_to_string(&file) {
-            Ok(s) => serde_json::from_str(&s).with_context(|| format!("lendo {}", file.display()))?,
+        let mut state: State = match std::fs::read_to_string(&file) {
+            Ok(s) => {
+                let mut doc: serde_json::Value = serde_json::from_str(&s).with_context(|| format!("lendo {}", file.display()))?;
+                match crate::schema::migrate(&mut doc, crate::schema::STATE, crate::schema::STATE_MIGRATIONS)? {
+                    crate::schema::Outcome::Current => {}
+                    crate::schema::Outcome::Migrated { from } => crate::schema::backup(&file, from),
+                    crate::schema::Outcome::Newer { found } => {
+                        crate::schema::backup(&file, found);
+                        eprintln!("kabul: {} é de um Kabul mais novo (formato v{found}); backup em .v{found}.bak", file.display());
+                    }
+                }
+                serde_json::from_value(doc).with_context(|| format!("lendo {}", file.display()))?
+            }
             Err(_) => State::default(),
         };
+        state.schema_version = crate::schema::STATE;
         Ok(Self { file, root, branch_prefix, state })
     }
 
@@ -286,11 +372,7 @@ impl Store {
         let repo = self.repo(repo_id)?.clone();
         let rp = Path::new(&repo.path);
         let dir = self.root.join(&repo.name);
-        let used = |c: &str| {
-            self.state.workspaces.iter().any(|w| w.repo_id == repo.id && w.name == c)
-                || dir.join(c).exists()
-                || git(rp, &["rev-parse", "--verify", "-q", &format!("refs/heads/{}", prefixed(&self.branch_prefix, c))]).is_ok()
-        };
+        let used = |c: &str| self.state.workspaces.iter().any(|w| w.repo_id == repo.id && w.name == c) || dir.join(c).exists() || git(rp, &["rev-parse", "--verify", "-q", &format!("refs/heads/{}", prefixed(&self.branch_prefix, c))]).is_ok();
         let city = pick_city(&used);
         let branch = prefixed(&self.branch_prefix, &city);
         let path = dir.join(&city);
@@ -332,6 +414,7 @@ impl Store {
         let repo = self.repo(repo_id)?.clone();
         let rp = Path::new(&repo.path);
         let local = branch.trim_start_matches("origin/").to_string();
+        anyhow::ensure!(valid_branch(&local), "nome de branch inválido: {local:?}");
         let dir = self.root.join(&repo.name);
         let used = |c: &str| self.state.workspaces.iter().any(|w| w.repo_id == repo.id && w.name == c) || dir.join(c).exists();
         let city = pick_city(&used);
@@ -348,7 +431,28 @@ impl Store {
         let files_copied = copy_ignored(rp, &path, &settings.file_include_globs).unwrap_or(0);
         exclude_context(rp);
         std::fs::create_dir_all(path.join(".context")).ok();
-        let w = Workspace { id: id(), repo_id: repo.id, name: city, branch: local, path: p, archived: false, created_at: now(), title: None, status: default_status(), state: "ready".into(), pinned: false, notes: String::new(), port: self.free_port(), target_branch: settings.target_branch, pr_url: None, archive_checkpoint: None, user_set_branch: true, files_copied, linear: None, ..Default::default() };
+        let w = Workspace {
+            id: id(),
+            repo_id: repo.id,
+            name: city,
+            branch: local,
+            path: p,
+            archived: false,
+            created_at: now(),
+            title: None,
+            status: default_status(),
+            state: "ready".into(),
+            pinned: false,
+            notes: String::new(),
+            port: self.free_port(),
+            target_branch: settings.target_branch,
+            pr_url: None,
+            archive_checkpoint: None,
+            user_set_branch: true,
+            files_copied,
+            linear: None,
+            ..Default::default()
+        };
         self.state.workspaces.push(w.clone());
         self.save()?;
         Ok(w)
@@ -396,7 +500,7 @@ impl Store {
     pub fn rename_branch(&mut self, id: &str, new: &str, by_user: bool) -> Result<Workspace> {
         let w = self.workspace(id)?.clone();
         let new = new.trim();
-        anyhow::ensure!(!new.is_empty() && !new.contains(' '), "nome de branch inválido");
+        anyhow::ensure!(valid_branch(new), "nome de branch inválido: {new:?}");
         git(Path::new(&w.path), &["branch", "-m", &w.branch, new])?;
         self.update_workspace(id, |x| {
             x.branch = new.into();
@@ -526,11 +630,13 @@ impl Store {
     }
 
     pub fn clone_repo(&mut self, url: &str) -> Result<Repo> {
+        // `--upload-pack=...` ou `-c ...` no lugar da URL viraria opção do git (execução de comando).
+        anyhow::ensure!(!url.is_empty() && !url.starts_with('-') && !url.chars().any(char::is_control), "URL de repositório inválida");
         let name = url.trim_end_matches('/').trim_end_matches(".git").rsplit(['/', ':']).next().unwrap_or("repo").to_string();
         let dest = self.root.parent().unwrap_or(&self.root).join("repos").join(&name);
         anyhow::ensure!(!dest.exists(), "{} já existe", dest.display());
         std::fs::create_dir_all(dest.parent().unwrap())?;
-        let o = Command::new("git").args(["clone", url]).arg(&dest).output().context("git clone")?;
+        let o = crate::shell::command("git").args(["clone", "--", url]).arg(&dest).output().context("git clone")?;
         anyhow::ensure!(o.status.success(), "git clone: {}", String::from_utf8_lossy(&o.stderr).trim());
         self.add_repo(&dest)
     }
@@ -566,7 +672,10 @@ pub fn branches(repo: &Path) -> Result<Vec<String>> {
 
 /// Busca a branch de um PR (`pull/N/head`) para uma branch local `pr-N` e devolve o nome.
 pub fn fetch_pr(repo: &Path, number: u32, head: &str) -> Result<String> {
-    let local = if head.is_empty() { format!("pr-{number}") } else { head.to_string() };
+    // O nome da branch vem do autor do PR (pode ser de um fork): inválido ou já existente aqui (ex.:
+    // `main`) vira `pr-N`, para o fetch nunca mexer numa branch local que não é do PR.
+    let taken = |b: &str| git(repo, &["rev-parse", "--verify", "-q", &format!("refs/heads/{b}")]).is_ok();
+    let local = if head.is_empty() || !valid_branch(head) || taken(head) { format!("pr-{number}") } else { head.to_string() };
     git(repo, &["fetch", "origin", &format!("pull/{number}/head:{local}")]).or_else(|_| git(repo, &["fetch", "origin", &format!("{local}:{local}")]))?;
     Ok(local)
 }
@@ -642,10 +751,26 @@ pub fn attach(ws: &Workspace, src: &Path) -> Result<String> {
 
 /// Grava bytes (ex.: imagem colada) como anexo.
 pub fn attach_bytes(ws: &Workspace, name: &str, data: &[u8]) -> Result<String> {
-    let tmp = std::env::temp_dir().join(format!("kabul-att-{}", now())).join(name.replace('/', "_"));
+    let tmp = std::env::temp_dir().join(format!("kabul-att-{}", now())).join(crate::paths::safe_file_name(name));
     std::fs::create_dir_all(tmp.parent().unwrap())?;
     std::fs::write(&tmp, data)?;
     attach(ws, &tmp)
+}
+
+/// Nome de branch aceitável (regras do `git check-ref-format --branch`, sem chamar o git). Recusa
+/// também nome começando com `-`, que viraria opção nos comandos do git e do gh.
+pub fn valid_branch(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 200
+        && !name.starts_with(['-', '/', '.'])
+        && !name.ends_with(['/', '.'])
+        && !name.ends_with(".lock")
+        && name != "@"
+        && !name.contains("..")
+        && !name.contains("//")
+        && !name.contains("@{")
+        && !name.contains("/.")
+        && !name.chars().any(|c| c.is_control() || c.is_whitespace() || "~^:?*[\\".contains(c))
 }
 
 /// Slug de branch a partir da primeira mensagem (renomeação automática).
@@ -722,7 +847,7 @@ pub fn file_diff(repo: &Repo, ws: &Workspace, file: &str) -> Result<String> {
     if !d.is_empty() {
         return Ok(d);
     }
-    let o = Command::new("git").arg("-C").arg(p).args(["diff", "--no-color", "--no-index", "--", "/dev/null", file]).output()?;
+    let o = crate::shell::command("git").arg("-C").arg(p).args(["diff", "--no-color", "--no-index", "--", "/dev/null", file]).output()?;
     Ok(String::from_utf8_lossy(&o.stdout).into_owned())
 }
 
@@ -757,7 +882,11 @@ pub struct PrOptions {
 /// Rodapé da descrição do PR com o link do workspace (`kabul://workspace?id=…`).
 pub fn pr_body(body: &str, ws: &Workspace) -> String {
     let link = format!("Criado no Kabul: [workspace {}](kabul://workspace?id={})", ws.title.as_deref().unwrap_or(&ws.name), ws.id);
-    if body.trim().is_empty() { link } else { format!("{}\n\n---\n{link}", body.trim_end()) }
+    if body.trim().is_empty() {
+        link
+    } else {
+        format!("{}\n\n---\n{link}", body.trim_end())
+    }
 }
 
 pub fn pr_args(base: &str, o: &PrOptions) -> Vec<String> {
@@ -779,10 +908,16 @@ pub struct PrResult {
 }
 
 pub fn create_pr(repo: &Repo, ws: &Workspace, o: &PrOptions) -> Result<PrResult> {
+    let r = create_pr_inner(repo, ws, o);
+    crate::gitops::invalidate(&ws.path);
+    r
+}
+
+fn create_pr_inner(repo: &Repo, ws: &Workspace, o: &PrOptions) -> Result<PrResult> {
     let p = Path::new(&ws.path);
     let mut base = ws.target_branch.clone().unwrap_or_else(|| repo.default_branch.clone());
     if let Some(n) = o.stack_on {
-        let out = Command::new("gh").args(["pr", "view", &n.to_string(), "--json", "headRefName", "-q", ".headRefName"]).current_dir(p).output().context("gh pr view")?;
+        let out = crate::shell::command("gh").args(["pr", "view", &n.to_string(), "--json", "headRefName", "-q", ".headRefName"]).current_dir(p).output().context("gh pr view")?;
         anyhow::ensure!(out.status.success(), "PR #{n} não encontrado: {}", String::from_utf8_lossy(&out.stderr).trim());
         base = String::from_utf8_lossy(&out.stdout).trim().to_string();
     }
@@ -802,13 +937,13 @@ pub fn create_pr(repo: &Repo, ws: &Workspace, o: &PrOptions) -> Result<PrResult>
         return Ok(PrResult { url: None, commands, dry_run: true });
     }
     git(p, &push)?;
-    let out = Command::new("gh").args(&args).current_dir(p).output().context("falha ao executar gh")?;
+    let out = crate::shell::command("gh").args(&args).current_dir(p).output().context("falha ao executar gh")?;
     if !out.status.success() {
         bail!("gh pr create: {}", String::from_utf8_lossy(&out.stderr).trim());
     }
     let text = String::from_utf8_lossy(&out.stdout);
     if o.automerge {
-        let am = Command::new("gh").args(["pr", "merge", "--auto", method]).current_dir(p).output().context("gh pr merge --auto")?;
+        let am = crate::shell::command("gh").args(["pr", "merge", "--auto", method]).current_dir(p).output().context("gh pr merge --auto")?;
         if !am.status.success() {
             bail!("PR criado, mas o auto-merge falhou: {}", String::from_utf8_lossy(&am.stderr).trim());
         }
@@ -828,12 +963,33 @@ mod tests {
     }
 
     #[test]
+    fn state_sem_versao_migra_com_backup() {
+        let tmp = std::env::temp_dir().join(format!("kabul-state-mig-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let f = tmp.join("state.json");
+        let v0 = r#"{"repos":[{"id":"r1","name":"app","path":"/x/app","default_branch":"main"}],"workspaces":[]}"#;
+        std::fs::write(&f, v0).unwrap();
+        let s = Store::open(f.clone(), tmp.join("ws"), "val".into()).unwrap();
+        assert_eq!((s.state.schema_version, s.state.repos[0].name.as_str()), (crate::schema::STATE, "app"));
+        assert_eq!(std::fs::read_to_string(tmp.join("state.json.v0.bak")).unwrap(), v0);
+        s.save().unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+        assert_eq!(saved["schema_version"], crate::schema::STATE);
+        // De um Kabul mais novo: abre no melhor esforço, com backup do original.
+        std::fs::write(&f, r#"{"schema_version":99,"repos":[],"workspaces":[],"coisa_nova":true}"#).unwrap();
+        assert!(Store::open(f.clone(), tmp.join("ws"), "val".into()).is_ok());
+        assert!(tmp.join("state.json.v99.bak").is_file());
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
     fn ciclo_repo_workspace_diff() {
         let tmp = std::env::temp_dir().join(format!("kabul-store-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let repo = tmp.join("meu-repo");
         std::fs::create_dir_all(&repo).unwrap();
-        let g = |d: &Path, a: &[&str]| assert!(Command::new("git").arg("-C").arg(d).args(a).output().unwrap().status.success(), "{a:?}");
+        let g = |d: &Path, a: &[&str]| assert!(crate::shell::command("git").arg("-C").arg(d).args(a).output().unwrap().status.success(), "{a:?}");
         g(&repo, &["init", "-q", "-b", "main"]);
         std::fs::write(repo.join("a.txt"), "um\n").unwrap();
         g(&repo, &["add", "."]);
@@ -899,7 +1055,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         let repo = tmp.join("r");
         std::fs::create_dir_all(&repo).unwrap();
-        let g = |a: &[&str]| assert!(Command::new("git").arg("-C").arg(&repo).args(["-c", "user.name=dev", "-c", "user.email=dev@example.com"]).args(a).output().unwrap().status.success());
+        let g = |a: &[&str]| assert!(crate::shell::command("git").arg("-C").arg(&repo).args(["-c", "user.name=dev", "-c", "user.email=dev@example.com"]).args(a).output().unwrap().status.success());
         g(&["init", "-q", "-b", "main"]);
         std::fs::write(repo.join("a"), "a").unwrap();
         g(&["add", "."]);
@@ -934,5 +1090,53 @@ mod tests {
         let o = PrOptions { title: "t".into(), body: "b".into(), draft: true, labels: vec!["x".into()], ..Default::default() };
         assert_eq!(pr_args("main", &o), vec!["pr", "create", "--base", "main", "--title", "t", "--body", "b", "--draft", "--label", "x"]);
         assert_eq!(slug("Corrigir o botão de Login!!"), "corrigir-o-botao-de-login");
+    }
+
+    /// Segurança: nome de branch vindo do usuário, do Linear ou de um PR de fork não vira opção do git.
+    #[test]
+    fn nomes_de_branch() {
+        for ok in ["main", "dev/eng-12-login", "val/lisboa", "feature/x_y.z", "pr-7"] {
+            assert!(valid_branch(ok), "{ok}");
+        }
+        for bad in ["", "-D", "--upload-pack=x", "a b", "a..b", "a/", "/a", ".a", "a.lock", "a@{1}", "@", "a~1", "a^", "a:b", "a?", "a*", "a[", "a\\b", "a\nb", "x/.y"] {
+            assert!(!valid_branch(bad), "{bad:?}");
+        }
+    }
+
+    /// Segurança: a URL do clone não pode virar opção do git (`--upload-pack` roda comando).
+    #[test]
+    fn clone_recusa_opcao_no_lugar_da_url() {
+        let tmp = std::env::temp_dir().join(format!("kabul-clone-inj-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let marker = tmp.join("pwned");
+        let mut s = Store::open(tmp.join("state.json"), tmp.join("ws"), "val".into()).unwrap();
+        let evil = format!("--upload-pack=touch {}", marker.display());
+        assert!(s.clone_repo(&evil).is_err());
+        assert!(!marker.exists());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Branch de PR com o nome de uma branch local (ex.: `main`) não é atualizada pelo fetch.
+    #[test]
+    fn fetch_pr_nao_sobrescreve_branch_local() {
+        let tmp = std::env::temp_dir().join(format!("kabul-fetchpr-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let (origin, clone) = (tmp.join("origin"), tmp.join("clone"));
+        std::fs::create_dir_all(&origin).unwrap();
+        let g = |d: &Path, a: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(d).args(["-c", "user.name=t", "-c", "user.email=t@t"]).args(a).output().unwrap().status.success(), "{a:?}");
+        g(&origin, &["init", "-q", "-b", "main"]);
+        g(&origin, &["commit", "-q", "--allow-empty", "-m", "i"]);
+        g(&tmp, &["clone", "-q", origin.to_str().unwrap(), clone.to_str().unwrap()]);
+        g(&origin, &["checkout", "-q", "-b", "fork"]);
+        g(&origin, &["commit", "-q", "--allow-empty", "-m", "do pr"]);
+        g(&origin, &["update-ref", "refs/pull/7/head", "HEAD"]);
+        g(&origin, &["update-ref", "refs/pull/8/head", "HEAD"]);
+        let head = |r: &str| String::from_utf8_lossy(&std::process::Command::new("git").arg("-C").arg(&clone).args(["rev-parse", r]).output().unwrap().stdout).trim().to_string();
+        let before = head("refs/heads/main");
+        let b = fetch_pr(&clone, 7, "main").unwrap();
+        assert_eq!(b, "pr-7");
+        assert_eq!(head("refs/heads/main"), before, "main local intacta");
+        assert_eq!(fetch_pr(&clone, 8, "-x").unwrap(), "pr-8");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

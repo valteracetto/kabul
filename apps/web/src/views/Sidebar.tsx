@@ -1,14 +1,57 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Floating } from "../components/Floating";
 import { createPortal } from "react-dom";
 import { api, STATUS_LABEL, STATUS_ORDER, wsTitle, type Repo, type Section, type Workspace } from "../api";
 import type { AgentState, Route } from "../App";
-import { RunsOnBadge, cloudList, cloudRunsOn } from "../components/RunsOn";
+import { RunsOnBadge, cloudList, cloudRunsOn, type CloudRecord } from "../components/RunsOn";
 import { MachinePicker } from "../components/MachinePicker";
 import { ResourcesChip } from "../components/Resources";
 import { confirmDialog } from "../components/Confirm";
+import { chatStore, statusOf, useChatSelect } from "../components/chatStore";
 import { useDismiss, usePopover } from "../components/useDismiss";
 import { noSuggest } from "../noSuggest";
-import { IArchive, IBack, IChevronDown, IChevronRight, ICube, IFwd, IGear, IGrid, IHelp, IHome, IMore, IPin, IPlus, IRestore, ISearch, ISidebar, RepoMark } from "../icons";
+import { IBranch, IEye, IEyeOff, IHistory, ILink, IList, IPR, ITrash } from "../icons";
+import { IArchive, IBack, IChevronDown, IChevronRight, ICube, IFwd, IGauge, IGear, IGrid, IHelp, IHome, IMore, IPin, IPlus, ISearch, ISidebar, RepoMark } from "../icons";
+
+type RowH = { down: (w: Workspace, e: React.PointerEvent) => void; click: (w: Workspace) => void; ctx: (w: Workspace, e: React.MouseEvent) => void; enter: (w: Workspace) => void; leave: () => void; mdown: () => void; stay: () => void };
+
+/**
+ * Linha do workspace, memorizada: com 100 workspaces, um evento de um agente só re-renderiza a linha
+ * dele (antes, a barra lateral inteira). Fora da tela, o navegador pula layout e pintura (content-visibility).
+ */
+const WsRow = memo(function WsRow({ w, s, ag, on, dragging, dragActive, byStatus, repoName, peek, cloud, h }: {
+  w: Workspace; s?: [number, number]; ag?: AgentState; on: boolean; dragging: boolean; dragActive: boolean; byStatus: boolean; repoName: string; peek: boolean; cloud?: CloudRecord; h: React.RefObject<RowH>;
+}) {
+  return (
+    <div className={"ws-row" + (on ? " on" : "") + (w.unread && !on ? " unread" : "") + (dragging ? " dragging" : "")}
+      onPointerDown={(e) => e.button === 0 && h.current!.down(w, e)}
+      onClick={() => h.current!.click(w)}
+      onContextMenu={(e) => h.current!.ctx(w, e)}
+      onMouseEnter={() => !dragActive && h.current!.enter(w)} onMouseLeave={() => h.current!.leave()} onMouseDown={() => h.current!.mdown()}
+      data-testid="ws-row" data-ws={w.id}>
+      {ag === "working" ? <span className="spinner tiny" title="Agente trabalhando" /> : ag === "waiting" ? <span className="agent-dot waiting" title="Esperando você" /> : ag === "queued" ? <span className="agent-dot queued" title="Agente aguardando vaga" data-testid="ws-queued" /> : w.state === "setting_up" ? <span className="spinner tiny" title="Rodando setup" /> : byStatus ? <RepoMark name={repoName || "?"} size={14} /> : w.pr_url ? <span className="ws-ico" data-status={w.status} title={`PR · ${STATUS_LABEL[w.status] ?? w.status}`}><IPR size={14} /></span> : <span className="ws-ico" data-status={w.status} title={STATUS_LABEL[w.status] ?? w.status}><IBranch size={14} /></span>}
+      <span className="ws-title">{wsTitle(w)}</span>
+      {cloud && <RunsOnBadge r={cloudRunsOn(cloud)} size={12} />}
+      {w.unread && !on && <span className="unread-dot" title="Não lido" />}
+      <span className="grow" />
+      {s && (s[0] > 0 || s[1] > 0) && <span className="ws-stat"><span className="add">+{fmt(s[0])}</span>{s[1] > 0 && <span className="del"> -{fmt(s[1])}</span>}</span>}
+      <button className="icon-btn hover-only" title="Arquivar (⌘⇧A)" data-testid="archive" onClick={(e) => (e.stopPropagation(), window.dispatchEvent(new CustomEvent("kabul:archive", { detail: w.id })))}><IArchive size={14} /></button>
+      {peek && (
+        <Floating className="ws-peek" placement="right-start" gap={8} testid="ws-peek">
+          <div onMouseEnter={() => h.current!.stay()} onMouseLeave={() => h.current!.leave()} onClick={(e) => e.stopPropagation()}>
+            <div className="peek-title">{wsTitle(w)}</div>
+            <div className="dim small">{repoName} · <span className="mono">{w.branch}</span></div>
+            <div className="peek-row"><span className={"st-icon st-" + w.status} /> {STATUS_LABEL[w.status] ?? w.status}{ag && <span className="dim"> · {ag === "working" ? "agente trabalhando" : ag === "queued" ? "aguardando vaga" : "esperando você"}</span>}</div>
+            {s && (s[0] > 0 || s[1] > 0) && <div className="peek-row mono small"><span className="add">+{s[0]}</span> <span className="del">−{s[1]}</span> <span className="dim">linhas</span></div>}
+            {w.pr_url && <div className="peek-row small">PR <span className="mono">{w.pr_url.split("/").pop()}</span></div>}
+            {w.notes && <div className="peek-notes small">{w.notes}</div>}
+            <div className="dim small">Porta {w.port} · {w.path.split(/[\\/]/).slice(-2).join("/")}</div>
+          </div>
+        </Floating>
+      )}
+    </div>
+  );
+});
 
 const COLLAPSED = "kabul.collapsedRepos";
 const PREFS = "kabul.sidebar";
@@ -49,7 +92,7 @@ type Menu = { kind: "ws"; w: Workspace; x: number; y: number } | { kind: "repo";
 type Drop = { kind: "section"; id: string } | { kind: "pinned" } | { kind: "repo"; id: string } | { kind: "status"; id: string };
 
 export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route, onRoute, onChange, onError, onSearch, onCollapse, onCreate, onAddProject, onHelp }: Props) {
-  const [, bump] = useState(0);
+  const [cloudBump, bump] = useState(0);
   useEffect(() => {
     const h = () => bump((x) => x + 1);
     window.addEventListener("kabul:cloud-changed", h);
@@ -66,7 +109,6 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
   const [sections, setSections] = useState<Section[]>([]);
   const loadSections = useCallback(() => void api.sections().then(setSections, () => {}), []);
   useEffect(() => loadSections(), [loadSections, workspaces]);
-  const [showArchived, setShowArchived] = useState(false);
   const [menu, setMenu] = useState<Menu | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   useDismiss(menuRef, !!menu, useCallback(() => setMenu(null), []));
@@ -79,6 +121,8 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
     return () => window.removeEventListener("kabul:new-section", h);
   }, []);
 
+  // Conversas com agente ativo (todas as abas de todos os workspaces), para o contador de "Agentes".
+  const activeAgents = useChatSelect(() => chatStore.all().filter((c) => statusOf(c) !== "idle").length, Object.is);
   const patch = (w: Workspace, p: Parameters<typeof api.updateWorkspace>[1]) => api.updateWorkspace(w.id, p).then(onChange, (e) => onError(String(e)));
   const archived = workspaces.filter((w) => w.archived);
   const live = workspaces.filter((w) => !w.archived);
@@ -88,6 +132,8 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
   const inSection = (sid: string) => live.filter((w) => !w.pinned && w.section === sid).sort(sortFn);
   const free = live.filter((w) => !w.pinned && !(w.section && sections.some((s) => s.id === w.section)));
   const visibleRepos = repos.filter((r) => prefs.showHidden || !r.hidden);
+  const repoNames = useMemo(() => new Map(repos.map((r) => [r.id, r.name])), [repos]);
+  const repoName = (id: string) => repoNames.get(id) ?? "";
 
   // ---------- arrastar (ponteiro, a partir de 5 px; Esc cancela; rola sozinho perto das bordas) ----------
   const [drag, setDrag] = useState<{ w: Workspace; x: number; y: number; over: string | null } | null>(null);
@@ -131,28 +177,29 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
   const dropProps = (key: string, d: Drop) => ({ "data-drop": key, "data-dropv": JSON.stringify(d) });
   const over = (key: string) => (drag && drag.over === key ? " drop-on" : "");
 
-  // ---------- linha do workspace ----------
-  const row = (w: Workspace) => {
-    const s = stats[w.id];
-    const ag = agents[w.id];
-    const on = route.kind === "workspace" && route.id === w.id;
-    return (
-      <div key={w.id} className={"ws-row" + (on ? " on" : "") + (w.unread && !on ? " unread" : "") + (drag?.w.id === w.id ? " dragging" : "")}
-        onPointerDown={(e) => e.button === 0 && (start.current = { w, x: e.clientX, y: e.clientY })}
-        onClick={() => !drag && onRoute({ kind: "workspace", id: w.id })}
-        onContextMenu={(e) => (e.preventDefault(), setSub(null), setMenu({ kind: "ws", w, x: e.clientX, y: e.clientY }))}
-        title={`${w.branch} · ${STATUS_LABEL[w.status] ?? w.status}`} data-testid="ws-row" data-ws={w.id}>
-        {ag === "working" ? <span className="spinner tiny" title="Agente trabalhando" /> : ag === "waiting" ? <span className="agent-dot waiting" title="Esperando você" /> : w.state === "setting_up" ? <span className="spinner tiny" title="Rodando setup" /> : prefs.groupBy === "status" ? <RepoMark name={repos.find((r) => r.id === w.repo_id)?.name ?? "?"} size={14} /> : <span className={"st-icon st-" + w.status} title={STATUS_LABEL[w.status]} />}
-        <span className="ws-title">{wsTitle(w)}</span>
-        {cloudList(w.id)[0] && <RunsOnBadge r={cloudRunsOn(cloudList(w.id)[0])} size={12} />}
-        {w.unread && !on && <span className="unread-dot" title="Não lido" />}
-        <span className="grow" />
-        {s && (s[0] > 0 || s[1] > 0) && <span className="ws-stat"><span className="add">+{fmt(s[0])}</span>{s[1] > 0 && <span className="del"> -{fmt(s[1])}</span>}</span>}
-        <button className="icon-btn hover-only" title="Arquivar (⌘⇧A)" data-testid="archive" onClick={(e) => (e.stopPropagation(), window.dispatchEvent(new CustomEvent("kabul:archive", { detail: w.id })))}><IArchive size={14} /></button>
-      </div>
-    );
-  };
+  // ---------- cartão de prévia (hover): abre em 700 ms, fecha 200 ms depois de sair ----------
+  const [peek, setPeek] = useState<string | null>(null);
+  const peekT = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const peekIn = (id: string) => (peekT.current && clearTimeout(peekT.current), (peekT.current = setTimeout(() => setPeek(id), 700)));
+  const peekOut = () => (peekT.current && clearTimeout(peekT.current), (peekT.current = setTimeout(() => setPeek(null), 200)));
+  const peekStay = () => peekT.current && clearTimeout(peekT.current);
 
+  // ---------- linha do workspace (memorizada; os handlers vão por ref) ----------
+  const cloudOf = useMemo(() => new Map(live.map((w) => [w.id, cloudList(w.id)[0]])), [live.length, workspaces, cloudBump]);
+  const rowH = useRef<RowH>(null as never);
+  rowH.current = {
+    down: (w, e) => void (start.current = { w, x: e.clientX, y: e.clientY }),
+    click: (w) => !drag && onRoute({ kind: "workspace", id: w.id }),
+    ctx: (w, e) => (e.preventDefault(), setSub(null), setMenu({ kind: "ws", w, x: e.clientX, y: e.clientY })),
+    enter: (w) => peekIn(w.id),
+    leave: peekOut,
+    mdown: () => (peekT.current && clearTimeout(peekT.current), setPeek(null)),
+    stay: () => void peekStay(),
+  };
+  const row = (w: Workspace) => (
+    <WsRow key={w.id} w={w} s={stats[w.id]} ag={agents[w.id]} on={route.kind === "workspace" && route.id === w.id} dragging={drag?.w.id === w.id} dragActive={!!drag}
+      byStatus={prefs.groupBy === "status"} repoName={repoName(w.repo_id)} peek={peek === w.id && !drag && !menu} cloud={cloudOf.get(w.id)} h={rowH} />
+  );
   // R e P com o menu de contexto aberto.
   useEffect(() => {
     if (menu?.kind !== "ws") return;
@@ -187,17 +234,21 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
       <div className="machine"><MachinePicker onRoute={onRoute} /></div>
       <nav className="side-nav">
         <button className={route.kind === "sessions" ? "on" : ""} onClick={() => onRoute({ kind: "sessions" })}><IGrid /> Painel</button>
+        <button className={route.kind === "agents" ? "on" : ""} onClick={() => onRoute({ kind: "agents" })} data-testid="nav-agents"><ICube /> Agentes <span className="grow" />{activeAgents > 0 && <span className="nav-count" data-testid="agents-count">{activeAgents}</span>}</button>
+        <button className={route.kind === "dashboard" ? "on" : ""} onClick={() => onRoute({ kind: "dashboard" })} data-testid="nav-dashboard"><IList /> Quadro</button>
         <button className={route.kind === "home" ? "on" : ""} onClick={() => onRoute({ kind: "home" })}><IHome /> Início <span className="grow" /><kbd>⌘⇧H</kbd></button>
         <button onClick={() => onCreate()} data-testid="create-ws"><IPlus /> Criar <span className="grow" /><kbd>⌘N</kbd></button>
+        <button className={route.kind === "routines" ? "on" : ""} onClick={() => onRoute({ kind: "routines" })} data-testid="nav-routines"><IHistory /> Rotinas</button>
         <button onClick={onSearch}><ISearch /> Buscar <span className="grow" /><kbd>⌘K</kbd></button>
         <button className={route.kind === "local" ? "on" : ""} onClick={() => onRoute({ kind: "local" })}><ICube /> Modelos locais</button>
+        <button className={route.kind === "usage" ? "on" : ""} onClick={() => onRoute({ kind: "usage" })} data-testid="nav-usage"><IGauge /> Uso</button>
       </nav>
       <div className="side-section side-group-head">
         <span>Meus workspaces</span><span className="grow" />
         <span className="picker" ref={groupMenu.ref}>
           <button className="icon-btn" title="Agrupar, ordenar, seções" onClick={groupMenu.toggle} data-testid="group-menu"><IMore size={13} /></button>
           {groupMenu.open && (
-            <div className="popover status-pop group-pop" data-testid="group-pop">
+            <Floating className="status-pop group-pop" placement="bottom-end" testid="group-pop">
               <div className="pop-title">Agrupar por</div>
               <div className={"pop-row" + (prefs.groupBy === "project" ? " on" : "")} onClick={() => setPrefs({ groupBy: "project" })} data-testid="group-project">Projeto</div>
               <div className={"pop-row" + (prefs.groupBy === "status" ? " on" : "")} onClick={() => setPrefs({ groupBy: "status" })} data-testid="group-status">Status</div>
@@ -209,7 +260,8 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
               <div className="pop-row" onClick={() => (groupMenu.close(), setDialog({ kind: "section" }))} data-testid="new-section">Nova seção…</div>
               <div className="pop-row" onClick={() => (groupMenu.close(), onAddProject())}>Adicionar projeto…</div>
               {repos.some((r) => r.hidden) && <div className="pop-row" onClick={() => setPrefs({ showHidden: !prefs.showHidden })} data-testid="toggle-hidden">{prefs.showHidden ? "Esconder repositórios ocultos" : "Mostrar repositórios ocultos"}</div>}
-            </div>
+              {archived.length > 0 && <div className="pop-row" onClick={() => (groupMenu.close(), window.dispatchEvent(new CustomEvent("kabul:palette", { detail: "archived" })))} data-testid="view-archived">Ver arquivados ({archived.length}) <span className="grow" /><span className="kbd-hint">⌘K</span></div>}
+            </Floating>
           )}
         </span>
       </div>
@@ -258,7 +310,7 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
                     {list.length > 0 && <span className="dim small">{list.length}</span>}
                     {isCollapsed && liveAg.length > 0 && <span className={"agent-dot " + (liveAg.includes("waiting") ? "waiting" : "working")} title={liveAg.includes("waiting") ? "Agente esperando você" : "Agente trabalhando"} data-testid="collapsed-indicator" />}
                     <span className="grow" />
-                    <button className="icon-btn hover-only-repo" title="Ações do repositório" onClick={(e) => (e.stopPropagation(), setMenu({ kind: "repo", r, x: e.clientX, y: e.clientY }))} data-testid={`repo-more-${r.name}`}><IMore size={13} /></button>
+                    <button className="icon-btn hover-only-repo" title="Ações do repositório" onClick={(e) => { e.stopPropagation(); const b = e.currentTarget.getBoundingClientRect(); setMenu({ kind: "repo", r, x: Math.max(8, b.left - 24), y: b.bottom + 4 }); }} data-testid={`repo-more-${r.name}`}><IMore size={13} /></button>
                     <button className="icon-btn" title="Novo workspace (⌘N)" onClick={(e) => (e.stopPropagation(), onCreate(r.id))} data-testid={`new-ws-${r.name}`}><IPlus /></button>
                   </div>
                   {!isCollapsed && list.length === 0 && <div className="ws-empty">Sem workspaces. <button className="text-btn" onClick={() => onCreate(r.id)}>Criar um</button></div>}
@@ -266,17 +318,6 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
                 </div>
               );
             })}
-        {archived.length > 0 && (
-          <div className="repo-group">
-            <div className="side-section clickable" onClick={() => setShowArchived(!showArchived)}>Arquivados ({archived.length}) {showArchived ? "▾" : "▸"}</div>
-            {showArchived && archived.map((w) => (
-              <div key={w.id} className="ws-row archived" data-testid="archived-row">
-                <IArchive size={13} /><span className="ws-title">{wsTitle(w)}</span><span className="grow" />
-                <button className="icon-btn" title="Desarquivar (recria o worktree com as mudanças)" data-testid="unarchive" onClick={() => api.unarchiveWorkspace(w.id).then(() => (onChange(), onRoute({ kind: "workspace", id: w.id })), (e) => onError(String(e)))}><IRestore size={13} /></button>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
       <div className="side-foot">
         <span className="grow" />
@@ -327,12 +368,12 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
             const close = () => setMenu(null);
             return (
               <>
-                <div className="pop-row" onClick={() => (close(), onCreate(r.id))} data-testid="repo-ctx-create">Criar workspace<span className="grow" /><span className="kbd-hint">⌘N</span></div>
-                <div className="pop-row" onClick={() => (close(), onCreate(r.id, true))}>Criar a partir de…<span className="grow" /><span className="kbd-hint">⌘⇧N</span></div>
-                <div className="pop-row" onClick={() => (close(), onRoute({ kind: "settings", tab: "repo", repoId: r.id }))}>Configurações do repositório<span className="grow" /><span className="kbd-hint">⌘,</span></div>
-                <div className="pop-row" onClick={() => (close(), api.repoUpdate(r.id, { hidden: !r.hidden }).then(onChange, (e) => onError(String(e))))} data-testid="repo-ctx-hide">{r.hidden ? "Mostrar repositório" : "Ocultar repositório"}</div>
+                <div className="pop-row" onClick={() => (close(), onCreate(r.id))} data-testid="repo-ctx-create"><IPlus size={14} /> Criar workspace</div>
+                <div className="pop-row" onClick={() => (close(), onCreate(r.id, true))} data-testid="repo-ctx-from"><ILink size={14} /> Criar a partir de…</div>
+                <div className="pop-row" onClick={() => (close(), onRoute({ kind: "settings", tab: "repo", repoId: r.id }))} data-testid="repo-ctx-config"><IGear size={14} /> Configuração</div>
+                <div className="pop-row" onClick={() => (close(), api.repoUpdate(r.id, { hidden: !r.hidden }).then(onChange, (e) => onError(String(e))))} data-testid="repo-ctx-hide">{r.hidden ? <IEye size={14} /> : <IEyeOff size={14} />} {r.hidden ? "Mostrar repositório" : "Ocultar repositório"}</div>
                 <div className="pop-sep" />
-                <div className="pop-row danger" onClick={async () => { close(); if (await confirmDialog(`Remover ${r.name} do Kabul? A pasta e o repositório continuam no disco; os workspaces precisam estar arquivados.`, { ok: "Remover", danger: true })) api.removeRepo(r.id).then(onChange, (e) => onError(String(e))); }} data-testid="repo-ctx-remove">Remover repositório…</div>
+                <div className="pop-row danger" onClick={async () => { close(); if (await confirmDialog(`Remover ${r.name} do Kabul? A pasta e o repositório continuam no disco; os workspaces precisam estar arquivados.`, { ok: "Remover", danger: true })) api.removeRepo(r.id).then(onChange, (e) => onError(String(e))); }} data-testid="repo-ctx-remove"><ITrash size={14} /> Remover repositório…</div>
               </>
             );
           })()}

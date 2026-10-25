@@ -1,7 +1,7 @@
 {
   "name": "@kabul/web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.9.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,18 +9,24 @@
     "preview": "vite preview",
     "e2e": "playwright test",
     "e2e:kabuld": "playwright test -c playwright.kabuld.config.ts",
+    "perf": "playwright test -c playwright.perf.config.ts",
     "docs:shortcuts": "node scripts/gen-shortcuts-doc.mjs"
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.8.0",
     "@tauri-apps/api": "^2",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-search": "^0.15.0",
+    "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
     "geist": "^1.8.2",
-    "katex": "^0.16.47",
+    "katex": "^0.18.11",
     "mermaid": "^11.17.2",
     "react": "^19",
     "react-dom": "^19"
+  },
+  "overrides": {
+    "katex": "$katex"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

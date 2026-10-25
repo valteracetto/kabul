@@ -1,0 +1,68 @@
+/* Uso, custos e limites (aba Uso, barra do Kabul, celular). Cores pela skill dataviz: série única azul
+   validada nas duas superfícies do app; status reservados (bom/atenção/perto/limite) sempre com ícone + texto. */
+:root { --viz-series: #3987e5; --st-good: #0ca30c; --st-warning: #fab219; --st-serious: #ec835a; --st-critical: #d03b3b; --viz-grid: #2c2c2a; --viz-base: #383835; }
+:root[data-theme="light"] { --viz-series: #2a78d6; --viz-grid: #e1e0d9; --viz-base: #c3c2b7; }
+.usage .seg { margin: 0; }
+.usage .seg.inline { display: inline-flex; margin-left: 10px; vertical-align: middle; }
+.usage h3 { display: flex; align-items: center; gap: 4px; }
+.usage td.num, .usage th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.usage tr.clickable:hover td { background: var(--hover); }
+.usage-note { margin: 0 0 10px; padding: 7px 10px; border-radius: 8px; background: var(--raise); border: 1px solid var(--line-2); color: var(--text-2); font-size: 12.5px; }
+.usage-alerts { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.usage-alert { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--raise); color: var(--text); font-size: 12.5px; border-left: 3px solid var(--st-serious); margin-bottom: 6px; }
+.usage-alert.lv-critical { border-left-color: var(--st-critical); }
+.usage-suggest { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; background: var(--sunken); border: 1px solid var(--line); font-size: 12.5px; flex-wrap: wrap; }
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 4px 0 8px; max-width: 760px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.stat-v { font-size: 22px; font-weight: 600; color: var(--text); line-height: 1.25; }
+.usage-sources { margin-top: 6px; }
+.lim-blocks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.lim-block { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.lim-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.lim-head .dim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.lim-plan { font-size: 10.5px; color: var(--muted); border: 1px solid var(--line-2); border-radius: 5px; padding: 0 5px; text-transform: lowercase; }
+.lim-status { font-size: 11.5px; color: var(--text-2); }
+.lim-row { display: flex; flex-direction: column; gap: 3px; }
+.lim-top { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); }
+.lim-pct { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 500; }
+.lim-flag { font-size: 11px; color: var(--text-2); }
+.lim-track { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.lim-fill { height: 100%; border-radius: 3px; background: var(--st-good); min-width: 2px; }
+.lv-warning .lim-fill { background: var(--st-warning); }
+.lv-serious .lim-fill { background: var(--st-serious); }
+.lv-critical .lim-fill { background: var(--st-critical); }
+.day-chart { position: relative; max-width: 900px; }
+.day-chart svg { width: 100%; height: 162px; display: block; overflow: visible; }
+.dc-bar { fill: var(--viz-series); }
+.dc-bar.on { fill: var(--text); }
+.dc-grid { stroke: var(--viz-grid); stroke-width: 1; vector-effect: non-scaling-stroke; stroke-dasharray: 2 3; }
+.dc-base { stroke: var(--viz-base); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.dc-tick { fill: var(--dim); font-size: 11px; }
+.dc-max { position: absolute; top: -2px; left: 0; pointer-events: none; }
+.dc-tip { position: absolute; top: 8px; transform: translateX(-50%); background: var(--pop); border: 1px solid var(--pop-line); border-radius: 8px; padding: 5px 9px; font-size: 12px; color: var(--text); white-space: nowrap; pointer-events: none; box-shadow: var(--shadow); }
+
+/* Popover da barra do Kabul (janela `tray`). */
+html.tray-window, html.tray-window body { background: var(--pop); }
+.tray-pop { height: 100vh; display: flex; flex-direction: column; background: var(--pop); color: var(--text); font-size: 12.5px; }
+.tray-head { display: flex; align-items: center; padding: 10px 12px 6px; }
+.tray-spend { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 12px 8px; }
+.tray-spend b { font-size: 17px; }
+.tray-alert { margin: 0 12px 8px; padding: 6px 9px; border-radius: 7px; border-left: 3px solid var(--st-serious); background: var(--raise); cursor: pointer; }
+.tray-scroll { flex: 1; overflow-y: auto; padding: 0 12px 10px; display: flex; flex-direction: column; gap: 6px; }
+.tray-scroll .lim-blocks { grid-template-columns: 1fr; gap: 6px; }
+.tray-scroll .lim-block { padding: 8px 10px; gap: 6px; background: var(--raise); }
+.tray-sec { display: flex; align-items: center; gap: 4px; margin-top: 6px; color: var(--muted); font-size: 11.5px; }
+.tray-agent { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; border: 1px solid transparent; background: none; border-radius: 7px; padding: 5px 6px; min-width: 0; }
+.tray-agent:hover { background: var(--pop-hover); }
+.tray-agent .ta-ws { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; flex: none; }
+.tray-agent .dim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tray-agent .dot.on { background: var(--st-good); }
+.tray-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px 12px 12px; border-top: 1px solid var(--pop-line); }
+.tray-actions .btn { justify-content: center; }
+.btn.ghost { background: transparent; border-color: transparent; }
+
+/* Celular. */
+.m-usage h3 { font-size: 13px; color: var(--muted); margin: 18px 0 8px; font-weight: 500; }
+.m-usage .lim-blocks { grid-template-columns: 1fr; }
+.m-usage .m-usage-row { display: flex; align-items: center; gap: 8px; padding: 8px 2px; border-bottom: 1px solid var(--row-line); font-size: 14px; min-width: 0; }
+.m-btn.on { background: var(--sel); border-color: var(--focus); }

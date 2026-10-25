@@ -1,0 +1,44 @@
+name: perf
+
+# Orçamentos de desempenho do backend (ESCALA): o teste de carga sobe o kabuld de verdade com 100
+# workspaces sintéticos e 30 agentes falsos e reprova se CPU, memória ou latência passarem dos
+# limites de perf-budgets.json. Os benchmarks do core rodam em modo rápido (só para não quebrarem).
+on:
+  push:
+    branches: [main]
+    paths: ["crates/**", "Cargo.toml", "Cargo.lock", "perf-budgets.json", ".github/workflows/perf.yml"]
+  pull_request:
+    paths: ["crates/**", "Cargo.toml", "Cargo.lock", "perf-budgets.json", ".github/workflows/perf.yml"]
+  workflow_dispatch:
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  loadtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: perf
+      - name: tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Build (perfil perf)
+        run: cargo build --profile perf -p kabul-cli
+      - name: Teste de carga com orçamentos
+        run: |
+          ./target/perf/kabul loadtest --workspaces 100 --agents 30 --rate 20 --duration 20 --warmup 3 --clients 3 --tmux 10 \
+            --label ci --budgets perf-budgets.json --out perf-report.json
+      - name: Relatório
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-report
+          path: perf-report.json
+          if-no-files-found: ignore
+      - name: Benchmarks do core (rápido)
+        run: cargo bench --profile perf -p kabul-core --bench core -- --warm-up-time 0.2 --measurement-time 0.5

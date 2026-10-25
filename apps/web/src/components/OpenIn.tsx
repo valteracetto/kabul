@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Floating } from "./Floating";
 import { useDismiss } from "./useDismiss";
 import { api, type OpenTarget } from "../api";
 import { IChevronDown, ICopy } from "../icons";
@@ -62,7 +63,7 @@ export function OpenIn({ path, onError }: { path: string; onError: (e: string) =
         <button className="btn caret-btn" title="Abrir em…" onClick={() => setOpen(!open)} data-testid="open-in-menu"><IChevronDown size={12} /></button>
       </div>
       {open && (
-        <div className="popover open-pop">
+        <Floating className="open-pop" placement="bottom-end">
           {targets.map((t, i) => (
             <div key={t.id} className={"pop-row" + (t.id === last ? " on" : "")} onClick={() => run(t.id)}>
               <AppIcon t={t} size={20} /><span className="label">{t.name}</span><span className="grow" />
@@ -72,7 +73,7 @@ export function OpenIn({ path, onError }: { path: string; onError: (e: string) =
           <div className="pop-row" onClick={() => run("copy")}>
             <span className="app-glyph"><ICopy size={17} /></span><span className="label">Copiar caminho</span><span className="grow" /><span className="num">{targets.length + 1}</span>
           </div>
-        </div>
+        </Floating>
       )}
     </div>
   );

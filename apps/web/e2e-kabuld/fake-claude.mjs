@@ -2,7 +2,9 @@
 // Agente falso para o E2E: fala o protocolo stream-json do Claude Code (stdin/stdout NDJSON).
 // - "eco: <texto>" para qualquer mensagem;
 // - texto com "devagar": demora 1,5 s antes de responder (para testar a fila);
-// - texto com "aprovar": pede aprovação de Bash e espera o control_response.
+// - texto com "aprovar": pede aprovação de Bash e espera o control_response;
+// - texto com "planejar": propõe um plano (ExitPlanMode) e espera aprovar/ajustar;
+// - com `--permission-mode plan`, as respostas começam com "(plano) ".
 import { createInterface } from "node:readline";
 
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
@@ -22,7 +24,15 @@ async function turn(text) {
   if (text.includes("devagar")) await sleep(1500);
   // Retomada (--resume <id>): a resposta diz qual sessão continuou.
   const r = process.argv.indexOf("--resume");
-  let reply = `${r > 0 ? `retomada ${process.argv[r + 1]}: ` : ""}eco: ${text}`;
+  const pm = process.argv.indexOf("--permission-mode");
+  const planMode = pm > 0 && process.argv[pm + 1] === "plan";
+  let reply = `${planMode ? "(plano) " : ""}${r > 0 ? `retomada ${process.argv[r + 1]}: ` : ""}eco: ${text}`;
+  if (text.includes("planejar")) {
+    const id = `req-${++req}`;
+    out({ type: "control_request", request_id: id, request: { subtype: "can_use_tool", tool_name: "ExitPlanMode", input: { plan: "1. Ler o fluxo de login\n2. Corrigir a validação" } } });
+    const allowed = await new Promise((r) => waiting.set(id, r));
+    reply = allowed ? "Executando o plano." : "Plano descartado.";
+  }
   if (text.includes("aprovar")) {
     const id = `req-${++req}`;
     out({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: `tool-${req}`, name: "Bash", input: { command: "npm test" } }] }, session_id: session });

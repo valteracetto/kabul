@@ -1,0 +1,88 @@
+/* Preview de arquivos no celular: árvore, diff estreito, código com números, mídia com pinça. */
+.pv-main { display: flex; flex-direction: column; }
+.pv-loading { padding: 32px; text-align: center; }
+.pv-note { padding: 8px 14px; }
+.pv-files-btn { font-size: 18px !important; }
+
+.pv-search { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 6px 10px 8px; }
+.pv-search input { width: 100%; box-sizing: border-box; }
+.pv-node, .pv-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--row-line, var(--line)); padding: 6px 12px; font-size: 14.5px; color: var(--text); }
+.pv-node.dir { font-weight: 600; color: var(--text-2); }
+.pv-ico { width: 14px; flex: none; color: var(--dim); text-align: center; font-size: 12px; }
+.pv-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pv-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; }
+.pv-badge { flex: none; font: 600 10.5px var(--mono); padding: 2px 6px; border-radius: 6px; background: var(--raise); color: var(--muted); min-width: 22px; text-align: center; }
+.pv-badge.new { background: var(--add-bg); color: var(--add-fg); }
+.pv-row.off { opacity: .6; }
+.pv-nums { flex: none; font-family: var(--mono); }
+.pv-add { color: var(--add); }
+.pv-del { color: var(--del); margin-left: 4px; }
+
+.pv-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+.pv-modes { display: flex; margin: 8px 10px 0; border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; }
+.pv-modes button { flex: 1; background: transparent; border: 0; padding: 7px; font-size: 13px; }
+.pv-modes button.on { background: var(--sel); font-weight: 600; }
+.pv-more { margin: 10px auto 16px; display: block; }
+
+/* Código: número de linha que toca (seleciona) e texto com realce. */
+.pv-code, .pv-diff { font: 12.5px/1.55 var(--mono); padding: 4px 0 80px; user-select: text; -webkit-user-select: text; }
+.pv-line, .pv-dl { display: flex; align-items: flex-start; min-width: 0; }
+.pv-ln { flex: none; min-width: 3.4em; padding: 0 8px 0 4px; text-align: right; color: var(--faint); background: transparent; border: 0; font: inherit; user-select: none; -webkit-user-select: none; position: sticky; left: 0; background: var(--bg); }
+.pv-text { flex: 1; min-width: 0; white-space: pre; padding-right: 10px; }
+.wrap .pv-text { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+.pv-code-wrap:not(.wrap) .pv-code, .pv-diff-wrap:not(.wrap) .pv-diff { overflow-x: auto; }
+.pv-code-wrap:not(.wrap) .pv-line, .pv-diff-wrap:not(.wrap) .pv-dl { width: max-content; min-width: 100%; }
+.pv-line.sel, .pv-dl.sel { background: var(--sel); }
+.pv-line.sel .pv-ln, .pv-dl.sel .pv-ln { background: var(--sel); color: var(--text); }
+.pv-dl.a { background: var(--add-bg); color: var(--add-fg); }
+.pv-dl.d { background: var(--del-bg); color: var(--del-fg); }
+.pv-dl.a .pv-ln, .pv-dl.d .pv-ln { background: inherit; }
+.pv-sign { flex: none; width: 1.1em; text-align: center; user-select: none; -webkit-user-select: none; }
+.pv-hunk { padding: 4px 10px; color: var(--dim); background: var(--sunken); font-size: 11.5px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.pv-selbar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 6px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: var(--pop); border-top: 1px solid var(--pop-line); box-shadow: var(--shadow); font-size: 13px; margin-top: auto; }
+.pv-pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--mono); padding: 10px; }
+
+.pv-md { padding: 12px 16px 40px; font-size: 15px; line-height: 1.55; user-select: text; -webkit-user-select: text; }
+.pv-md .md-img { max-width: 100%; }
+
+/* Imagem com pinça: só ela escala, a página não dá zoom. */
+.pv-image, .pv-media { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.pv-zoom { position: relative; flex: 1; min-height: 50vh; overflow: hidden; touch-action: none; background: repeating-conic-gradient(var(--sunken) 0 25%, var(--bg) 0 50%) 0 0 / 16px 16px; display: flex; }
+.pv-zoom-in { transform-origin: 0 0; width: 100%; display: flex; align-items: center; justify-content: center; will-change: transform; }
+.pv-zoom-in img { max-width: 100%; max-height: 70vh; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; pointer-events: none; }
+.pv-zoom-reset { position: absolute; right: 10px; top: 10px; }
+.pv-media video { width: 100%; max-height: 70vh; background: #000; }
+.pv-media audio { width: calc(100% - 24px); margin: 24px 12px; }
+
+.pv-card { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 20px; text-align: center; }
+.pv-card-icon { width: 64px; height: 76px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--raise); display: flex; align-items: center; justify-content: center; font: 700 13px var(--mono); color: var(--muted); }
+.pv-card-name { word-break: break-all; }
+.pv-card a.m-btn { text-decoration: none; display: inline-flex; align-items: center; }
+.pv-bar a.m-btn { text-decoration: none; display: inline-flex; align-items: center; }
+
+.pv-table-wrap { overflow: auto; max-height: calc(100vh - 170px); }
+.pv-table { border-collapse: collapse; font: 12.5px/1.4 var(--mono); }
+.pv-table th, .pv-table td { border: 1px solid var(--line); padding: 4px 8px; white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.pv-table th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.pv-rn { color: var(--faint); text-align: right !important; position: sticky; left: 0; background: var(--bg); }
+.pv-table th.pv-rn { background: var(--panel); z-index: 2; }
+
+.pv-json { font: 12.5px/1.6 var(--mono); padding: 8px 10px 40px; user-select: text; -webkit-user-select: text; }
+.pv-jnode > summary { cursor: pointer; list-style: revert; }
+.pv-jkids { padding-left: 16px; border-left: 1px solid var(--line); margin-left: 4px; }
+.pv-jrow { white-space: pre-wrap; word-break: break-word; }
+.pv-jk { color: var(--text-2); }
+
+.pv-app .pv-row { min-height: 52px; }
+.pv-app a { text-decoration: none; }
+
+.pv-ask { display: flex; flex-direction: column; gap: 10px; padding: 4px 14px 8px; }
+.pv-ask-snippet { margin: 0; max-height: 140px; overflow: auto; font: 11.5px/1.45 var(--mono); background: var(--sunken); border-radius: 8px; padding: 8px; white-space: pre-wrap; word-break: break-word; }
+.pv-ask select, .pv-ask textarea { font-size: 16px; padding: 10px; border-radius: 10px; }
+
+/* Chat: caminhos citados viram link; faixa de arquivos alterados acima do campo. */
+.pv-filecode { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; cursor: pointer; color: var(--accent); }
+.pv-chips { display: flex; gap: 6px; overflow-x: auto; padding: 6px 8px; border-top: 1px solid var(--line); scrollbar-width: none; background: var(--panel); }
+.pv-chip { flex: none; display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line-2); background: var(--raise); border-radius: 999px; padding: 4px 10px; font: 12px var(--mono); color: var(--text); white-space: nowrap; }
+.pv-chip.files { font-family: inherit; font-weight: 600; }
+.pv-chip .pv-del { margin-left: 2px; }

@@ -20,6 +20,24 @@ impl ClaudeCode {
         env
     }
 
+    /// `--settings` com o endpoint no `env`: o `env` do `~/.claude/settings.json` do usuário (ex.: um
+    /// `ANTHROPIC_BASE_URL` próprio) ganha da variável do processo, e as settings da linha de comando
+    /// ganham das do usuário. Sem isso o modelo local ia para o servidor das settings.
+    pub fn settings(opts: &SessionOptions) -> Option<String> {
+        let base: Option<Value> = opts.settings_json.as_deref().and_then(|s| serde_json::from_str(s).ok());
+        if opts.endpoint.is_none() {
+            return opts.settings_json.clone();
+        }
+        let mut v = base.unwrap_or_else(|| json!({}));
+        if !v["env"].is_object() {
+            v["env"] = json!({});
+        }
+        for (k, val) in Self::endpoint_env(&SessionOptions { env: vec![], ..opts.clone() }) {
+            v["env"][k] = Value::String(val);
+        }
+        Some(v.to_string())
+    }
+
     fn common(opts: &SessionOptions, a: &mut Vec<String>) {
         let model = opts.endpoint.as_ref().map(|e| e.model.clone()).or_else(|| opts.model.clone());
         let mut push = |k: &str, v: &Option<String>| {
@@ -32,7 +50,7 @@ impl ClaudeCode {
         push("--effort", &opts.effort);
         push("--permission-mode", &opts.permission_mode);
         push("--resume", &opts.resume);
-        push("--settings", &opts.settings_json);
+        push("--settings", &Self::settings(opts));
         push("--append-system-prompt", &opts.system_prompt);
         if opts.fork && opts.resume.is_some() {
             a.push("--fork-session".into());
@@ -42,7 +60,10 @@ impl ClaudeCode {
             a.push(d.clone());
         }
         if let Some(c) = &opts.mcp_config {
-            a.extend(["--mcp-config".into(), c.clone(), "--strict-mcp-config".into()]);
+            a.extend(["--mcp-config".into(), c.clone()]);
+            if opts.mcp_strict {
+                a.push("--strict-mcp-config".into());
+            }
         }
     }
 }
@@ -75,8 +96,8 @@ impl Harness for ClaudeCode {
         CmdSpec::new("claude", a).with_cwd(opts.cwd.clone()).with_env(&Self::endpoint_env(opts))
     }
 
-    fn protocol(&self, _opts: &SessionOptions) -> Box<dyn Protocol> {
-        Box::new(ClaudeProtocol::default())
+    fn protocol(&self, opts: &SessionOptions) -> Box<dyn Protocol> {
+        Box::new(ClaudeProtocol { plan: opts.permission_mode.as_deref() == Some("plan"), ..Default::default() })
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -125,15 +146,53 @@ impl Harness for ClaudeCode {
 #[derive(Default)]
 pub struct ClaudeProtocol {
     pub session_id: Option<String>,
+    /// Em plan mode. Com `--permission-prompt-tool` o Claude pergunta ao app até em plan, e aprovar
+    /// escreve (confirmado com o teste `plan_real`): o Kabul nega edição sozinho enquanto isso.
+    pub plan: bool,
 }
+
+/// Ferramentas que mudam arquivos: negadas em plan mode (Bash continua indo para o cartão).
+const PLAN_DENY: [&str; 4] = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 
 impl Protocol for ClaudeProtocol {
     fn on_line(&mut self, line: &str) -> (Vec<Event>, Vec<String>) {
-        (parse_claude_line(line, &mut self.session_id), vec![])
+        let ev = parse_claude_line(line, &mut self.session_id);
+        if !self.plan {
+            return (ev, vec![]);
+        }
+        let mut out = vec![];
+        let mut replies = vec![];
+        for e in ev {
+            match &e {
+                Event::ApprovalRequest { request_id, tool, .. } if PLAN_DENY.contains(&tool.as_str()) => {
+                    replies.push(
+                        json!({"type":"control_response","response":{"subtype":"success","request_id":request_id,"response":{"behavior":"deny","message":"Plan mode: não edite agora. Apresente o plano com ExitPlanMode e espere a aprovação."}}})
+                            .to_string(),
+                    );
+                    out.push(Event::Log { line: format!("plan mode: {tool} negado") });
+                }
+                _ => out.push(e),
+            }
+        }
+        (out, replies)
     }
 
     fn user_message(&mut self, text: &str) -> Vec<String> {
         vec![json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":text}]}}).to_string()]
+    }
+
+    /// `control_request` `set_permission_mode`: sai (ou entra) do plan mode sem reiniciar a sessão.
+    fn set_mode(&mut self, mode: &str) -> Option<Vec<String>> {
+        self.plan = mode == "plan";
+        let id = format!("kabul-mode-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+        Some(vec![json!({"type":"control_request","request_id":id,"request":{"subtype":"set_permission_mode","mode":mode}}).to_string()])
+    }
+
+    /// `control_request` de interrupção do stream-json: o Claude encerra o comando em primeiro plano e o
+    /// turno, e a sessão continua aberta para a próxima mensagem.
+    fn interrupt(&mut self) -> Option<Vec<String>> {
+        let id = format!("kabul-int-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+        Some(vec![json!({"type":"control_request","request_id":id,"request":{"subtype":"interrupt"}}).to_string()])
     }
 
     fn approval_ext(&mut self, request_id: &str, allow: bool, tool: &str, updated_input: Option<Value>, always: bool) -> Vec<String> {
@@ -151,14 +210,16 @@ impl Protocol for ClaudeProtocol {
 }
 
 /// Nome da pasta do projeto em `~/.claude/projects` (caminho com `/` e `.` trocados por `-`).
+/// Pasta do projeto em `~/.claude/projects`: o Claude troca todo caractere que não é letra ASCII ou
+/// dígito por `-` (`/home/dev/a.b` → `-home-dev-a-b`; `C:\w` → `C--w`; espaço também vira `-`).
 pub fn project_dir_name(cwd: &std::path::Path) -> String {
-    cwd.display().to_string().chars().map(|c| if c == '/' || c == '.' { '-' } else { c }).collect()
+    cwd.display().to_string().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
 /// Copia o transcript de uma sessão para o projeto de outro diretório, para `--resume` funcionar lá
 /// (fork para um workspace novo).
 pub fn copy_session(id: &str, from_cwd: &std::path::Path, to_cwd: &std::path::Path) -> anyhow::Result<()> {
-    let base = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".claude/projects");
+    let base = crate::paths::home().join(".claude").join("projects");
     let src = base.join(project_dir_name(from_cwd)).join(format!("{id}.jsonl"));
     let dir = base.join(project_dir_name(to_cwd));
     std::fs::create_dir_all(&dir)?;
@@ -232,9 +293,7 @@ pub fn parse_claude_line(line: &str, session: &mut Option<String>) -> Vec<Event>
             out.push(Event::TurnCompleted {
                 result: s(&v, "result"),
                 // Contexto usado = entrada nova + lida do cache + gravada no cache.
-                input_tokens: v.pointer("/usage/input_tokens").and_then(Value::as_u64).map(|i| {
-                    i + ["/usage/cache_read_input_tokens", "/usage/cache_creation_input_tokens"].iter().filter_map(|k| v.pointer(k).and_then(Value::as_u64)).sum::<u64>()
-                }),
+                input_tokens: v.pointer("/usage/input_tokens").and_then(Value::as_u64).map(|i| i + ["/usage/cache_read_input_tokens", "/usage/cache_creation_input_tokens"].iter().filter_map(|k| v.pointer(k).and_then(Value::as_u64)).sum::<u64>()),
                 output_tokens: v.pointer("/usage/output_tokens").and_then(Value::as_u64),
                 cost_usd: v.get("total_cost_usd").and_then(Value::as_f64),
             });
@@ -265,7 +324,10 @@ mod tests {
     #[test]
     fn init_com_mcp() {
         let mut sid = None;
-        let ev = parse_claude_line(r#"{"type":"system","subtype":"init","session_id":"s","tools":["Bash","mcp__linear__list_issues","mcp__linear__get_issue"],"mcp_servers":[{"name":"linear","status":"connected"},{"name":"quebrado","status":"failed"}]}"#, &mut sid);
+        let ev = parse_claude_line(
+            r#"{"type":"system","subtype":"init","session_id":"s","tools":["Bash","mcp__linear__list_issues","mcp__linear__get_issue"],"mcp_servers":[{"name":"linear","status":"connected"},{"name":"quebrado","status":"failed"}]}"#,
+            &mut sid,
+        );
         assert!(matches!(&ev[1], Event::SessionInfo { tools, mcp_servers } if tools.len() == 3 && mcp_servers[1].status == "failed"));
     }
 
@@ -277,14 +339,35 @@ mod tests {
         assert_eq!(r.pointer("/response/response/updatedInput/answers/Q").unwrap(), "A");
         let d = std::env::temp_dir().join(format!("kabul-proj-{}", std::process::id()));
         assert_eq!(project_dir_name(std::path::Path::new("/home/dev/a.b/c")), "-home-dev-a-b-c");
+        assert_eq!(project_dir_name(std::path::Path::new("/Users/dev/Meus Projetos/x_y")), "-Users-dev-Meus-Projetos-x-y");
+        assert_eq!(project_dir_name(std::path::Path::new("C:\\Users\\dev\\w")), "C--Users-dev-w");
         let _ = d;
     }
 
     #[test]
+    fn plan_mode_nega_edicao_e_troca_ao_vivo() {
+        let mut p = ClaudeCode.protocol(&SessionOptions { permission_mode: Some("plan".into()), ..Default::default() });
+        let (ev, out) = p.on_line(r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"/w/a","content":"x"}}}"#);
+        assert!(!ev.iter().any(|e| matches!(e, Event::ApprovalRequest { .. })));
+        let r: Value = serde_json::from_str(&out[0]).unwrap();
+        assert_eq!((r.pointer("/response/request_id").and_then(Value::as_str), r.pointer("/response/response/behavior").and_then(Value::as_str)), (Some("r1"), Some("deny")));
+        // Bash ainda vai para o cartão.
+        let (ev, _) = p.on_line(r#"{"type":"control_request","request_id":"r2","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}"#);
+        assert!(matches!(&ev[0], Event::ApprovalRequest { tool, .. } if tool == "Bash"));
+        let m: Value = serde_json::from_str(&p.set_mode("default").unwrap()[0]).unwrap();
+        assert_eq!((m.pointer("/request/subtype").and_then(Value::as_str), m.pointer("/request/mode").and_then(Value::as_str)), (Some("set_permission_mode"), Some("default")));
+        let (ev, _) = p.on_line(r#"{"type":"control_request","request_id":"r3","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"/w/a","content":"x"}}}"#);
+        assert!(matches!(&ev[0], Event::ApprovalRequest { tool, .. } if tool == "Write"));
+    }
+
+    #[test]
     fn mcp_config_estrito() {
-        let o = SessionOptions { mcp_config: Some("/tmp/m.json".into()), ..Default::default() };
+        let o = SessionOptions { mcp_config: Some("/tmp/m.json".into()), mcp_strict: true, ..Default::default() };
         let c = ClaudeCode.command(&o);
         assert!(c.args.windows(3).any(|w| w == ["--mcp-config", "/tmp/m.json", "--strict-mcp-config"]));
+        // Só acrescentar (MCPs de outras IAs): sem estrito, os do usuário continuam.
+        let c = ClaudeCode.command(&SessionOptions { mcp_config: Some("/tmp/m.json".into()), ..Default::default() });
+        assert!(c.args.windows(2).any(|w| w == ["--mcp-config", "/tmp/m.json"]) && !c.args.contains(&"--strict-mcp-config".to_string()));
     }
 
     #[test]
@@ -309,6 +392,13 @@ mod tests {
         assert_eq!(ClaudeCode.teleport("s1").unwrap().args, vec!["--teleport", "s1"]);
         assert_eq!(ClaudeCode.background("oi", &SessionOptions::default()).unwrap().args, vec!["--bg", "oi"]);
         assert!(ClaudeCode.background_action("format-disk", "x").is_none());
+        // Endpoint também vai no `env` de `--settings` (ganha do `env` das settings do usuário).
+        let ep = Endpoint { base_url: "http://127.0.0.1:9/".into(), apis: vec![Api::Anthropic], api_key: None, model: "m1".into(), context: None };
+        let c = ClaudeCode.command(&SessionOptions { endpoint: Some(ep), settings_json: Some(r#"{"outputStyle":"x"}"#.into()), ..Default::default() });
+        let i = c.args.iter().position(|a| a == "--settings").unwrap();
+        let v: Value = serde_json::from_str(&c.args[i + 1]).unwrap();
+        assert_eq!((v["outputStyle"].as_str(), v["env"]["ANTHROPIC_BASE_URL"].as_str(), v["env"]["ANTHROPIC_MODEL"].as_str()), (Some("x"), Some("http://127.0.0.1:9"), Some("m1")));
+        assert!(c.env.contains(&("ANTHROPIC_BASE_URL".into(), "http://127.0.0.1:9".into())));
     }
 
     #[test]

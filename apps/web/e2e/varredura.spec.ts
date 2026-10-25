@@ -86,3 +86,54 @@ for (const theme of THEMES) {
     expect(found, found.join("\n")).toEqual([]);
   });
 }
+
+/** Popover aberto (portal [data-floating]) 100% dentro da janela e por cima de tudo: amostra pontos internos
+ *  e confere que o elemento no topo pertence ao popover (nenhum painel o cobre). */
+async function popoverOk(page: Page, nome: string): Promise<string[]> {
+  await page.waitForTimeout(120);
+  return page.evaluate((nome) => {
+    const out: string[] = [];
+    const pops = [...document.querySelectorAll("[data-floating]")] as HTMLElement[];
+    if (!pops.length) return [`${nome}: não abriu`];
+    const el = pops[pops.length - 1];
+    const r = el.getBoundingClientRect();
+    if (r.left < 0 || r.top < 0 || r.right > innerWidth + 0.5 || r.bottom > innerHeight + 0.5) out.push(`${nome}: fora da janela (${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}×${Math.round(r.height)})`);
+    for (const fx of [0.1, 0.5, 0.9]) for (const fy of [0.1, 0.5, 0.9]) {
+      const x = r.left + r.width * fx, y = r.top + r.height * fy;
+      if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;
+      const top = document.elementFromPoint(x, y);
+      if (top && !el.contains(top)) { out.push(`${nome}: coberto em (${Math.round(x)},${Math.round(y)}) por ${top.tagName.toLowerCase()}.${(top.className as string).toString().split(" ")[0]}`); break; }
+    }
+    return out;
+  }, nome);
+}
+
+test("popovers inteiros e por cima dos painéis, em várias larguras e com a barra lateral estreita", async ({ page }) => {
+  test.setTimeout(180_000);
+  const found: string[] = [];
+  for (const [w, side] of [[900, 200], [1280, 200], [1440, 300], [1920, 200]] as const) {
+    await page.addInitScript((s) => localStorage.setItem("kabul.size.sidebar", String(s)), side);
+    await page.setViewportSize({ width: w, height: w < 1000 ? 700 : 900 });
+    await setup(page);
+    const host = page.locator(".ws-host:not([hidden])");
+    const chat = page.locator(".ws-host:not([hidden]) .center-body:not([hidden])");
+    await chat.getByTestId("composer").fill("liste");
+    await chat.getByTestId("composer").press("Enter");
+    await expect(host.locator(".turn-meta")).toBeVisible();
+    const abre = async (nome: string, click: () => Promise<unknown>) => {
+      await click();
+      for (const p of await popoverOk(page, nome)) found.push(`${w}px/${side}: ${p}`);
+      await page.keyboard.press("Escape");
+      await expect(page.locator("[data-floating]")).toHaveCount(0);
+    };
+    await abre("Meus workspaces ···", () => page.getByTestId("group-menu").click());
+    await abre("máquina", () => page.getByTestId("machine-picker").click());
+    await abre("seletor de modelo", () => chat.locator(".picker-trigger").click());
+    await abre("ações do workspace", () => host.getByTestId("ws-menu").click());
+    await abre("nova aba", () => host.getByTestId("new-tab").click());
+    await abre("abrir em", () => host.getByTestId("open-in").locator("button").last().click());
+    await abre("git", () => page.getByTestId("git-menu").click());
+    await abre("ações da mensagem", () => host.getByTestId("turn-more").last().click());
+  }
+  expect(found, found.join("\n")).toEqual([]);
+});

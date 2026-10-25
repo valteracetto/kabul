@@ -1,3 +1,4 @@
+import { lastNotify } from "./components/links";
 import { transport } from "./transport";
 
 export type HarnessKind = "claude" | "codex" | "antigravity" | "opencode" | "qwen" | "gemini" | "goose" | "cursor";
@@ -50,11 +51,23 @@ export interface AppSettings {
   open_prs_in?: string; delete_branch_on_archive?: boolean; archive_on_merge?: boolean; rename_ws_on_branch?: boolean; merge_method?: string; github_dry_run?: boolean; pr_include_workspace_link?: boolean; automerge?: boolean; optional_checks_blocking?: boolean; push_set_upstream?: boolean; stacked_prs?: boolean;
   claude_output_style?: string; codex_personality?: string; review_model?: string | null; default_plan?: boolean; agy_skip_permissions?: boolean; show_resources?: boolean;
   clone_dir?: string; claude_path?: string | null; codex_path?: string | null; opencode_path?: string | null; scrollback_mb?: number;
+  tray?: boolean; usage_alert_pct?: number; usage_daily_budget?: number | null; usage_monthly_budget?: number | null; usage_codexbar?: boolean;
+  /** Configurações › Avançado › Atualizações. */
+  auto_update?: boolean; update_channel?: string; schema_version?: number;
 }
+/** Versão do app instalado e se o updater roda (só no app empacotado). */
+export interface AppVersion { version: string; protocol: number; channel: string; updater: boolean }
+export interface UpdateInfo { current: string; version: string; notes: string | null; date: string | null; channel: string }
 export interface SessionSummary { id: string; title: string; model_key: string | null; updated_at: number }
 export interface SessionRecord { id: string; workspace_id: string; title: string; model_key: string | null; agent_session: string | null; updated_at: number; items: unknown }
-export interface ChatStarted { chat_id: string; harness: HarnessKind; approvals: boolean; note: string | null }
+/** Processo que o agente deixou rodando (Parar, fechar aba, arquivar, sair). */
+export interface Leftover { pid: number; start: number; name: string; cmd: string; ports: number[]; age: number; workspace_id?: string | null }
+export interface DockerContainer { id: string; image: string; name: string }
+export interface StopReport { alive: boolean; leftovers: Leftover[]; containers: DockerContainer[] }
+export interface ChatStarted { chat_id: string; harness: HarnessKind; approvals: boolean; note: string | null; plan?: "native" | "emulated" }
 export interface McpEntry { name: string; scope: string; source: string; transport: string; target: string }
+/** MCP do registro único: origem em cada CLI, compartilhamento e peso no contexto (sem valores de env). */
+export interface McpShared { name: string; transport: string; target: string; origins: { harness: string; scope: string; source: string }[]; conflict: boolean; shared: boolean; env_keys: string[]; weight: { tools: number; tokens: number } | null }
 export interface LinearIssue { id: string; identifier: string; title: string; url: string; description: string | null; state: string | null; branchName: string | null; priority: string | null; assignee: string | null; team: string | null }
 export interface LinearLink { identifier: string; title: string; url: string }
 export interface CloudInfo { id: string | null; url: string | null; title: string | null; warning: string | null; exited: number | null; runs_on?: { kind: string; provider?: string; host?: string } | null }
@@ -65,8 +78,17 @@ export interface OpenTarget { id: string; name: string; kind: "finder" | "editor
 export interface PrCheck { name: string; state: string; bucket: string; link: string; workflow: string; description?: string }
 export interface TermInfo { session: string; pane: string; snapshot: string }
 
-export type AgentEvent =
+/**
+ * Evento do agente. `parent_tool_use_id` (opcional): o evento veio de um subagente lançado pelo tool_use
+ * Task/Agent com esse id (árvore de subagentes). `queued`/`slot_acquired`: fila do limite de agentes
+ * simultâneos; `suspended`/`resumed`: encerrado por ociosidade e retomado (contrato em docs/escala.md).
+ */
+export type AgentEvent = (
   | { type: "session_started"; session_id: string; model: string | null }
+  | { type: "queued"; position: number; limit: number | null }
+  | { type: "slot_acquired" }
+  | { type: "suspended" }
+  | { type: "resumed" }
   | { type: "text"; text: string }
   | { type: "text_delta"; text: string }
   | { type: "reasoning"; text: string }
@@ -79,7 +101,11 @@ export type AgentEvent =
   | { type: "error"; message: string }
   | { type: "raw"; value: unknown }
   | { type: "log"; line: string }
-  | { type: "exited"; code: number | null };
+  | { type: "exited"; code: number | null }
+) & { parent_tool_use_id?: string | null };
+
+/** Fila e limite de agentes simultâneos (kabuld/core; o Tauri ainda não tem: a UI esconde). */
+export interface AgentsStatus { limit: number | null; running: number; queued: { chat_id: string; position: number; workspace_id?: string | null }[]; running_chats?: string[]; suspended?: string[]; focus?: string | null; idle_minutes?: number | null }
 
 /** Processo no painel de recursos (CPU e memória somam os filhos). */
 export interface ResourceNode { pid: number; name: string; cpu: number; mem: number; kind: string; agent: string | null; workspace_id: string | null; chat_id: string | null; children: ResourceNode[] }
@@ -90,7 +116,22 @@ export interface ExternalRunning { agent: string; pid: number; cwd: string | nul
 export interface ExternalRecent { agent: string; id: string; title: string; cwd: string | null; repo: string | null; branch: string | null; updated: number }
 export interface ExternalSessions { running: ExternalRunning[]; recent: ExternalRecent[]; cloud_note: string }
 
-export type AuthEvent = { kind: HarnessKind; event: import("./components/LoginFlow").LoginEvent };
+/** Uso, custos e limites (core `usage`). Custos só quando o harness reporta (`unpriced` = turnos sem custo). */
+export interface UsageRow { key: string; label: string; turns: number; input: number; output: number; cache_read: number; cache_write: number; tokens: number; cost_usd: number; unpriced: number; duration_ms: number }
+export interface UsageSession { session: string; workspace_id: string; provider: string; model: string; account: string | null; started: number; ended: number; turns: number; tokens: number; cost_usd: number; unpriced: number; duration_ms: number }
+export interface UsageLimit { provider: string; account: string | null; account_label: string | null; plan: string | null; window: string; title: string; used_pct: number; window_mins: number | null; resets_at: number | null; source: string; updated_at: number }
+export interface ProviderStatus { provider: string; indicator: string; description: string; url: string | null }
+export interface LimitsSnapshot { schema_version: number; limits: UsageLimit[]; status: ProviderStatus[]; credits: { provider: string; account_label: string | null; remaining: number }[]; sources: { name: string; ok: boolean; detail: string }[]; updated_at: number }
+export interface UsageAlert { key: string; kind: string; level: "warn" | "crit"; text: string; provider: string | null; account: string | null }
+export interface UsageSuggestion { provider: string; account: string | null; to_account: { id: string; nickname: string } | null; to_provider: string | null; text: string }
+export interface UsageOverview {
+  schema_version: number; days: number; today_usd: number; month_usd: number; today_tokens: number; month_tokens: number; unpriced_turns: number;
+  by_day: UsageRow[]; by_model: UsageRow[]; by_account: UsageRow[]; by_workspace: UsageRow[]; by_provider: UsageRow[]; sessions: UsageSession[];
+  limits: LimitsSnapshot; tightest: UsageLimit | null; alerts: UsageAlert[]; suggestions: UsageSuggestion[];
+}
+export interface RunningAgent { chat_id: string; workspace_id: string; workspace: string; model: string; harness: string; since: number; working: boolean }
+
+export type AuthEvent ={ kind: HarnessKind; event: import("./components/LoginFlow").LoginEvent };
 
 const c = transport.call.bind(transport);
 
@@ -139,6 +180,7 @@ export const api = {
   openDevtools: () => c<void>("open_devtools"),
   appQuit: () => c<void>("app_quit"),
   onMenu: (h: (id: string) => void) => transport.subscribe("menu", h),
+  onDeepLink: (h: (url: string) => void) => transport.subscribe("deep-link", h),
   onQuitRequested: (h: () => void) => transport.subscribe("quit-requested", h),
   machineInfo: () => c<MachineInfo>("machine_info"),
   ghRepos: () => c<GhRepo[]>("gh_repos"),
@@ -212,6 +254,11 @@ export const api = {
   onGithubAuth: (h: (e: { Url: string } | { Codigo: string } | "PedeCodigo" | "Ok" | { Erro: string }) => void) => transport.subscribe("github-auth-event", h),
   mcpList: (workspaceId: string, harness: HarnessKind) => c<McpEntry[]>("mcp_list", { workspaceId, harness }),
   mcpAdd: (workspaceId: string, name: string, command: string, args: string[]) => c<void>("mcp_add", { workspaceId, name, command, args }),
+  chatSetMode: (chatId: string, mode: "plan" | "default") => c<boolean>("chat_set_mode", { chatId, mode }),
+  mcpShared: (workspaceId: string) => c<McpShared[]>("mcp_shared", { workspaceId }),
+  mcpWeigh: (workspaceId: string, name: string) => c<{ tools: number; tokens: number }>("mcp_weigh", { workspaceId, name }),
+  mcpSetShared: (workspaceId: string, name: string, on: boolean) => c<void>("mcp_set_shared", { workspaceId, name, on }),
+  mcpExportAgy: (workspaceId: string, name: string) => c<string | null>("mcp_export_agy", { workspaceId, name }),
   linearStatus: () => c<{ connected: boolean; who: string | null; error: string | null }>("linear_status"),
   linearConnect: (key: string) => c<string>("linear_connect", { key }),
   linearDisconnect: () => c<void>("linear_disconnect"),
@@ -220,9 +267,23 @@ export const api = {
   chatSend: (chatId: string, text: string) => c<void>("chat_send", { chatId, text }),
   chatApprove: (chatId: string, requestId: string, allow: boolean, extra: { tool?: string; updatedInput?: unknown; always?: boolean } = {}) => c<void>("chat_approve", { chatId, requestId, allow, ...extra }),
   chatStop: (chatId: string) => c<void>("chat_stop", { chatId }),
+  /** Parar: interrompe só o turno (protocolo do agente) e devolve o que ficou rodando. */
+  chatInterrupt: (chatId: string) => c<StopReport>("chat_interrupt", { chatId }),
+  chatProcesses: (chatIds: string[]) => c<Leftover[]>("chat_processes", { chatIds }),
+  processesKeep: (items: Leftover[], workspaceId: string | null) => c<void>("processes_keep", { items, workspaceId }),
+  processesKept: () => c<Leftover[]>("processes_kept"),
+  processKill: (keys: { pid: number; start: number }[]) => c<number>("process_kill", { keys }),
+  dockerStop: (id: string) => c<void>("docker_stop", { id }),
   resources: () => c<ResourceSnapshot>("resources_get"),
   externalSessions: () => c<ExternalSessions>("external_sessions"),
   onChat: (h: (p: { chat_id: string; event: AgentEvent }) => void) => transport.subscribe("chat-event", h),
+  agentsStatus: () => c<AgentsStatus>("agents_status"),
+  agentsConfig: (cfg: { limit?: number | null; idleMinutes?: number | null; niceBackground?: boolean }) => c<AgentsStatus>("agents_config", cfg),
+  /** kabuld avisa cada mudança da fila/limite (o mesmo objeto de agents_status). */
+  onAgentsStatus: (h: (s: AgentsStatus) => void) => transport.subscribe("agents-status", h),
+  agentsFocus: (workspaceId: string) => c<void>("agents_focus", { workspaceId }),
+  /** Parar em lote; sem o comando no backend, para um por um. */
+  chatsInterrupt: (chatIds: string[]) => c<{ stopped: string[]; errors: { chat_id: string; error: string }[] }>("chats_interrupt", { chatIds }),
 
   historyList: (workspaceId: string) => c<SessionSummary[]>("history_list", { workspaceId }),
   historyLoad: (workspaceId: string, id: string) => c<SessionRecord>("history_load", { workspaceId, id }),
@@ -243,9 +304,26 @@ export const api = {
 
   appSettings: () => c<AppSettings>("app_settings_get"),
   saveAppSettings: (settings: AppSettings) => c<void>("app_settings_save", { settings }),
-  notify: (title: string, body: string) => c<void>("notify", { title, body }),
+  /** Notificação do sistema; `target` é a conversa que o clique deve abrir. */
+  notify: (title: string, body: string, target?: { ws: string; session: string }) => (target && Object.assign(lastNotify, { ...target, at: Date.now() }), c<void>("notify", { title, body })),
+  badgeSet: (count: number) => c<void>("badge_set", { count }),
+  appVersion: () => c<AppVersion>("app_version"),
+  updateCheck: (channel?: string) => c<UpdateInfo | null>("update_check", { channel }),
+  updateInstall: () => c<void>("update_install"),
+  onUpdateAvailable: (h: (u: UpdateInfo) => void) => transport.subscribe("update-available", h),
   openExternal: (target: string) => c<void>("open_external", { target }),
   transcribe: (audio: number[], ext: string) => c<string>("transcribe", { audio, ext }),
+
+  usageOverview: (days = 30) => c<UsageOverview>("usage_overview", { days }),
+  usageRefresh: () => c<LimitsSnapshot>("usage_refresh"),
+  usageCsv: (days = 30) => c<string>("usage_csv", { days }),
+  /** Desktop: grava em Downloads e devolve o caminho. */
+  usageCsvSave: (days = 30) => c<string>("usage_csv_save", { days }),
+  onUsageChanged: (h: () => void) => transport.subscribe("usage-changed", h),
+  agentsRunning: () => c<RunningAgent[]>("agents_running"),
+  trayAction: (action: "open" | "open-workspace" | "new-workspace" | "usage" | "pause-all", workspaceId: string | null = null) => c<void>("tray_action", { action, workspaceId }),
+  trayHide: () => c<void>("tray_hide"),
+  onTrayAction: (h: (p: { action: string; workspace_id: string | null }) => void) => transport.subscribe("tray-action", h),
 };
 
 export const HARNESS_LABEL: Record<HarnessKind, string> = { claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", opencode: "OpenCode", qwen: "Qwen Code", gemini: "Gemini CLI", goose: "Goose", cursor: "Cursor" };

@@ -1,7 +1,6 @@
 //! Identidade desta máquina para o seletor do topo da barra lateral: nome amigável do computador e
 //! a conta do GitHub conectada (login, e-mail e avatar). Nada fica gravado; tudo é lido na hora.
 use serde::Serialize;
-use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct MachineUser {
@@ -17,7 +16,7 @@ pub struct MachineInfo {
 }
 
 fn out(cmd: &str, args: &[&str]) -> Option<String> {
-    let o = Command::new(cmd).args(args).output().ok()?;
+    let o = crate::shell::command(cmd).args(args).output().ok()?;
     let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
     (o.status.success() && !s.is_empty()).then_some(s)
 }
@@ -33,6 +32,11 @@ pub fn computer_name() -> String {
         return n;
     }
     out("hostname", &[]).map(|h| h.split('.').next().unwrap_or(&h).to_string()).unwrap_or_else(|| "Este computador".into())
+}
+
+/// Usuário do sistema: `USER` (Unix) ou `USERNAME` (Windows).
+pub fn user_name() -> String {
+    std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default()
 }
 
 /// Conta ativa do `gh` (login, e-mail público e avatar). `None` sem GitHub conectado.

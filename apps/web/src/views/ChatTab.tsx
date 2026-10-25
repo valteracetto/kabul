@@ -1,74 +1,30 @@
+import { createPortal } from "react-dom";
+import { FileIcon, IFork, IForkTab, IVolume } from "../icons";
 import { confirmDialog } from "../components/Confirm";
+import { Floating } from "../components/Floating";
 import { noSuggest } from "../noSuggest";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, HARNESS_LABEL, type AgentEvent, type HarnessKind, type Model, type Workspace } from "../api";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { api, HARNESS_LABEL, type AgentEvent, type Model, type Workspace } from "../api";
 import { ModelPicker } from "../components/ModelPicker";
 import { useModelPrefs } from "../components/prefs";
 import { useDictation } from "../components/useDictation";
 import { Markdown } from "../components/Markdown";
-import { McpPanel, repoDisabled, type McpLive } from "../components/McpPanel";
+import { McpPanel, repoDisabled, saveSessionDisabled, sessionDisabled, type McpLive } from "../components/McpPanel";
 import { ContextPanel } from "../components/ContextPanel";
 import { useDismiss } from "../components/useDismiss";
 import type { LinearIssue } from "../api";
-import { ToolCard, ThinkingCard, ApprovalCard, PlanCard, QuestionCard } from "../components/ToolCards";
+import { ToolCard, ThinkingCard, ApprovalCard, PlanCard, QuestionCard, LeftoversCard } from "../components/ToolCards";
 import { chatPrefs, pendingFork, pendingModel, type PendingFork } from "../components/chatPrefs";
 import { ChatFind } from "../components/ChatFind";
 import { WorkingLine, activity } from "../components/WorkingLine";
 import { stripAbsolutelyRight, useSettings } from "../components/useSettings";
 import { IApps, IArrowUp, ICopy, IMic, IPlan, IPlus, IRestore, IStop } from "../icons";
+import { apply, interrupted, type ChatMemory, type Item, type Live, type Usage } from "../components/chatModel";
+import { chatStore, mcpFrom, useChatSelect } from "../components/chatStore";
+import { markUsageSwitch, takeUsageSwitches, type UsageSwitch } from "../components/usageSwitch";
+import { SubagentTree } from "../components/SubagentTree";
 
-export type Item =
-  | { k: "user"; text: string; checkpoint?: string; queued?: boolean }
-  | { k: "assistant"; text: string; streaming: boolean }
-  | { k: "reasoning"; text: string }
-  | { k: "tool"; id: string; name: string; input: unknown; output?: string; error?: boolean }
-  | { k: "approval"; id: string; tool: string; input: unknown; decided?: boolean; allow?: boolean; always?: boolean }
-  | { k: "turn"; meta: string; copy: string; usage?: Usage; started?: number; ended?: number }
-  | { k: "handoff"; text: string }
-  | { k: "notice"; text: string }
-  | { k: "error"; text: string };
-
-const time = () => new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-
-function apply(items: Item[], ev: AgentEvent, started: number): Item[] {
-  const last = items[items.length - 1];
-  switch (ev.type) {
-    case "text_delta":
-      if (last?.k === "assistant" && last.streaming) return [...items.slice(0, -1), { ...last, text: last.text + ev.text }];
-      return [...items, { k: "assistant", text: ev.text, streaming: true }];
-    case "text":
-      if (last?.k === "assistant" && last.streaming) return [...items.slice(0, -1), { k: "assistant", text: ev.text, streaming: false }];
-      return [...items, { k: "assistant", text: ev.text, streaming: false }];
-    case "reasoning":
-      return ev.text.trim() ? [...items, { k: "reasoning", text: ev.text }] : items;
-    case "tool_use":
-      return items.some((i) => i.k === "tool" && i.id === ev.id) ? items : [...items, { k: "tool", id: ev.id, name: ev.name, input: ev.input }];
-    case "tool_result":
-      return items.map((i) => (i.k === "tool" && i.id === ev.id ? { ...i, output: ev.output, error: ev.is_error } : i));
-    case "approval_request":
-      return [...items, { k: "approval", id: ev.request_id, tool: ev.tool, input: ev.input }];
-    case "turn_completed": {
-      // Fim de turno repetido (nada entre os dois): mostra um só.
-      if (last?.k === "turn") return items;
-      const secs = Math.max(1, Math.round((Date.now() - started) / 1000));
-      const lastText = [...items].reverse().find((i) => i.k === "assistant") as { text: string } | undefined;
-      const extra = [ev.output_tokens != null && `${ev.output_tokens} tokens`, ev.cost_usd ? `US$ ${ev.cost_usd.toFixed(4)}` : null].filter(Boolean).join(" · ");
-      // Agentes que só mandam deltas (agy, ACP): o fim do turno encerra o streaming do texto.
-      const done = items.map((i) => (i.k === "assistant" && i.streaming ? { ...i, streaming: false } : i));
-      return [...done, { k: "turn", meta: `${secs}s · ${time()}${extra ? " · " + extra : ""}`, copy: lastText?.text ?? ev.result ?? "" }];
-    }
-    case "error":
-      // O mesmo erro pode chegar duas vezes (notificação e fim do turno): mostra uma.
-      return last?.k === "error" && last.text === ev.message ? items : [...items, { k: "error", text: ev.message }];
-    case "exited":
-      return ev.code ? [...items, { k: "error", text: `o agente encerrou (código ${ev.code})` }] : items;
-    default:
-      return items;
-  }
-}
-
-
-interface Usage { input: number | null; output: number | null; cache_read: number | null; cache_write: number | null; duration_ms: number | null }
+export type { Item } from "../components/chatModel";
 
 /** Texto de handoff (replay) para um agente novo continuar a conversa (espelha `transcript::handoff_prompt`). */
 export function handoffText(items: Item[], changes: string[], branch: string, lastN = 12): string {
@@ -77,9 +33,10 @@ export function handoffText(items: Item[], changes: string[], branch: string, la
   return `Você está continuando uma conversa que começou com outro agente, no mesmo repositório e na mesma branch. Leia o contexto e continue de onde parou; não refaça o que já foi feito.\n\n## Últimas mensagens (${tail.length} de ${msgs.length})\n\n${tail.join("\n\n")}\n\n## Estado do código\n\nBranch \`${branch}\`. Arquivos alterados: ${changes.join(", ") || "nenhum"}. Arquivos de contexto em \`.context/\`.\n`;
 }
 
-interface Live { id: string; harness: HarnessKind; key: string; effort: string | null; fast: boolean; plan: boolean; approvals: boolean; mcpOff: string; account: string | null }
-const PROVIDER_OF: Partial<Record<HarnessKind, string>> = { claude: "claude", codex: "codex", antigravity: "agy" };
-interface Props { ws: Workspace; sessionId: string; active: boolean; onTitle: (t: string) => void; onUnread: () => void; onBusy: (b: boolean) => void; onWaiting: (w: boolean) => void; onError: (e: string) => void; onWorkspaceChange: () => void }
+const PROVIDER_OF: Partial<Record<string, string>> = { claude: "claude", codex: "codex", antigravity: "agy" };
+/** Mensagens desenhadas de início (as mais recentes); rolar até o topo traz mais, em blocos. */
+const WINDOW = 120, WINDOW_STEP = 150;
+interface Props { ws: Workspace; sessionId: string; active: boolean; onTitle: (t: string) => void; onError: (e: string) => void; onWorkspaceChange: () => void }
 
 /** Anel de uso de contexto (tokens de entrada do último turno ÷ janela do modelo). */
 function ContextRing({ used, total, onClick, on, quiet }: { used: number; total: number | null; onClick: () => void; on: boolean; quiet?: boolean }) {
@@ -93,69 +50,150 @@ function ContextRing({ used, total, onClick, on, quiet }: { used: number; total:
   );
 }
 
-export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWaiting, onError, onWorkspaceChange }: Props) {
+/**
+ * Arranjo do fio numa passada só (antes era quadrático: com milhares de itens, cada evento custava
+ * milhões de operações): o que fica recolhido, os toggles dos passos, e por turno/erro o checkpoint,
+ * se é o último turno, os arquivos mudados e se é o erro do fim da conversa.
+ */
+interface Layout { hidden: Uint8Array; toggles: Map<number, string>; turn: Map<number, { isLast: boolean; checkpoint?: string; files: string }>; err: Map<number, { tail: boolean; lastUser?: string }>; userIdx: number[] }
+function layoutOf(items: Item[], noCollapse: boolean, expanded: Set<number>, root: string): Layout {
+  const n = items.length;
+  const hidden = new Uint8Array(n);
+  const toggles = new Map<number, string>();
+  const turn = new Map<number, { isLast: boolean; checkpoint?: string; files: string }>();
+  const err = new Map<number, { tail: boolean; lastUser?: string }>();
+  const userIdx: number[] = [];
+  let u = -1, seg: number[] = [], files: Map<string, { add: number; del: number }> = new Map();
+  let lastUserText: string | undefined, lastCk: string | undefined;
+  const lines = (t: unknown) => (typeof t === "string" && t ? t.split("\n").length : 0);
+  for (let k = 0; k < n; k++) {
+    const it = items[k];
+    if (it.k === "user" && !it.queued) (u = k), (seg = []), (files = new Map()), (lastUserText = it.text), (lastCk = it.checkpoint), userIdx.push(k);
+    else if (u >= 0 && (it.k === "tool" || it.k === "reasoning" || it.k === "assistant")) seg.push(k);
+    if (it.k === "tool" && !it.error && /^(Edit|MultiEdit|Write|NotebookEdit)$/.test(it.name)) {
+      const inp = (it.input ?? {}) as { file_path?: string; content?: string; edits?: { old_string?: string; new_string?: string }[]; old_string?: string; new_string?: string };
+      if (inp.file_path) {
+        const p = inp.file_path.startsWith(root + "/") ? inp.file_path.slice(root.length + 1) : inp.file_path;
+        const cur = files.get(p) ?? { add: 0, del: 0 };
+        for (const e of inp.edits ?? [inp]) (cur.add += lines(e.new_string ?? inp.content)), (cur.del += lines(e.old_string));
+        files.set(p, cur);
+      }
+    }
+    if (it.k === "turn") {
+      turn.set(k, { isLast: true, checkpoint: lastCk, files: JSON.stringify([...files].map(([path, v]) => ({ path, ...v }))) });
+      if (!noCollapse && u >= 0 && !expanded.has(u)) {
+        let finalA = -1;
+        for (const j of seg) if (items[j].k === "assistant") finalA = j;
+        const mid = seg.filter((j) => j < (finalA >= 0 ? finalA : k));
+        if (mid.length >= 2) {
+          for (const j of mid) hidden[j] = 1;
+          const tools = mid.filter((j) => items[j].k === "tool");
+          toggles.set(mid[0], [u, tools.length, mid.length - tools.length, tools.some((j) => (items[j] as { name: string }).name === "Bash") ? 1 : 0].join("|"));
+        }
+      }
+    }
+    if (it.k === "error") err.set(k, { tail: true, lastUser: lastUserText });
+  }
+  // Último turno: não há mensagem sua depois. Erro do fim: nem mensagem sua nem outro erro depois.
+  for (const [k, t] of turn) t.isLast = !userIdx.some((x) => x > k);
+  let after = false;
+  for (let k = n - 1; k >= 0; k--) {
+    const it = items[k];
+    if (it.k === "error") (err.get(k)!.tail = !after), (after = true);
+    else if (it.k === "user") after = true;
+  }
+  return { hidden, toggles, turn, err, userIdx };
+}
+
+/** Arquivos mudados no turno (Edit/MultiEdit/Write), com +/− aproximados pelas strings da ferramenta. */
+export function turnFiles(items: Item[], n: number, root: string): { path: string; add: number; del: number }[] {
+  return JSON.parse(layoutOf(items.slice(0, n + 1), true, new Set(), root).turn.get(n)?.files ?? "[]");
+}
+
+export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceChange }: Props) {
+  // Callbacks do pai sempre pela versão mais recente: o pai cria funções novas a cada render, e um efeito
+  // que dependesse delas rodaria a cada render (avisar o pai → pai re-renderiza → função nova → efeito de novo).
+  const parent = useRef({ onTitle });
+  parent.current = { onTitle };
+  // Estado guardado quando a aba desmontou (workspace fora da tela): volta exatamente como estava.
+  const [m0] = useState<ChatMemory | null>(() => (chatStore.register(sessionId, ws.id, ws.name), chatStore.memory(sessionId)));
   const [models, setModels] = useState<Model[]>([]);
   const { prefs, setPrefs, selected, effort } = useModelPrefs(models);
-  const [live, setLive] = useState<Live | null>(null);
-  const [agentSession, setAgentSession] = useState<string | null>(null);
-  const [items, setItems] = useState<Item[]>([]);
-  const [busy, setBusyState] = useState(false);
-  const [text, setText] = useState("");
-  const [queue, setQueue] = useState<string[]>([]);
-  const [queuePaused, setQueuePaused] = useState(false);
+  const [live, setLiveState] = useState<Live | null>(m0?.live ?? null);
+  const [agentSession, setAgentSession] = useState<string | null>(m0?.agentSession ?? null);
+  const [items, setItems] = useState<Item[]>(m0?.items ?? []);
+  const [busy, setBusyState] = useState(m0?.busy ?? false);
+  const [text, setText] = useState(m0?.text ?? "");
+  const [queue, setQueue] = useState<string[]>(m0?.queue ?? []);
+  const [queuePaused, setQueuePaused] = useState(m0?.queuePaused ?? false);
   const appSet = useSettings();
   useEffect(() => {
-    const k = pendingModel[sessionId];
-    if (k) (delete pendingModel[sessionId], setPrefs((p) => ({ ...p, selected: k })));
+    const k = pendingModel[sessionId] ?? m0?.modelKey;
+    if (pendingModel[sessionId]) delete pendingModel[sessionId];
+    if (k) setPrefs((p) => ({ ...p, selected: k }));
   }, [sessionId]);
-  const [plan, setPlan] = useState(false);
+  const [plan, setPlan] = useState(m0?.plan ?? false);
   // "Conversas novas em plan mode" (Configurações › Modelos).
-  const planInit = useRef(false);
+  const planInit = useRef(!!m0);
   useEffect(() => void (appSet && !planInit.current && ((planInit.current = true), appSet.default_plan && setPlan(true))), [appSet]);
-  const [ctxUsed, setCtxUsed] = useState(0);
+  const [ctxUsed, setCtxUsed] = useState(m0?.ctxUsed ?? 0);
   const [appsOpen, setAppsOpen] = useState(false);
   const [ctxOpen, setCtxOpen] = useState(false);
   const appsRef = useRef<HTMLDivElement>(null), ctxRef = useRef<HTMLDivElement>(null);
   useDismiss(appsRef, appsOpen, useCallback(() => setAppsOpen(false), []));
   useDismiss(ctxRef, ctxOpen, useCallback(() => setCtxOpen(false), []));
-  const [mcpLive, setMcpLive] = useState<McpLive | null>(null);
-  const [sessionOff, setSessionOff] = useState<string[]>([]);
-  const [ctxBase, setCtxBase] = useState(0);
+  const [mcpLive, setMcpLive] = useState<McpLive | null>(m0?.mcpLive ?? null);
+  // MCP desligado nesta sessão: lembrado por aba (vale no próximo turno, em qualquer IA).
+  const [sessionOff, setSessionOffRaw] = useState<string[]>(() => m0?.sessionOff ?? sessionDisabled(sessionId));
+  const setSessionOff = (v: string[]) => (saveSessionDisabled(sessionId, v), setSessionOffRaw(v));
+  const [ctxBase, setCtxBase] = useState(m0?.ctxBase ?? 0);
   const [issues, setIssues] = useState<LinearIssue[]>([]);
   const [suggest, setSuggest] = useState<{ kind: "@" | "/"; q: string; sel: number } | null>(null);
   const [files, setFiles] = useState<string[]>([]);
   const [commands, setCommands] = useState<[string, string][]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [account, setAccount] = useState<{ id: string; nickname: string } | null>(null);
+  const [loaded, setLoaded] = useState(!!m0);
+  const [account, setAccount] = useState<{ id: string; nickname: string } | null>(m0?.account ?? null);
   const [accounts, setAccounts] = useState<import("../api").AccountRow[]>([]);
   const [accOpen, setAccOpen] = useState(false);
   const accRef = useRef<HTMLDivElement>(null);
   useDismiss(accRef, accOpen, useCallback(() => setAccOpen(false), []));
-  const waiting = items.some((i) => i.k === "approval" && !i.decided);
-  const replayRef = useRef(false);
-  const forkRef = useRef(false);
-  const harnessRef = useRef<HarnessKind | null>(null);
-  const usageRef = useRef<Usage | null>(null);
+  const pendingApproval = useMemo(() => { for (let j = items.length - 1; j >= 0; j--) { const i = items[j]; if (i.k === "approval" && !i.decided) return i; } return undefined; }, [items]);
+  const waiting = !!pendingApproval;
+  const replayRef = useRef(m0?.replay ?? false);
+  const forkRef = useRef(m0?.fork ?? false);
+  const harnessRef = useRef(m0?.harness ?? null);
+  const usageRef = useRef<Usage | null>(m0?.usage ?? null);
   const [noCollapse, setNoCollapse] = useState(chatPrefs.noCollapse());
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const [note, setNote] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set(m0?.expanded ?? []));
+  const [note, setNote] = useState<string | null>(m0?.note ?? null);
   const scroller = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const [finding, setFinding] = useState(false);
+  const [quoteBtn, setQuoteBtn] = useState<{ x: number; y: number; text: string } | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
-  const liveRef = useRef<Live | null>(null);
-  const started = useRef(Date.now());
-  const itemsRef = useRef<Item[]>([]);
+  const liveRef = useRef<Live | null>(live);
+  const started = useRef(m0?.started ?? Date.now());
+  // Conversa parada pelo usuário: eventos do turno interrompido são descartados até o próximo envio.
+  const stoppedRef = useRef<string | null>(m0?.stopped ?? null);
+  const itemsRef = useRef<Item[]>(items);
   liveRef.current = live;
   itemsRef.current = items;
   const activeRef = useRef(active);
   activeRef.current = active;
+  /** Agente vivo desta conversa: o registro passa a encaminhar os eventos dele para cá na hora. */
+  const setLive = useCallback((l: Live | null, label?: string | null) => {
+    liveRef.current = l;
+    chatStore.bind(sessionId, l, label);
+    setLiveState(l);
+  }, [sessionId]);
 
-  const setBusy = useCallback((b: boolean) => (setBusyState(b), onBusy(b)), [onBusy]);
+  const setBusy = useCallback((b: boolean) => setBusyState(b), []);
+  useEffect(() => chatStore.report(sessionId, { busy, waiting }), [busy, waiting, sessionId]);
+  useEffect(() => void (selected && chatStore.setModel(sessionId, selected.label)), [selected?.label, sessionId]);
 
   useEffect(() => void api.models().then(setModels, (e) => onError(String(e))), [onError]);
   useEffect(() => {
-    const pf = pendingFork[sessionId];
+    const pf = m0 ? null : pendingFork[sessionId];
     if (pf) {
       delete pendingFork[sessionId];
       setItems([...(pf.items as Item[]), { k: "notice", text: "Fork desta conversa" }]);
@@ -164,9 +202,11 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
       replayRef.current = pf.replay;
       if (pf.modelKey) setPrefs((p) => ({ ...p, selected: pf.modelKey }));
       setLoaded(true);
-    } else api.historyLoad(ws.id, sessionId).then(
+    } else if (!m0) api.historyLoad(ws.id, sessionId).then(
       (r) => {
-        setItems((r?.items as Item[]) ?? []);
+        const its = (r?.items as Item[]) ?? [];
+        setItems(its);
+        chatStore.seedSubs(sessionId, its);
         setAgentSession(r?.agent_session ?? null);
         if (r?.model_key) setPrefs((p) => ({ ...p, selected: r.model_key }));
         setLoaded(true);
@@ -182,46 +222,77 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
     (its: Item[], agent: string | null) => {
       const firstUser = its.find((i) => i.k === "user") as { text: string } | undefined;
       const title = firstUser ? firstUser.text.slice(0, 40) : "Nova conversa";
-      onTitle(title);
+      parent.current.onTitle(title);
+      chatStore.setTitle(sessionId, title);
       api.historySave({ id: sessionId, workspace_id: ws.id, title, model_key: prefs.selected, agent_session: agent, updated_at: Math.floor(Date.now() / 1000), items: its.map((i) => (i.k === "assistant" ? { ...i, streaming: false } : i)) }).catch(() => {});
     },
-    [sessionId, ws.id, prefs.selected, onTitle],
+    [sessionId, ws.id, prefs.selected],
   );
 
-  useEffect(
-    () =>
-      api.onChat(({ chat_id, event }) => {
-        if (chat_id !== liveRef.current?.id) return;
-        if (event.type === "log" || event.type === "raw") return;
-        if (event.type === "session_started") setAgentSession(event.session_id);
-        if (event.type === "usage") usageRef.current = event;
-        if (event.type === "session_info") {
-          const tools: Record<string, number> = {};
-          for (const t of event.tools) if (t.startsWith("mcp__")) tools[t.split("__")[1]] = (tools[t.split("__")[1]] ?? 0) + 1;
-          setMcpLive({ status: Object.fromEntries(event.mcp_servers.map((m) => [m.name, m.status])), tools, total: event.tools.length });
+  // Eventos do agente, em lote (um por frame) pelo registro de conversas.
+  const onBatch = (batch: { chat_id: string; event: AgentEvent }[]) => {
+    const evs: AgentEvent[] = [];
+    for (const { chat_id, event } of batch) {
+      if (chat_id !== liveRef.current?.id) continue;
+      // Depois do Parar, o que o agente ainda mandar do turno interrompido (resultado atrasado, fim de
+      // turno) é descartado: o "Interrompido" fica no fim do turno. Vale até o próximo envio.
+      if (stoppedRef.current === chat_id) { if (event.type === "session_started") setAgentSession(event.session_id); continue; }
+      if (event.type === "log" || event.type === "raw" || event.parent_tool_use_id) continue;
+      if (event.type === "session_started") setAgentSession(event.session_id);
+      if (event.type === "session_info") setMcpLive(mcpFrom(event));
+      if (event.type === "turn_completed") {
+        if (event.input_tokens) (setCtxUsed(event.input_tokens), setCtxBase((b) => b || event.input_tokens!));
+        if (!activeRef.current || !document.hasFocus()) {
+          if (!activeRef.current) chatStore.markUnread(sessionId, true);
+          api.notify(`Kabul · ${ws.name}`, "O agente terminou o turno", { ws: ws.id, session: sessionId }).catch(() => {});
         }
-        if (event.type === "turn_completed") {
-          if (event.input_tokens) (setCtxUsed(event.input_tokens), setCtxBase((b) => b || event.input_tokens!));
-          if (!activeRef.current || !document.hasFocus()) {
-            onUnread();
-            api.notify(`Kabul · ${ws.name}`, "O agente terminou o turno").catch(() => {});
-          }
+      }
+      if (event.type === "approval_request" && (!activeRef.current || !document.hasFocus())) api.notify(`Kabul · ${ws.name}`, `Pedido de permissão: ${event.tool}`, { ws: ws.id, session: sessionId }).catch(() => {});
+      if (event.type === "turn_completed" || event.type === "exited" || event.type === "approval_request") setBusy(false);
+      if (event.type === "exited") setLive(null);
+      evs.push(event);
+    }
+    if (!evs.length) return;
+    setItems((it) => {
+      let next = it;
+      for (const event of evs) {
+        if (event.type === "usage") { usageRef.current = event; continue; }
+        const before = next;
+        next = apply(next, event, started.current);
+        if (event.type === "turn_completed" && next !== before) {
+          const last = next[next.length - 1];
+          if (last?.k === "turn") next[next.length - 1] = { ...last, usage: usageRef.current ?? undefined, started: started.current, ended: Date.now() };
+          usageRef.current = null;
         }
-        if (event.type === "approval_request" && (!activeRef.current || !document.hasFocus())) api.notify(`Kabul · ${ws.name}`, `Pedido de permissão: ${event.tool}`).catch(() => {});
-        if (event.type === "turn_completed" || event.type === "exited" || event.type === "approval_request") setBusy(false);
-        if (event.type === "exited") setLive(null);
-        setItems((it) => {
-          const next = apply(it, event, started.current);
-          if (event.type === "turn_completed") {
-            const last = next[next.length - 1];
-            if (last?.k === "turn") next[next.length - 1] = { ...last, usage: usageRef.current ?? undefined, started: started.current, ended: Date.now() };
-            usageRef.current = null;
-          }
-          return next;
-        });
-      }),
-    [setBusy, onUnread, ws.name],
-  );
+      }
+      return next;
+    });
+  };
+  const onBatchRef = useRef(onBatch);
+  onBatchRef.current = onBatch;
+  // Estado completo para guardar ao desmontar (lido na hora da limpeza).
+  const scrollPos = useRef<{ top: number; bottom: boolean }>(m0?.scroll ?? { top: 0, bottom: true });
+  const [win, setWin] = useState(m0?.window ?? WINDOW);
+  const snap = useRef<() => ChatMemory>(() => null as never);
+  snap.current = () => ({
+    items: itemsRef.current, live: liveRef.current, agentSession, text, queue, queuePaused, plan, ctxUsed, ctxBase, mcpLive, sessionOff, account, note,
+    scroll: scrollPos.current, expanded: [...expanded], harness: harnessRef.current, fork: forkRef.current, replay: replayRef.current, stopped: stoppedRef.current,
+    started: started.current, usage: usageRef.current, modelKey: prefs.selected, busy, window: win, seq: 0,
+  });
+  useLayoutEffect(() => {
+    const fresh = chatStore.attach(sessionId, (b) => onBatchRef.current(b), m0 ? m0.seq : null);
+    if (fresh) {
+      // Chegou evento entre o render e agora: pega o estado guardado mais novo.
+      setItems(fresh.items);
+      setAgentSession(fresh.agentSession);
+      setBusyState(fresh.busy);
+      setQueue(fresh.queue);
+      liveRef.current = fresh.live;
+      setLiveState(fresh.live);
+      stoppedRef.current = fresh.stopped;
+    }
+    return () => chatStore.detach(sessionId, snap.current());
+  }, [sessionId]);
   // Salva com o id do agente quando ele aparece.
   useEffect(() => {
     if (!loaded || !items.length) return;
@@ -229,13 +300,40 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
     return () => clearTimeout(t);
   }, [agentSession, items, loaded]);
   // Tarefas em segundo plano do agente (Bash com run_in_background ainda não encerradas).
-  const bgTasks = (() => {
-    const started = items.filter((i) => i.k === "tool" && i.name === "Bash" && (i.input as { run_in_background?: boolean })?.run_in_background).length;
-    const killed = items.filter((i) => i.k === "tool" && /^Kill(Shell|Bash)$/.test(i.name)).length;
-    return Math.max(0, started - killed);
-  })();
-  useEffect(() => onWaiting(waiting), [waiting, onWaiting]);
-  useEffect(() => void scroller.current?.scrollTo({ top: scroller.current.scrollHeight }), [items]);
+  const bgTasks = useMemo(() => {
+    let st = 0, killed = 0;
+    for (const i of items) if (i.k === "tool") (i.name === "Bash" && (i.input as { run_in_background?: boolean })?.run_in_background && st++), /^Kill(Shell|Bash)$/.test(i.name) && killed++;
+    return Math.max(0, st - killed);
+  }, [items]);
+
+  // Rolagem: gruda no fim enquanto você está no fim; rolar até o topo desenha as mensagens anteriores.
+  const anchor = useRef<{ h: number; top: number } | null>(null);
+  const jumpTo = useRef<number | null>(null);
+  const firstScroll = useRef(true);
+  useLayoutEffect(() => {
+    const s = scroller.current;
+    if (!s) return;
+    if (firstScroll.current && m0?.scroll && !m0.scroll.bottom) {
+      firstScroll.current = false;
+      s.scrollTop = m0.scroll.top;
+      return;
+    }
+    firstScroll.current = false;
+    if (anchor.current) {
+      s.scrollTop = anchor.current.top + (s.scrollHeight - anchor.current.h);
+      anchor.current = null;
+    } else if (jumpTo.current !== null) {
+      s.querySelector(`[data-msg="${jumpTo.current}"]`)?.scrollIntoView({ block: "start" });
+      jumpTo.current = null;
+    } else if (scrollPos.current.bottom) s.scrollTop = s.scrollHeight;
+  }, [items, win]);
+  const onScroll = () => {
+    const s = scroller.current;
+    if (!s) return;
+    scrollPos.current = { top: s.scrollTop, bottom: s.scrollHeight - s.scrollTop - s.clientHeight < 80 };
+    if (s.scrollTop < 400 && startIdx > 0 && !anchor.current) (anchor.current = { h: s.scrollHeight, top: s.scrollTop }), setWin((w) => w + WINDOW_STEP);
+  };
+  const toBottom = () => (scrollPos.current = { ...scrollPos.current, bottom: true });
 
   // Texto vindo de fora (comentários de diff, etc.).
   useEffect(() => {
@@ -272,6 +370,16 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
     const mcpOff = [...new Set([...sessionOff, ...repoDisabled(ws.repo_id)])].sort();
     const acc = account?.id ?? null;
     if (cur && cur.key === selected.key && cur.effort === effort && cur.fast === prefs.fast && cur.plan === plan && cur.mcpOff === mcpOff.join() && cur.account === acc) return cur;
+    // Só o plan mode mudou (ex.: plano aprovado): troca ao vivo, sem reiniciar a conversa.
+    if (cur && cur.key === selected.key && cur.effort === effort && cur.fast === prefs.fast && cur.plan !== plan && cur.mcpOff === mcpOff.join() && cur.account === acc) {
+      const ok = await api.chatSetMode(cur.id, plan ? "plan" : "default").catch(() => false);
+      if (ok) {
+        const l = { ...cur, plan };
+        setLive(l, selected.label);
+        setItems((it) => [...it, { k: "notice", text: plan ? "Plan mode ligado" : "Saiu do plan mode" }]);
+        return l;
+      }
+    }
     if (cur && cur.account !== acc && cur.harness === selected.harness) {
       // Outra conta do mesmo provedor: config isolada, então a conversa continua por handoff.
       await api.chatStop(cur.id).catch(() => {});
@@ -281,9 +389,8 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
       setItems((it) => [...it, { k: "handoff", text: `Trocou para a conta ${account?.nickname ?? "padrão"}` }]);
       try {
         const r = await api.chatStart(ws.id, selected, effort, prefs.fast, null, plan, mcpOff, false, acc);
-        const l = { id: r.chat_id, harness: r.harness, key: selected.key, effort, fast: prefs.fast, plan, approvals: r.approvals, mcpOff: mcpOff.join(), account: acc };
-        liveRef.current = l;
-        setLive(l);
+        const l = { id: r.chat_id, harness: r.harness, key: selected.key, effort, fast: prefs.fast, plan, approvals: r.approvals, mcpOff: mcpOff.join(), account: acc, planKind: r.plan };
+        setLive(l, selected.label);
         return l;
       } catch (e) {
         onError(String(e));
@@ -310,9 +417,8 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
       forkRef.current = false;
       harnessRef.current = r.harness;
       if (r.note) setNote(r.note);
-      const l = { id: r.chat_id, harness: r.harness, key: selected.key, effort, fast: prefs.fast, plan, approvals: r.approvals, mcpOff: mcpOff.join(), account: account?.id ?? null };
-      liveRef.current = l;
-      setLive(l);
+      const l = { id: r.chat_id, harness: r.harness, key: selected.key, effort, fast: prefs.fast, plan, approvals: r.approvals, mcpOff: mcpOff.join(), account: account?.id ?? null, planKind: r.plan };
+      setLive(l, selected.label);
       return l;
     } catch (e) {
       onError(String(e));
@@ -323,6 +429,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
   const dispatch = async (t: string) => {
     setBusy(true);
     started.current = Date.now();
+    toBottom();
     const ck = await api.createCheckpoint(ws.id, `antes: ${t.slice(0, 60)}`).catch(() => null);
     const firstMessage = !itemsRef.current.some((i) => i.k === "user" && !i.queued);
     setItems((it) => {
@@ -332,9 +439,35 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
     });
     if (firstMessage) api.autoBranch(ws.id, t).then((w) => w && onWorkspaceChange(), () => {});
     // A lista de modelos ainda não chegou (aba recém-aberta): envia assim que chegar, sem perder a mensagem.
-    if (!selected) return void (pendingSendRef.current = t);
-    await sendNow(t);
+    // Lê o modelo e o envio do último render: depois dos awaits acima, `selected` desta closure pode estar velho
+    // (a lista chegou no meio) e o efeito abaixo já teria rodado sem nada pendente, deixando a mensagem parada.
+    if (!selectedRef.current) return void (pendingSendRef.current = t);
+    await sendNowRef.current(t);
   };
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  // Aba Uso / barra do Kabul: perto do limite, troca a conta ou o LLM desta conversa (vale no próximo
+  // envio, pelo mesmo caminho da troca manual: handoff na mesma conversa e branch).
+  // Fora da tela a aba não está montada: o pedido fica guardado e é aplicado aqui ao montar.
+  useEffect(() => {
+    const applySwitch = (d: UsageSwitch) => {
+      const cur = selectedRef.current;
+      if (!cur || PROVIDER_OF[cur.harness] !== d.provider || cur.local) return;
+      if (d.account) setAccount(d.account);
+      if (d.toProvider) {
+        const m = models.find((x) => !x.local && PROVIDER_OF[x.harness] === d.toProvider);
+        if (m) (setPrefs((p) => ({ ...p, selected: m.key })), setAccount(null));
+      }
+    };
+    if (selectedRef.current && models.length) takeUsageSwitches(sessionId).forEach(applySwitch);
+    const h = (e: Event) => {
+      const d = (e as CustomEvent).detail as UsageSwitch;
+      markUsageSwitch(sessionId, d);
+      applySwitch(d);
+    };
+    window.addEventListener("kabul:usage-switch", h);
+    return () => window.removeEventListener("kabul:usage-switch", h);
+  }, [models, setPrefs, sessionId, !!selected]);
   const pendingSendRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selected || !pendingSendRef.current) return;
@@ -342,7 +475,10 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
     pendingSendRef.current = null;
     void sendNow(t);
   }, [selected]);
+  const sendNowRef = useRef<(t: string) => Promise<void>>(async () => {});
+  sendNowRef.current = (t: string) => sendNow(t);
   const sendNow = async (t: string) => {
+    stoppedRef.current = null;
     const l = await ensure();
     if (!l) return setBusy(false);
     let payload = t;
@@ -370,6 +506,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
     if (!t) return;
     setText("");
     setSuggest(null);
+    toBottom();
     if (t === "/plan") return setPlan((p) => !p);
     // Agente trabalhando ou esperando aprovação: a mensagem entra na fila (ou redireciona).
     if (busy || waiting) {
@@ -398,11 +535,39 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
     setItems((it) => it.filter((i) => !(i.k === "user" && i.queued && i.text === t)));
   };
 
+  // Parar: interrompe só o agente (pelo protocolo dele; a sessão continua retomável). Passos pendentes viram
+  // "interrompido" e o marcador vai no fim do turno. O que o agente deixou rodando é listado para o usuário
+  // decidir (manter é o padrão); nada é encerrado sozinho.
   const stop = async () => {
-    if (live) await api.chatStop(live.id).catch(() => {});
-    setLive(null);
+    const cur = liveRef.current;
+    if (cur) stoppedRef.current = cur.id;
     setBusy(false);
-    setItems((it) => [...it, { k: "notice", text: "Interrompido" }]);
+    chatStore.interruptSubs(sessionId);
+    setItems((it) => interrupted(it));
+    if (!cur) return;
+    const r = await api.chatInterrupt(cur.id).catch(() => null);
+    if (!r?.alive) setLive(null);
+    if (!r || (!r.leftovers.length && !r.containers.length)) return;
+    const remember = localStorage.getItem(`kabul.leftovers.${ws.id}`);
+    if (remember === "kill") {
+      await api.processKill(r.leftovers.map(({ pid, start }) => ({ pid, start }))).catch((e) => onError(String(e)));
+      for (const c of r.containers) await api.dockerStop(c.id).catch((e) => onError(String(e)));
+      return setItems((it) => [...it, { k: "leftovers", procs: r.leftovers, containers: r.containers, decided: "killed", killed: r.leftovers.map((p) => p.pid), stopped: r.containers.map((c) => c.id) }]);
+    }
+    if (remember === "keep") {
+      await api.processesKeep(r.leftovers, ws.id).catch(() => {});
+      return setItems((it) => [...it, { k: "leftovers", procs: r.leftovers, containers: r.containers, decided: "kept" }]);
+    }
+    setItems((it) => [...it, { k: "leftovers", procs: r.leftovers, containers: r.containers }]);
+  };
+  const decideLeftovers = async (n: number, kill: import("../api").Leftover[], keep: import("../api").Leftover[], remember: "keep" | "kill" | null) => {
+    if (remember) localStorage.setItem(`kabul.leftovers.${ws.id}`, remember);
+    if (keep.length) await api.processesKeep(keep, ws.id).catch(() => {});
+    if (kill.length) await api.processKill(kill.map(({ pid, start }) => ({ pid, start }))).catch((e) => onError(String(e)));
+    setItems((it) => it.map((x, j) => (j === n && x.k === "leftovers" ? { ...x, decided: kill.length ? "killed" : "kept", killed: kill.map((p) => p.pid) } : x)));
+  };
+  const stopContainer = async (n: number, id: string) => {
+    await api.dockerStop(id).then(() => setItems((it) => it.map((x, j) => (j === n && x.k === "leftovers" ? { ...x, stopped: [...(x.stopped ?? []), id] } : x))), (e) => onError(String(e)));
   };
 
   // Arquivar/sair com agentes rodando: "parar e arquivar" para todas as conversas do workspace.
@@ -426,10 +591,9 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
 
   // Fork e reset a partir de um turno.
   const turnBounds = (n: number) => {
-    const userIdx = items.map((x, k) => (x.k === "user" && !x.queued ? k : -1)).filter((k) => k >= 0);
-    const nextUser = userIdx.find((k) => k > n);
-    const nextCk = nextUser !== undefined ? (items[nextUser] as { checkpoint?: string }).checkpoint ?? null : null;
-    return { isLast: nextUser === undefined, nextCk };
+    const nextUser = items.findIndex((x, k) => k > n && x.k === "user" && !x.queued);
+    const nextCk = nextUser >= 0 ? (items[nextUser] as { checkpoint?: string }).checkpoint ?? null : null;
+    return { isLast: nextUser < 0, nextCk };
   };
   const forkTab = (n: number) => {
     const { isLast } = turnBounds(n);
@@ -506,7 +670,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
     const before = v.slice(0, caret);
     const m = before.match(/(^|\s)([@/])([^\s]*)$/);
     if (m && (m[2] === "@" || m[1] !== "" || before.startsWith("/"))) setSuggest({ kind: m[2] as "@" | "/", q: m[3], sel: 0 });
-    else setSuggest(null);
+    else if (suggest) setSuggest(null);
   };
   const options = useMemo(() => {
     if (!suggest) return [];
@@ -587,12 +751,51 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
     return () => window.removeEventListener("keydown", h);
   }, [active, prefs.favorites, selected, effort, dictation, setPrefs, busy, suggest]);
 
+  // ---------- fio: arranjo em uma passada, janela das mensagens recentes e linhas memorizadas ----------
+  const layout = useMemo(() => layoutOf(items, noCollapse, expanded, ws.path), [items, noCollapse, expanded, ws.path]);
+  // A janela começa numa mensagem sua (um turno nunca aparece cortado); ⌘F desenha tudo para buscar.
+  let startIdx = finding ? 0 : Math.max(0, items.length - win);
+  if (startIdx > 0) startIdx = [...layout.userIdx].reverse().find((k) => k <= startIdx) ?? 0;
+  const ctx = useRef<RowCtx>(null as never);
+  ctx.current = {
+    openFile: (p: string) => window.dispatchEvent(new CustomEvent("kabul:open-file", { detail: { ws: ws.id, path: p.startsWith(ws.path) ? p.slice(ws.path.length + 1) : p } })),
+    expand: (u: number) => setExpanded((e) => new Set(e).add(u)),
+    editQueued, deleteQueued, steer, restore, decide, setPlan, send: (t: string) => sendRef.current(t),
+    newChatWith: (t: string) => window.dispatchEvent(new CustomEvent("kabul:new-chat-with", { detail: { ws: ws.id, text: t } })),
+    decideLeftovers, stopContainer,
+    quote: (t: string) => setText((x) => `${x}${x ? "\n" : ""}> ${t.split("\n").join("\n> ")}\n\n`),
+    forkTab, forkWorkspace, resetChat,
+  };
+  const jump = (n: number) => {
+    if (n < startIdx) {
+      jumpTo.current = n;
+      setWin(items.length - n + 20);
+    } else scroller.current?.querySelector(`[data-msg="${n}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
+
+  const jumpRef = useRef(jump);
+  jumpRef.current = jump;
+  const onJump = useCallback((n: number) => jumpRef.current(n), []);
   const harnessNow = live?.harness ?? selected?.harness;
+  const slot = useChatSelect(() => chatStore.get(sessionId)?.queue ?? null);
   return (
     <div className="chat">
-      <Minimap items={items} scroller={scroller} />
+      <Minimap items={items} onJump={onJump} />
       {finding && <ChatFind root={threadRef} scroller={scroller} version={items.length} onClose={() => setFinding(false)} />}
-      <div className="messages" ref={scroller}>
+      {quoteBtn && createPortal(
+        <button className="btn small quote-btn" style={{ left: quoteBtn.x, top: quoteBtn.y }} onMouseDown={(e) => e.preventDefault()}
+          onClick={() => (setText((x) => `${x}${x ? "\n" : ""}> ${quoteBtn.text.split("\n").join("\n> ")}\n\n`), setQuoteBtn(null), window.getSelection()?.removeAllRanges(), setTimeout(() => input.current?.focus(), 0))} data-testid="quote-selection">Citar</button>,
+        document.body,
+      )}
+      <div className="messages" ref={scroller} onScroll={onScroll} onMouseUp={() => {
+        // Citar: texto selecionado numa resposta vira citação na próxima mensagem.
+        const sel = window.getSelection();
+        const t = sel?.toString().trim();
+        const node = sel?.anchorNode instanceof Element ? sel.anchorNode : sel?.anchorNode?.parentElement;
+        if (!t || !sel?.rangeCount || !node?.closest(".msg-assistant")) return setQuoteBtn(null);
+        const r = sel.getRangeAt(0).getBoundingClientRect();
+        setQuoteBtn({ x: Math.round(r.left), y: Math.round(r.top - 34), text: t });
+      }}>
         <div className="thread" ref={threadRef}>
           {items.length === 0 && (
             <div className="chat-empty">
@@ -601,81 +804,11 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
               <div className="ce-hints dim">Use <kbd>@</kbd> para mencionar arquivos, <kbd>/</kbd> para comandos, <kbd>⇧⇥</kbd> para plan mode e <kbd>⌘U</kbd> para anexar.</div>
             </div>
           )}
-          {(() => {
-            // Recolhe os passos intermediários de turnos concluídos (⌃O desliga).
-            const hidden = new Set<number>();
-            const toggles = new Map<number, { user: number; tools: number; msgs: number; shell: boolean }>();
-            if (!noCollapse) {
-              let u = -1;
-              const collapse = (mid: number[]) => {
-                if (mid.length < 2 || expanded.has(u)) return;
-                mid.forEach((j) => hidden.add(j));
-                const tools = mid.filter((j) => items[j].k === "tool");
-                toggles.set(mid[0], { user: u, tools: tools.length, msgs: mid.length - tools.length, shell: tools.some((j) => (items[j] as { name: string }).name === "Bash") });
-              };
-              items.forEach((it, k) => {
-                if (it.k === "user" && !it.queued) u = k;
-                if (it.k === "turn" && u >= 0) {
-                  const finalA = [...items.keys()].filter((j) => j > u && j < k && items[j].k === "assistant").pop();
-                  collapse([...items.keys()].filter((j) => j > u && j < (finalA ?? k) && ["tool", "reasoning", "assistant"].includes(items[j].k)));
-                }
-              });
-              // Turno em andamento: os passos também ficam numa linha só (a linha de status diz o que está rodando);
-              // o texto que está chegando continua visível.
-              const lastTurn = items.map((x) => x.k).lastIndexOf("turn");
-              if (busy && u > lastTurn) {
-                const lastIdx = items.length - 1;
-                collapse([...items.keys()].filter((j) => j > u && ["tool", "reasoning", "assistant"].includes(items[j].k) && !(j === lastIdx && items[j].k === "assistant")));
-              }
-            }
-            const openFile = (p: string) => window.dispatchEvent(new CustomEvent("kabul:open-file", { detail: { ws: ws.id, path: p.startsWith(ws.path) ? p.slice(ws.path.length + 1) : p } }));
-            return items.map((i, n) => {
-              const tg = toggles.get(n);
-              const toggle = tg ? (
-                <button key={`t${n}`} className="steps-toggle" onClick={() => setExpanded((e) => new Set(e).add(tg.user))} data-testid="expand-steps" title="Mostrar os passos (⌃O mostra sempre)">
-                  <span className="st-chev">›</span>
-                  {[tg.tools && `${tg.tools} ferramenta${tg.tools === 1 ? "" : "s"}`, tg.msgs && `${tg.msgs} mensage${tg.msgs === 1 ? "m" : "ns"}`].filter(Boolean).join(", ")}
-                  {tg.shell && <span className="st-shell mono" data-testid="steps-shell">&gt;_</span>}
-                </button>
-              ) : null;
-              if (hidden.has(n)) return toggle;
-              switch (i.k) {
-                case "user": return (
-                  <div key={n} data-msg={n} className={"msg-user" + (i.queued ? " queued" : "")} data-testid={i.queued ? "queued-msg" : undefined}>
-                    {i.text}
-                    {i.queued && <span className="badge">na fila</span>}
-                    {i.queued && (
-                      <span className="q-actions">
-                        <button className="text-btn small" onClick={() => editQueued(i.text)} data-testid="queue-edit">Editar <kbd>e</kbd></button>
-                        <button className="text-btn small" onClick={() => deleteQueued(i.text)} data-testid="queue-delete">Apagar <kbd>⌫</kbd></button>
-                        <button className="text-btn small" onClick={() => steer(i.text)} data-testid="queue-steer">Enviar agora <kbd>↵</kbd></button>
-                      </span>
-                    )}
-                    {i.checkpoint && !busy && <button className="icon-btn restore" title="Restaurar checkpoint (arquivos como antes desta mensagem)" onClick={() => restore(i.checkpoint!)}><IRestore size={13} /></button>}
-                  </div>
-                );
-                case "assistant": return <div key={n} data-msg={n} className="msg-assistant"><Markdown text={appSet?.not_absolutely_right ? stripAbsolutelyRight(i.text) : i.text} onFile={openFile} />{i.streaming && <span className="caret" />}</div>;
-                case "reasoning": return <ThinkingCard key={n} text={i.text} />;
-                case "tool": return <ToolCard key={n} name={i.name} input={i.input} output={i.output} error={i.error} onOpenFile={openFile} />;
-                case "approval":
-                  if (i.tool === "ExitPlanMode") return <PlanCard key={n} plan={String((i.input as { plan?: string })?.plan ?? "")} decided={i.decided} allow={i.allow}
-                    onApprove={() => (decide(i.id, true), setPlan(false))}
-                    onAdjust={(t) => (decide(i.id, false), setTimeout(() => sendRef.current(t), 300))}
-                    onHandOff={() => (decide(i.id, false), window.dispatchEvent(new CustomEvent("kabul:new-chat-with", { detail: { ws: ws.id, text: `Implemente este plano:\n\n${(i.input as { plan?: string })?.plan ?? ""}` } })))} />;
-                  if (i.tool === "AskUserQuestion") return <QuestionCard key={n} input={i.input} decided={i.decided}
-                    onSubmit={(answers) => decide(i.id, true, false, { ...(i.input as object), answers })} onSkip={() => decide(i.id, false)} />;
-                  return <ApprovalCard key={n} tool={i.tool} input={i.input} decided={i.decided} allow={i.allow} always={i.always} onDecide={(a, al) => decide(i.id, a, al)} />;
-                case "turn": return <TurnMeta key={n} item={i} files={turnFiles(items, n, ws.path)} onOpenFile={openFile} checkpoint={([...items.slice(0, n)].reverse().find((x) => x.k === "user") as { checkpoint?: string } | undefined)?.checkpoint}
-                  isLast={turnBounds(n).isLast} onRestore={restore} onQuote={(t) => setText((x) => `${x}${x ? "\n" : ""}> ${t.split("\n").join("\n> ")}\n\n`)}
-                  onForkTab={() => forkTab(n)} onForkWorkspace={() => forkWorkspace(n)} onReset={() => resetChat(n)} />;
-                case "handoff": return <div key={n} className="handoff-divider" data-testid="handoff"><span>{i.text}</span></div>;
-                case "notice": return <div key={n} className="notice">{i.text}</div>;
-                case "error": return <div key={n} className="msg-error">{i.text}</div>;
-              }
-            });
-          })()}
+          {startIdx > 0 && <button className="text-btn small older-btn" onClick={() => { const s = scroller.current; if (s) anchor.current = { h: s.scrollHeight, top: s.scrollTop }; setWin((w) => w + WINDOW_STEP); }} data-testid="load-older">Mostrar mensagens anteriores ({startIdx})</button>}
+          <Thread items={items} start={startIdx} layout={layout} busy={busy} noAbs={!!appSet?.not_absolutely_right} ctx={ctx} />
           {!busy && bgTasks > 0 && <WorkingLine testid="bg-tasks" since={started.current} text={`Aguardando ${bgTasks} tarefa${bgTasks === 1 ? "" : "s"} em segundo plano`} />}
-          {busy && !waiting && <WorkingLine since={started.current} text={activity(items.slice(items.map((x) => x.k).lastIndexOf("user") + 1) as never)} />}
+          {busy && !waiting && slot && <WorkingLine testid="slot-wait" since={started.current} text={`Aguardando vaga · ${slot.position}º na fila${slot.limit ? ` (limite de ${slot.limit} agentes ao mesmo tempo)` : ""}`} />}
+          {busy && !waiting && !slot && <WorkingLine since={started.current} text={activity(items.slice(items.map((x) => x.k).lastIndexOf("user") + 1) as never)} />}
         </div>
       </div>
 
@@ -687,18 +820,19 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
             {live && !live.approvals && <span>{HARNESS_LABEL[live.harness]} aplica as permissões dele; aprovações pelo app não estão disponíveis neste harness.</span>}
           </div>
         )}
+        <SubagentBar session={sessionId} />
         <div className={"composer" + (plan ? " plan" : "")}>
           {suggest && options.length > 0 && (
-            <div className="popover suggest" data-testid="suggest">
+            <Floating className="suggest" placement="top-start" testid="suggest">
               {options.map(([o, d], k) => (
                 <div key={o} className={"pop-row" + (k === suggest.sel ? " on" : "")} onMouseDown={(e) => (e.preventDefault(), pickOption(o))}>
                   <span className="label">{o}</span><span className="grow" /><span className="dim">{d}</span>
                 </div>
               ))}
-            </div>
+            </Floating>
           )}
           {!text && <span className="focus-hint">⌘L para focar</span>}
-          {plan && <div className="plan-chip"><IPlan size={13} /> Plan mode <span className="dim">· o agente planeja sem editar (⇧⇥)</span></div>}
+          {plan && <div className="plan-chip" data-testid="plan-chip"><IPlan size={13} /> {live?.planKind === "emulated" ? "Plan mode (emulado)" : "Plan mode"} <span className="dim">· {live?.planKind === "emulated" ? `${HARNESS_LABEL[live.harness]} não tem plan mode: o Kabul pede só leitura e nega edições e comandos (⇧⇥)` : "o agente planeja sem editar (⇧⇥)"}</span></div>}
           <textarea ref={input} rows={3} autoCorrect="off" {...noSuggest} placeholder="Peça mudanças, @mencione arquivos, rode /comandos" value={text} data-testid="composer"
             onChange={(e) => onChangeText(e.target.value, e.target.selectionStart)} onPaste={onPaste}
             onKeyDown={(e) => {
@@ -708,7 +842,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
                 if (e.key === "Enter" || e.key === "Tab") return (e.preventDefault(), pickOption(options[suggest.sel][0]));
                 if (e.key === "Escape") return (e.preventDefault(), setSuggest(null));
               }
-              const pending = items.find((i) => i.k === "approval" && !i.decided) as { id: string; tool: string } | undefined;
+              const pending = pendingApproval;
               if (pending && !text.trim() && pending.tool !== "AskUserQuestion") {
                 if (pending.tool === "ExitPlanMode" && e.key === "Enter" && e.metaKey && e.shiftKey) return (e.preventDefault(), decide(pending.id, true), setPlan(false));
                 if (pending.tool !== "ExitPlanMode") {
@@ -732,7 +866,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
                   {account?.nickname ?? "Conta padrão"} <span className="dim">˅</span>
                 </button>
                 {accOpen && (
-                  <div className="popover status-pop account-pop" data-testid="account-menu">
+                  <Floating className="status-pop account-pop" placement="top-start" testid="account-menu">
                     <div className="pop-title">Conta desta conversa</div>
                     {accounts.map((a) => (
                       <div key={a.id} className={"pop-row" + ((account?.id ?? accounts.find((x) => x.default)?.id) === a.id ? " on" : "")} onClick={() => (setAccount({ id: a.id, nickname: a.nickname }), setAccOpen(false))} data-testid="account-option">
@@ -741,7 +875,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
                     ))}
                     <div className="pop-sep" />
                     <div className="pop-row" onClick={() => (setAccOpen(false), window.dispatchEvent(new CustomEvent("kabul:route", { detail: { kind: "settings", tab: "contas" } })))}>Gerenciar contas…</div>
-                  </div>
+                  </Floating>
                 )}
               </div>
             )}
@@ -779,45 +913,142 @@ export function ChatTab({ ws, sessionId, active, onTitle, onUnread, onBusy, onWa
   );
 }
 
+interface RowCtx {
+  openFile: (p: string) => void; expand: (u: number) => void; editQueued: (t: string) => void; deleteQueued: (t: string) => void; steer: (t: string) => void;
+  restore: (ck: string) => void; decide: (rid: string, allow: boolean, always?: boolean, updatedInput?: unknown) => void; setPlan: (p: boolean) => void; send: (t: string) => void;
+  newChatWith: (t: string) => void; decideLeftovers: (n: number, kill: import("../api").Leftover[], keep: import("../api").Leftover[], remember: "keep" | "kill" | null) => void;
+  stopContainer: (n: number, id: string) => void; quote: (t: string) => void; forkTab: (n: number) => void; forkWorkspace: (n: number) => void; resetChat: (n: number) => void;
+}
+
+/** O fio desenhado: só a janela [start, fim), e cada linha só re-renderiza se o item dela mudou. */
+const Thread = memo(function Thread({ items, start, layout, busy, noAbs, ctx }: { items: Item[]; start: number; layout: Layout; busy: boolean; noAbs: boolean; ctx: React.RefObject<RowCtx> }) {
+  const out: React.ReactNode[] = [];
+  for (let n = start; n < items.length; n++) {
+    const i = items[n];
+    const t = i.k === "turn" ? layout.turn.get(n) : undefined;
+    const er = i.k === "error" ? layout.err.get(n) : undefined;
+    out.push(<Row key={n} item={i} n={n} toggle={layout.toggles.get(n)} hidden={!!layout.hidden[n]} busy={i.k === "user" || i.k === "error" ? busy : false} noAbs={i.k === "assistant" && noAbs}
+      isLast={t?.isLast} checkpoint={t?.checkpoint} files={t?.files} tail={er ? er.tail && !busy : undefined} lastUser={er?.lastUser} ctx={ctx} />);
+  }
+  return <>{out}</>;
+});
+
+const Row = memo(function Row({ item: i, n, toggle, hidden, busy, noAbs, isLast, checkpoint, files, tail, lastUser, ctx }: {
+  item: Item; n: number; toggle?: string; hidden: boolean; busy: boolean; noAbs: boolean; isLast?: boolean; checkpoint?: string; files?: string; tail?: boolean; lastUser?: string; ctx: React.RefObject<RowCtx>;
+}) {
+  const c = () => ctx.current!;
+  let tg: React.ReactNode = null;
+  if (toggle) {
+    const [user, tools, msgs, shell] = toggle.split("|").map(Number);
+    tg = (
+      <button className="steps-toggle" onClick={() => c().expand(user)} data-testid="expand-steps" title="Mostrar os passos (⌃O mostra sempre)">
+        <span className="st-chev">›</span>
+        {[tools && `${tools} ferramenta${tools === 1 ? "" : "s"}`, msgs && `${msgs} mensage${msgs === 1 ? "m" : "ns"}`].filter(Boolean).join(", ")}
+        {shell ? <span className="st-shell mono" data-testid="steps-shell">&gt;_</span> : null}
+      </button>
+    );
+  }
+  if (hidden) return tg;
+  let body: React.ReactNode = null;
+  switch (i.k) {
+    case "user": body = (
+      <div data-msg={n} className={"msg-user" + (i.queued ? " queued" : "")} data-testid={i.queued ? "queued-msg" : undefined}>
+        {i.text}
+        {i.queued && <span className="badge">na fila</span>}
+        {i.queued && (
+          <span className="q-actions">
+            <button className="text-btn small" onClick={() => c().editQueued(i.text)} data-testid="queue-edit">Editar <kbd>e</kbd></button>
+            <button className="text-btn small" onClick={() => c().deleteQueued(i.text)} data-testid="queue-delete">Apagar <kbd>⌫</kbd></button>
+            <button className="text-btn small" onClick={() => c().steer(i.text)} data-testid="queue-steer">Enviar agora <kbd>↵</kbd></button>
+          </span>
+        )}
+        {i.checkpoint && !busy && <button className="icon-btn restore" title="Restaurar checkpoint (arquivos como antes desta mensagem)" onClick={() => c().restore(i.checkpoint!)}><IRestore size={13} /></button>}
+      </div>
+    ); break;
+    case "assistant": body = <div data-msg={n} className="msg-assistant"><MdMemo text={noAbs ? stripAbsolutelyRight(i.text) : i.text} ctx={ctx} />{i.streaming && <span className="caret" />}</div>; break;
+    case "reasoning": body = <ThinkingCard text={i.text} />; break;
+    case "tool": body = <ToolCard name={i.name} input={i.input} output={i.output} error={i.error} interrupted={i.interrupted} onOpenFile={(p) => c().openFile(p)} />; break;
+    case "leftovers": body = <LeftoversCard item={i} onDecide={(kill, keep, remember) => c().decideLeftovers(n, kill, keep, remember)} onDockerStop={(id) => c().stopContainer(n, id)} />; break;
+    case "approval":
+      if (i.tool === "ExitPlanMode") body = <PlanCard plan={String((i.input as { plan?: string })?.plan ?? "")} decided={i.decided} allow={i.allow}
+        onApprove={() => (c().decide(i.id, true), c().setPlan(false))}
+        onAdjust={(t) => (c().decide(i.id, false), setTimeout(() => c().send(t), 300))}
+        onHandOff={() => (c().decide(i.id, false), c().newChatWith(`Implemente este plano:\n\n${(i.input as { plan?: string })?.plan ?? ""}`))} />;
+      else if (i.tool === "AskUserQuestion") body = <QuestionCard input={i.input} decided={i.decided} onSubmit={(answers) => c().decide(i.id, true, false, { ...(i.input as object), answers })} onSkip={() => c().decide(i.id, false)} />;
+      else body = <ApprovalCard tool={i.tool} input={i.input} decided={i.decided} allow={i.allow} always={i.always} onDecide={(a, al) => c().decide(i.id, a, al)} />;
+      break;
+    case "turn": body = <TurnMeta item={i} files={JSON.parse(files ?? "[]")} onOpenFile={(p) => c().openFile(p)} checkpoint={checkpoint}
+      isLast={!!isLast} onRestore={(ck) => c().restore(ck)} onQuote={(t) => c().quote(t)}
+      onForkTab={() => c().forkTab(n)} onForkWorkspace={() => c().forkWorkspace(n)} onReset={() => c().resetChat(n)} />; break;
+    case "handoff": body = <div className="handoff-divider" data-testid="handoff"><span>{i.text}</span></div>; break;
+    case "notice": body = <div className="notice">{i.text}</div>; break;
+    case "error": body = (
+      // Último erro do fim da conversa: tentar de novo (aqui ou numa conversa nova) e copiar os detalhes.
+      <div className="msg-error" data-testid="msg-error">
+        <div>{i.text}</div>
+        {tail && (
+          <div className="row err-actions">
+            {lastUser && <button className="btn small" onClick={() => c().send(lastUser)} data-testid="retry">Tentar de novo</button>}
+            {lastUser && <button className="btn small" onClick={() => c().newChatWith(lastUser)} data-testid="retry-new">Tentar em nova conversa</button>}
+            <button className="text-btn small" onClick={() => navigator.clipboard.writeText(i.text)} data-testid="copy-error">Copiar detalhes</button>
+          </div>
+        )}
+      </div>
+    ); break;
+  }
+  return <>{tg}{body}</>;
+});
+
+/** Markdown memorizado pelo texto (o parse só refaz quando a mensagem muda). */
+const MdMemo = memo(function MdMemo({ text, ctx }: { text: string; ctx: React.RefObject<RowCtx> }) {
+  const onFile = useCallback((p: string) => ctx.current!.openFile(p), [ctx]);
+  return <Markdown text={text} onFile={onFile} />;
+});
+
+/** Subagentes da conversa (pai → filhos): status, tempo, ferramentas, tokens e custo de cada um. */
+function SubagentBar({ session }: { session: string }) {
+  const subs = useChatSelect(() => chatStore.get(session)?.subs ?? null, Object.is);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, open, useCallback(() => setOpen(false), []));
+  const list = subs ? Object.values(subs) : [];
+  if (!list.length) return null;
+  const running = list.filter((s) => s.status === "running").length;
+  return (
+    <div className="subagent-bar picker" ref={ref}>
+      <button className={"text-btn small" + (open ? " on" : "")} onClick={() => setOpen(!open)} data-testid="subagents-btn">
+        {running > 0 && <span className="spinner tiny" />} {list.length} subagente{list.length === 1 ? "" : "s"}{running ? ` · ${running} rodando` : ""}
+      </button>
+      {open && <Floating className="status-pop subagent-pop" placement="top-start" testid="subagents-pop"><div className="pop-title">Subagentes desta conversa</div><SubagentTree subs={subs!} /></Floating>}
+    </div>
+  );
+}
+
 function IQueueIcon() {
   return <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"><path d="M3 4.5h10M3 8h10M3 11.5h6" /></svg>;
 }
 
 /** Minimapa à direita do chat: um traço por mensagem (claro = sua, escuro = do agente); clique pula até ela. */
-function Minimap({ items, scroller }: { items: Item[]; scroller: React.RefObject<HTMLDivElement | null> }) {
-  const marks = items.map((it, n) => ({ it, n })).filter(({ it }) => it.k === "user" || it.k === "assistant");
+const Minimap = memo(function Minimap({ items, onJump }: { items: Item[]; onJump: (n: number) => void }) {
+  const marks: { it: Item; n: number }[] = [];
+  for (let n = items.length - 1; n >= 0 && marks.length < 40; n--) if (items[n].k === "user" || items[n].k === "assistant") marks.unshift({ it: items[n], n });
   if (marks.length < 2) return null;
-  const jump = (n: number) => scroller.current?.querySelector(`[data-msg="${n}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
   return (
     <div className="minimap" data-testid="minimap">
-      {marks.slice(-40).map(({ it, n }) => (
-        <button key={n} className={"mm " + it.k} title={(it as { text: string }).text.slice(0, 80)} onClick={() => jump(n)} />
+      {marks.map(({ it, n }) => (
+        <button key={n} className={"mm " + it.k} title={(it as { text: string }).text.slice(0, 80)} onClick={() => onJump(n)} />
       ))}
     </div>
   );
-}
+}, (a, b) => {
+  // Só os traços importam: o texto em streaming não muda o minimapa a cada delta.
+  if (a.items.length !== b.items.length) return false;
+  const last = a.items.length - 1;
+  return last < 0 || a.items[last].k === b.items[last].k;
+});
 
 /** Rodapé do turno: tempo (popover com início→fim e tokens), copiar e "···" (fork, reset, citar, restaurar). */
-/** Arquivos mudados no turno (Edit/MultiEdit/Write), com +/− aproximados pelas strings da ferramenta. */
-export function turnFiles(items: Item[], n: number, root: string): { path: string; add: number; del: number }[] {
-  let u = n - 1;
-  while (u >= 0 && !(items[u].k === "user" && !(items[u] as { queued?: boolean }).queued)) u--;
-  const lines = (t: unknown) => (typeof t === "string" && t ? t.split("\n").length : 0);
-  const out = new Map<string, { add: number; del: number }>();
-  for (const it of items.slice(u + 1, n)) {
-    if (it.k !== "tool" || it.error || !/^(Edit|MultiEdit|Write|NotebookEdit)$/.test(it.name)) continue;
-    const inp = (it.input ?? {}) as { file_path?: string; old_string?: string; new_string?: string; content?: string; edits?: { old_string?: string; new_string?: string }[] };
-    if (!inp.file_path) continue;
-    const p = inp.file_path.startsWith(root + "/") ? inp.file_path.slice(root.length + 1) : inp.file_path;
-    const cur = out.get(p) ?? { add: 0, del: 0 };
-    const edits = inp.edits ?? [inp];
-    for (const e of edits) (cur.add += lines((e as { new_string?: string }).new_string ?? inp.content), (cur.del += lines((e as { old_string?: string }).old_string)));
-    out.set(p, cur);
-  }
-  return [...out].map(([path, v]) => ({ path, ...v }));
-}
-
-function TurnMeta({ item, files, onOpenFile, checkpoint, isLast, onRestore, onQuote, onForkTab, onForkWorkspace, onReset }: {
+function TurnMeta({ item, files, onOpenFile, isLast, onForkTab, onForkWorkspace, onReset }: {
   item: Extract<Item, { k: "turn" }>; files: { path: string; add: number; del: number }[]; onOpenFile: (p: string) => void; checkpoint?: string; isLast: boolean; onRestore: (c: string) => void; onQuote: (t: string) => void;
   onForkTab: () => void; onForkWorkspace: () => void; onReset: () => void;
 }) {
@@ -833,40 +1064,55 @@ function TurnMeta({ item, files, onOpenFile, checkpoint, isLast, onRestore, onQu
       <span className="picker turn-time" onMouseEnter={() => setTimeOpen(true)} onMouseLeave={() => setTimeOpen(false)} data-testid="turn-time">
         {item.meta}
         {timeOpen && (
-          <div className="popover status-pop time-pop" data-testid="time-pop">
+          <Floating className="status-pop time-pop" placement="top-start" testid="time-pop">
             <div className="row"><span className="dim">Início → fim</span><span className="grow" />{t(item.started)} → {t(item.ended)}</div>
             <div className="row"><span className="dim">Entrada</span><span className="grow" />{f(u?.input)}</div>
             <div className="row"><span className="dim">Saída</span><span className="grow" />{f(u?.output)}</div>
             <div className="row"><span className="dim">Cache lido</span><span className="grow" />{f(u?.cache_read)}</div>
             <div className="row"><span className="dim">Cache gravado</span><span className="grow" />{f(u?.cache_write)}</div>
-          </div>
+          </Floating>
         )}
       </span>
       <button className="icon-btn" title="Copiar resposta final" onClick={() => navigator.clipboard.writeText(item.copy)}><ICopy size={13} /></button>
-      {files.length > 0 && (
-        <span className="turn-files" data-testid="turn-files">
-          {files.slice(0, 6).map((f) => <button key={f.path} className="file-chip" title={`Abrir o diff de ${f.path}`} onClick={() => onOpenFile(f.path)} data-testid="file-chip">{f.path.split("/").pop()} <span className="add">+{f.add}</span> <span className="del">−{f.del}</span></button>)}
-          {files.length > 6 && <span className="dim small">+{files.length - 6}</span>}
-        </span>
-      )}
+      <ReadAloud text={item.copy} />
+
       <span className="picker" ref={ref}>
         <button className={"icon-btn" + (open ? " on" : "")} title="Ações da mensagem" onClick={() => setOpen(!open)} data-testid="turn-more"><IMoreDots /></button>
         {open && (
-          <div className="popover status-pop turn-pop">
-            <div className="pop-row" onClick={() => (setOpen(false), onForkTab())} data-testid="fork-tab">Fork para nova aba <span className="grow" /><span className="kbd-hint">⌘⌥↵</span></div>
-            <div className="pop-row" onClick={() => (setOpen(false), onForkWorkspace())} data-testid="fork-ws">Fork para novo workspace</div>
-            {!isLast && <div className="pop-row" onClick={() => (setOpen(false), onReset())} data-testid="reset-chat">Reset chat a partir daqui…</div>}
-            <div className="pop-sep" />
-            <div className="pop-row" onClick={() => (navigator.clipboard.writeText(item.copy), setOpen(false))}>Copiar como Markdown</div>
-            <div className="pop-row" onClick={() => (onQuote(item.copy), setOpen(false))}>Citar na próxima mensagem</div>
-            {checkpoint && <div className="pop-row" onClick={() => (onRestore(checkpoint), setOpen(false))}>Restaurar arquivos de antes deste turno</div>}
-          </div>
+          <Floating className="status-pop turn-pop" placement="bottom-start">
+            <div className="pop-row" onClick={() => (setOpen(false), onForkTab())} data-testid="fork-tab"><IForkTab size={16} /> Fork para nova aba</div>
+            <div className="pop-row" onClick={() => (setOpen(false), onForkWorkspace())} data-testid="fork-ws"><IFork size={16} /> Fork para novo workspace</div>
+            {!isLast && <div className="pop-row" onClick={() => (setOpen(false), onReset())} data-testid="reset-chat"><IRestore size={16} /> Reset chat a partir daqui…</div>}
+          </Floating>
         )}
       </span>
+      {files.length > 0 && (
+        <span className="turn-files" data-testid="turn-files">
+          {files.slice(0, 6).map((f) => <button key={f.path} className="file-chip" title={`Abrir o diff de ${f.path}`} onClick={() => onOpenFile(f.path)} data-testid="file-chip"><FileIcon name={f.path} size={14} /> {f.path.split("/").pop()} <span className="add">+{f.add}</span> <span className="del">−{f.del}</span></button>)}
+          {files.length > 6 && <span className="dim small">+{files.length - 6}</span>}
+        </span>
+      )}
     </div>
   );
 }
 
 function IMoreDots() {
   return <svg width="13" height="13" viewBox="0 0 16 16"><g fill="currentColor"><circle cx="3.5" cy="8" r="1.1" /><circle cx="8" cy="8" r="1.1" /><circle cx="12.5" cy="8" r="1.1" /></g></svg>;
+}
+
+/** "Ler em voz alta" a resposta final (síntese de voz do sistema pela Web Speech API; pt-BR). */
+function ReadAloud({ text }: { text: string }) {
+  const [on, setOn] = useState(false);
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return null;
+  const toggle = () => {
+    if (on) return void (speechSynthesis.cancel(), setOn(false));
+    const plain = text.replace(/```[\s\S]*?```/g, " ").replace(/`([^`]*)`/g, "$1").replace(/[*_#>\[\]()]/g, "").replace(/\s+/g, " ").trim();
+    const u = new SpeechSynthesisUtterance(plain);
+    u.lang = "pt-BR";
+    u.onend = u.onerror = () => setOn(false);
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+    setOn(true);
+  };
+  return <button className={"icon-btn" + (on ? " on" : "")} title={on ? "Parar a leitura" : "Ler em voz alta"} onClick={toggle} data-testid="read-aloud"><IVolume size={13} /></button>;
 }

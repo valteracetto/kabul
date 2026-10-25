@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Kabul",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "identifier": "app.kabul.desktop",
   "build": {
     "frontendDist": "../../web/dist",
@@ -22,11 +22,43 @@
         "backgroundColor": "#0d0d0c"
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob: https://github.com https://avatars.githubusercontent.com",
+        "font-src": "'self' data:",
+        "media-src": "'self' blob:",
+        "connect-src": "'self' ipc: http://ipc.localhost ws: wss: http: https:",
+        "worker-src": "'self'",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "form-action": "'none'",
+        "frame-src": "'none'"
+      },
+      "devCsp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:5173 ws://localhost:5173 ipc: http://ipc.localhost data: blob:; img-src 'self' data: blob: https: http://localhost:5173; connect-src 'self' ipc: http://ipc.localhost ws: wss: http: https:; object-src 'none'",
+      "dangerousDisableAssetCspModification": ["style-src"]
+    }
   },
   "bundle": {
     "active": true,
     "targets": ["app"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.png"]
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico", "icons/icon.png"],
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["kabul"]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ3QTEyQzNGMEI4MjJDMUEKUldRYUxJSUxQeXloUndRQ0ZQbElCRitRNklZa1JPSjM5QmowSlkzMjRMeUMxVEVvWkQ4cFBWMjcK",
+      "endpoints": ["https://github.com/valteracetto/kabul/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

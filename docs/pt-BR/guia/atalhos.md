@@ -62,6 +62,7 @@ No Windows, `⌘` será `Ctrl`. A mesma lista está em **Configurações › Ata
 | `⌘W` | Fechar aba |
 | `⌘⇧T` | Reabrir a aba fechada (ou novo terminal) |
 | `⌃Tab / ⌃⇧Tab` | Próxima / anterior aba (também ⌘⇧] / ⌘⇧[) |
+| `⌘D` | Dividir com a próxima aba / desfazer a divisão |
 
 ### Chat
 

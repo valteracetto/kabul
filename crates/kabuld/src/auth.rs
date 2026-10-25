@@ -160,7 +160,14 @@ impl Auth {
         if let Some(d) = self.file.parent() {
             std::fs::create_dir_all(d)?;
         }
-        std::fs::write(&self.file, serde_json::to_vec_pretty(devices)?).context("gravando dispositivos")
+        std::fs::write(&self.file, serde_json::to_vec_pretty(devices)?).context("gravando dispositivos")?;
+        // Sem chave, mas com nomes e aparelhos: só o dono da conta lê.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&self.file, std::fs::Permissions::from_mode(0o600))?;
+        }
+        Ok(())
     }
 
     /// Emite um ingresso de uso único válido por `ttl` segundos.
@@ -243,6 +250,12 @@ impl Auth {
         }
     }
 
+    /// A credencial ainda vale? (o dono local, `local`, sempre). Conferido a cada comando: a queda
+    /// pela revogação é um evento no barramento e um evento pode se perder se a conexão atrasar.
+    pub fn is_active(&self, id: &str) -> bool {
+        id == "local" || self.devices.lock().unwrap().iter().any(|d| d.id == id)
+    }
+
     pub fn list(&self) -> Vec<Device> {
         self.devices.lock().unwrap().clone()
     }
@@ -303,6 +316,11 @@ mod tests {
         // O arquivo guarda metadados, nunca a chave.
         let raw = std::fs::read_to_string(dir.join("kabuld-devices.json")).unwrap();
         assert!(!raw.contains(&key));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(dir.join("kabuld-devices.json")).unwrap().permissions().mode() & 0o777, 0o600);
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -316,7 +334,9 @@ mod tests {
         let (d, key) = a.redeem(&t.token, "", "").unwrap();
         assert_eq!(d.user, "Convidado");
         assert_eq!(d.scope, Scope::Workspace { id: "w1".into() });
+        assert!(a.is_active(&d.id) && a.is_active("local"));
         a.revoke(&d.id).unwrap();
+        assert!(!a.is_active(&d.id));
         assert!(a.verify(&d.id, &key).is_none());
         assert!(a.revoke(&d.id).is_err());
         let _ = std::fs::remove_dir_all(dir);

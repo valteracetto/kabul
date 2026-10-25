@@ -1,12 +1,14 @@
 use anyhow::{bail, Result};
 
+mod loadtest;
 mod serve;
 use clap::{Parser, Subcommand};
 use kabul_core::harness::{HarnessKind, SessionOptions};
-use kabul_core::{agent, auth, import::sessions::SessionImporter, tmux, worktree};
+use kabul_core::term::{self, Cmd as TermCmd, Launch, What};
+use kabul_core::{agent, auth, import::sessions::SessionImporter, worktree};
 
 #[derive(Parser)]
-#[command(name = "kabul", about = "Sessões de agentes (Claude, Codex, Antigravity) no tmux")]
+#[command(name = "kabul", about = "Sessões de agentes (Claude, Codex, Antigravity) no tmux ou no terminal do Kabul")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -50,11 +52,13 @@ enum Cmd {
         #[arg(long)]
         home: String,
     },
-    /// Um turno de chat estruturado (mesmo caminho do app). `--local <id>` usa um modelo local.
+    /// Um turno de chat estruturado (mesmo caminho do app). `--local <id>` usa um modelo local com o
+    /// harness do registro por família (ou o de `--agente`, se ele falar uma API do servidor).
     Chat {
         prompt: String,
-        #[arg(long, default_value = "claude")]
-        agente: String,
+        /// Padrão: claude (sem `--local`) ou o do registro (com `--local`).
+        #[arg(long)]
+        agente: Option<String>,
         #[arg(long)]
         model: Option<String>,
         #[arg(long)]
@@ -64,6 +68,65 @@ enum Cmd {
         /// Responde pedidos de aprovação: allow | deny.
         #[arg(long, default_value = "allow")]
         aprovar: String,
+    },
+    /// Teste de carga do backend: kabuld real, N workspaces sintéticos, M agentes falsos e K clientes
+    /// WebSocket; relatório JSON (CPU/memória do servidor, latência evento → cliente, RPC).
+    Loadtest {
+        #[arg(long, default_value_t = 100)]
+        workspaces: usize,
+        #[arg(long, default_value_t = 30)]
+        agents: usize,
+        /// Eventos por segundo por agente.
+        #[arg(long, default_value_t = 20.0)]
+        rate: f64,
+        /// Segundos medidos (depois do aquecimento).
+        #[arg(long, default_value_t = 20)]
+        duration: u64,
+        #[arg(long, default_value_t = 3)]
+        warmup: u64,
+        /// Clientes WebSocket: 0 e 1 assinam tudo (app, espelho); os demais só status (celular).
+        #[arg(long, default_value_t = 3)]
+        clients: usize,
+        /// Sessões tmux de teste (prefixo kabul-test-perf-) imprimindo sem parar; o cliente 0 assiste.
+        #[arg(long, default_value_t = 0)]
+        tmux: usize,
+        #[arg(long, default_value_t = 1500)]
+        monitor_ms: u64,
+        /// Limite de agentes simultâneos no kabuld (fila "aguardando vaga").
+        #[arg(long)]
+        max_agents: Option<usize>,
+        /// Pede compressão por mensagem ao kabuld (hello.compress = deflate).
+        #[arg(long)]
+        compress: bool,
+        /// Grava o relatório também neste arquivo.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        /// Limites (perf-budgets.json): sai com código 1 se algum passar.
+        #[arg(long)]
+        budgets: Option<std::path::PathBuf>,
+        #[arg(long)]
+        label: Option<String>,
+    },
+    /// Processo servidor do loadtest (interno).
+    #[command(hide = true)]
+    LoadtestWorker {
+        #[arg(long)]
+        home: std::path::PathBuf,
+        #[arg(long)]
+        port: u16,
+        #[arg(long)]
+        workspaces: usize,
+        #[arg(long)]
+        agents: usize,
+        #[arg(long)]
+        rate: f64,
+        #[arg(long)]
+        tmux: usize,
+        #[arg(long)]
+        monitor_ms: u64,
+        /// 0 = sem limite.
+        #[arg(long, default_value_t = 0)]
+        max_agents: usize,
     },
 }
 
@@ -83,8 +146,18 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Serve { port, home } => { kabul_core::shell_env::apply(&[]); serve::serve(port, home.into()) },
-        Cmd::Chat { prompt, agente, model, local, cwd, aprovar } => chat(&prompt, &agente, model, local, cwd, aprovar == "allow"),
+        Cmd::Serve { port, home } => {
+            kabul_core::shell_env::apply(&[]);
+            serve::serve(port, home.into())
+        }
+        Cmd::Loadtest { workspaces, agents, rate, duration, warmup, clients, tmux, monitor_ms, max_agents, compress, out, budgets, label } => {
+            let code = loadtest::run(loadtest::Opts { workspaces, agents, rate, duration, warmup, clients, tmux, monitor_ms, max_agents, compress, out, budgets, label })?;
+            std::process::exit(code)
+        }
+        Cmd::LoadtestWorker { home, port, workspaces, agents, rate, tmux, monitor_ms, max_agents } => {
+            loadtest::worker(loadtest::WorkerOpts { home, port, workspaces, agents, rate, tmux, monitor_ms, max_agents: (max_agents > 0).then_some(max_agents) })
+        }
+        Cmd::Chat { prompt, agente, model, local, cwd, aprovar } => chat(&prompt, agente, model, local, cwd, aprovar == "allow"),
         Cmd::Auth => {
             for k in [HarnessKind::Claude, HarnessKind::Codex, HarnessKind::Antigravity] {
                 match auth::status(k) {
@@ -98,10 +171,10 @@ fn main() -> Result<()> {
 }
 
 fn ls(importadas: bool) -> Result<()> {
-    let panes = tmux::list_panes()?;
-    println!("== tmux ({} panes)", panes.len());
-    for p in &panes {
-        let a = agent::detect_pane(&p.command, p.pid);
+    let b = term::backend();
+    let panes = b.list()?;
+    println!("== {} ({} panes)", b.kind(), panes.len());
+    for (p, a) in panes.iter().zip(agent::detect_panes(&panes)) {
         println!("{:<6} {:<12} {}:{}.{}  {:<10} {}", p.pane_id, a.label(), p.session, p.window_index, p.pane_index, p.command, p.path);
     }
     if importadas {
@@ -136,15 +209,42 @@ fn run(agente: &str, nome: Option<String>, cwd: Option<String>, model: Option<St
     } else {
         let Some(kind) = HarnessKind::parse(agente) else { bail!("agente desconhecido: {agente} (use claude, codex, agy ou shell)") };
         let opts = SessionOptions { cwd: Some(cwd.clone()), model, remote_control, ..Default::default() };
-        Some(kind.harness().interactive_command(&opts).shell_line())
+        Some(kind.harness().interactive_command(&opts))
     };
-    let nome = nome.unwrap_or_else(|| (1..).map(|n| format!("kabul-{agente}-{n}")).find(|n| !tmux::has_session(n)).unwrap());
-    tmux::new_session(&nome, Some(&cwd), command.as_deref())?;
+    let b = term::backend();
+    if b.kind() != "tmux" {
+        // Sem tmux (Windows): as sessões do PTY vivem no app/kabuld, não sobrevivem a este processo.
+        // Roda aqui mesmo, neste terminal.
+        let mut c = match &command {
+            Some(spec) => {
+                #[allow(unused_mut)]
+                let mut c = spec.command();
+                // Interativo neste console: sem o CREATE_NO_WINDOW que o core põe nos processos de fundo.
+                #[cfg(windows)]
+                std::os::windows::process::CommandExt::creation_flags(&mut c, 0);
+                c
+            }
+            None => {
+                let sh = kabul_core::shell::Shell::interactive();
+                let mut c = std::process::Command::new(&sh.program);
+                c.args(sh.interactive_args());
+                c
+            }
+        };
+        let st = c.current_dir(&cwd).status()?;
+        std::process::exit(st.code().unwrap_or(1));
+    }
+    let nome = nome.unwrap_or_else(|| (1..).map(|n| format!("kabul-{agente}-{n}")).find(|n| !b.has(n)).unwrap());
+    let what = match command {
+        Some(spec) => What::Exec(TermCmd::Spec(spec)),
+        None => What::Shell,
+    };
+    b.open(&Launch::new(&nome, Some(&cwd), what))?;
     println!("sessão tmux '{nome}' criada em {cwd}\nanexar: tmux attach -t {nome}");
     Ok(())
 }
 
-fn chat(prompt: &str, agente: &str, model: Option<String>, local: Option<String>, cwd: Option<String>, allow: bool) -> Result<()> {
+fn chat(prompt: &str, agente: Option<String>, model: Option<String>, local: Option<String>, cwd: Option<String>, allow: bool) -> Result<()> {
     use kabul_core::harness::{self, Event};
     let mut opts = SessionOptions { cwd: cwd.or_else(|| std::env::current_dir().ok().map(|d| d.display().to_string())), model, approvals_via_app: true, ..Default::default() };
     let kind = if let Some(id) = local {
@@ -153,11 +253,21 @@ fn chat(prompt: &str, agente: &str, model: Option<String>, local: Option<String>
         let m = s.models.iter().find(|m| m.id == id).unwrap();
         let reg = kabul_core::registry::Registry::parse(kabul_core::registry::DEFAULT)?;
         let r = reg.resolve(&id, &s.apis, &|h| h.installed());
-        eprintln!("[kabul] {} ({})", r.note, s.name);
+        eprintln!("[kabul] {} ({}, APIs {:?})", r.note, s.name, s.apis);
         opts.endpoint = Some(kabul_core::local::prepare(s, m, None)?);
-        r.harness.ok_or_else(|| anyhow::anyhow!(r.note))?
+        match agente.as_deref() {
+            Some(a) => {
+                let k = HarnessKind::parse(a).ok_or_else(|| anyhow::anyhow!("agente desconhecido"))?;
+                if !k.harness().endpoint_apis().iter().any(|x| s.apis.contains(x)) {
+                    bail!("{} não fala nenhuma API de {} ({:?})", k.label(), s.name, s.apis);
+                }
+                eprintln!("[kabul] usando {} (--agente)", k.label());
+                k
+            }
+            None => r.harness.ok_or_else(|| anyhow::anyhow!(r.note))?,
+        }
     } else {
-        HarnessKind::parse(agente).ok_or_else(|| anyhow::anyhow!("agente desconhecido"))?
+        HarnessKind::parse(agente.as_deref().unwrap_or("claude")).ok_or_else(|| anyhow::anyhow!("agente desconhecido"))?
     };
     if kind == HarnessKind::Claude {
         opts.permission_mode = Some("default".into());

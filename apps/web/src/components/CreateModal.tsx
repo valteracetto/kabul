@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Floating } from "./Floating";
 import { createPortal } from "react-dom";
 import { api, type LinearIssue, type Model, type Repo, type Workspace } from "../api";
 import { ModelPicker } from "./ModelPicker";
@@ -42,8 +43,8 @@ const whereKey = (repo: string) => `kabul.create.where.${repo}`;
 /** Pendente para o workspace recém-criado: primeira mensagem e onde rodar. */
 export const pendingFirst: Record<string, { text: string; where: Where; send: boolean; plan?: boolean }> = {};
 
-export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onCreated, onReposChanged, onError }: {
-  repos: Repo[]; defaultRepo?: string; fromTab?: "prs" | "branches" | "issues"; addMode?: boolean; onClose: () => void;
+export function CreateModal({ repos, defaultRepo, fromTab, addMode, initialText, onClose, onCreated, onReposChanged, onError }: {
+  repos: Repo[]; defaultRepo?: string; fromTab?: "prs" | "branches" | "issues"; addMode?: boolean; initialText?: string; onClose: () => void;
   onCreated: (w: Workspace) => void; onReposChanged: () => void; onError: (e: string) => void;
 }) {
   const [repoId, setRepoId] = useState(defaultRepo ?? repos[0]?.id ?? "");
@@ -85,7 +86,7 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onC
   useEffect(() => void (appSet && !planInit.current && ((planInit.current = true), appSet.default_plan && setPlan(true))), [appSet]);
   const [more, setMore] = useState(false);
   const [from, setFrom] = useState<"prs" | "branches" | "issues" | null>(fromTab ?? null);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialText ?? "");
   const [base, setBase] = useState<string | null>(null);
   const [branches, setBranches] = useState<string[]>([]);
   const [prs, setPrs] = useState<Awaited<ReturnType<typeof api.repoPrs>>>([]);
@@ -186,7 +187,7 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onC
           <div className="picker" ref={repoRef}>
             <button className="create-repo" onClick={() => setRepoOpen(!repoOpen)} data-testid="create-repo">{repo && <RepoMark name={repo.name} />}{repo?.name ?? "Escolha um projeto"} <IChevronDown size={12} /></button>
             {repoOpen && (
-              <div className="popover status-pop repo-pop" data-testid="repo-pop">
+              <Floating className="status-pop repo-pop" placement="bottom-start" testid="repo-pop">
                 {adding ? (
                   <AddMenu busy={addBusy} canBack={repos.length > 0} onBack={() => setAdding(false)}
                     onOpen={async () => addProject(await api.pickFolder())} onGitHub={() => setDialog("clone")} onQuick={() => setDialog("quick")} />
@@ -201,18 +202,18 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onC
                     <div className="repo-foot pop-row" onClick={() => setAdding(true)} data-testid="add-project"><IFolderPlus /> Adicionar projeto</div>
                   </>
                 )}
-              </div>
+              </Floating>
             )}
           </div>
           <div className="picker" ref={moreRef}>
             <button className={"icon-btn" + (more ? " on" : "")} title="Opções" onClick={() => setMore(!more)} data-testid="create-more"><IMore /></button>
             {more && (
-              <div className="popover status-pop more-pop">
+              <Floating className="status-pop more-pop" placement="bottom-start">
                 <div className="pop-title">Branch de destino (base)</div>
                 <select value={base ?? repo?.default_branch ?? ""} onChange={(e) => setBase(e.target.value === repo?.default_branch ? null : e.target.value)} data-testid="create-base">
                   {[repo?.default_branch, ...branches.filter((b) => b !== repo?.default_branch)].filter(Boolean).map((b) => <option key={b} value={b!}>{b}</option>)}
                 </select>
-              </div>
+              </Floating>
             )}
           </div>
           {source && <span className="source-chip" data-testid="create-source">{source.kind === "pr" ? `PR #${source.number}` : source.kind === "branch" ? source.name : source.issue.identifier}<button className="text-btn" onClick={() => setSource(null)}>×</button></span>}
@@ -248,13 +249,13 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, onClose, onC
           <div className="picker" ref={whereRef}>
             <button className="where-btn" onClick={() => setWhereOpen(!whereOpen)} title="Onde roda" data-testid="create-where">{where === "local" ? "💻" : <RunsOnBadge r={whereLabel[2]} />} {whereLabel[1]} <IChevronDown size={11} /></button>
             {whereOpen && (
-              <div className="popover status-pop where-pop">
+              <Floating className="status-pop where-pop" placement="top-start">
                 {whereOpts.map(([k, label, r, enabled, hint]) => (
                   <div key={k} className={"pop-row" + (k === where ? " on" : "") + (enabled ? "" : " disabled")} onClick={() => enabled && pickWhere(k)} data-testid={`where-${k}`}>
                     <span className="where-ico">{k === "local" ? "💻" : <RunsOnBadge r={r} />}</span>{label}<span className="grow" /><span className="dim small">{hint}</span>
                   </div>
                 ))}
-              </div>
+              </Floating>
             )}
           </div>
           {plan && <button className="plan-chip" onClick={() => setPlan(false)} title="Sair do plan mode (⇧⇥)" data-testid="create-plan-chip">Plan mode ×</button>}

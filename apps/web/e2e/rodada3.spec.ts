@@ -24,7 +24,7 @@ test("MCP da sessão, contexto, minimapa", async ({ page }) => {
   await expect(page.getByTestId("mcp-row")).toHaveCount(2);
   await expect(page.getByTestId("mcp-panel")).toContainText("2 ferramentas");
   await expect(page.getByTestId("mcp-panel")).toContainText("falhou");
-  await page.getByTestId("mcp-row").first().locator(".toggle").click();
+  await page.getByTestId("mcp-row").first().locator(".mcp-toggle .toggle").click();
   await expect(page.getByTestId("mcp-row").first()).toHaveClass(/off/);
   await shot(page, "mcp");
   await page.getByTestId("apps").click();
@@ -33,7 +33,9 @@ test("MCP da sessão, contexto, minimapa", async ({ page }) => {
   await expect(page.getByTestId("context-panel")).toContainText("de 200k tokens");
   await shot(page, "contexto");
   await page.getByTestId("turn-more").first().click();
-  await expect(page.locator(".turn-pop")).toContainText("Restaurar arquivos");
+  // Menu do turno enxuto: forks (e Reset chat em turnos anteriores); restaurar fica em Checkpoints e no Reset.
+  await expect(page.locator(".turn-pop")).toContainText("Fork para nova aba");
+  await expect(page.locator(".turn-pop")).not.toContainText("Restaurar arquivos");
   await page.getByTestId("turn-more").first().click();
   await page.getByTestId("new-terminal").click();
   await expect(page.locator(".btab", { hasText: "Terminal 2" })).toBeVisible();

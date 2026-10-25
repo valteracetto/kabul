@@ -62,6 +62,7 @@ On Windows, `⌘` will be `Ctrl`. The same list is in **Settings › Shortcuts**
 | `⌘W` | Close tab |
 | `⌘⇧T` | Reopen closed tab (or new terminal) |
 | `⌃Tab / ⌃⇧Tab` | Next / previous tab (also ⌘⇧] / ⌘⇧[) |
+| `⌘D` | Split with the next tab / unsplit |
 
 ### Chat
 

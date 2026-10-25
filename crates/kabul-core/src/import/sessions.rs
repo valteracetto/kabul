@@ -16,7 +16,7 @@ fn compatible(path: &Path) -> bool {
 
 /// Pastas de dados de apps do sistema (macOS: Application Support; Windows: %APPDATA%; Linux: ~/.local/share).
 fn app_data_dirs() -> Vec<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let home = crate::paths::home();
     let mut v = vec![home.join("Library/Application Support"), home.join(".local/share")];
     if let Some(a) = std::env::var_os("APPDATA") {
         v.push(PathBuf::from(a));
@@ -73,8 +73,7 @@ pub struct SessionImporter {
 
 impl SessionImporter {
     pub fn open(path: &Path) -> Result<Self> {
-        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
-            .with_context(|| format!("abrindo {} read-only", path.display()))?;
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX).with_context(|| format!("abrindo {} read-only", path.display()))?;
         conn.busy_timeout(std::time::Duration::from_millis(500))?;
         Ok(Self { conn })
     }
@@ -94,17 +93,7 @@ impl SessionImporter {
              WHERE COALESCE(w.state,'active') != 'archived'
              ORDER BY w.updated_at DESC",
         )?;
-        let rows = st.query_map([], |r| {
-            Ok(ImportedWorkspace {
-                id: r.get(0)?,
-                repo_name: r.get(1)?,
-                directory_name: r.get(2)?,
-                workspace_name: r.get(3)?,
-                branch: r.get(4)?,
-                state: r.get(5)?,
-                path: r.get(6)?,
-            })
-        })?;
+        let rows = st.query_map([], |r| Ok(ImportedWorkspace { id: r.get(0)?, repo_name: r.get(1)?, directory_name: r.get(2)?, workspace_name: r.get(3)?, branch: r.get(4)?, state: r.get(5)?, path: r.get(6)? }))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -114,17 +103,7 @@ impl SessionImporter {
              FROM sessions WHERE COALESCE(is_hidden,0) = 0
              ORDER BY updated_at DESC",
         )?;
-        let rows = st.query_map([], |r| {
-            Ok(ImportedSession {
-                id: r.get(0)?,
-                workspace_id: r.get(1)?,
-                status: r.get(2)?,
-                title: r.get(3)?,
-                model: r.get(4)?,
-                agent_type: r.get(5)?,
-                updated_at: r.get(6)?,
-            })
-        })?;
+        let rows = st.query_map([], |r| Ok(ImportedSession { id: r.get(0)?, workspace_id: r.get(1)?, status: r.get(2)?, title: r.get(3)?, model: r.get(4)?, agent_type: r.get(5)?, updated_at: r.get(6)? }))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 }

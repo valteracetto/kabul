@@ -79,25 +79,43 @@ pub fn build(procs: &[Proc], root: u32, hints: &[Hint]) -> Snapshot {
             kids.entry(pp).or_default().push(p.pid);
         }
     }
-    fn node(pid: u32, by: &HashMap<u32, &Proc>, kids: &HashMap<u32, Vec<u32>>, hints: &[Hint], inherited: (Option<String>, Option<String>), depth: usize, count: &mut usize) -> Node {
-        let p = by.get(&pid).copied().cloned().unwrap_or_default();
+    // Prefixos dos workspaces montados uma vez (antes: dois `format!` por hint em cada processo).
+    let prefixes: Vec<(&Hint, String, String)> = hints.iter().filter_map(|h| h.path.as_deref().map(|w| (h, format!("{w}/"), format!("{w}\\")))).collect();
+    let by_pid_hint: HashMap<u32, &Hint> = hints.iter().rev().filter_map(|h| h.pid.map(|p| (p, h))).collect();
+    struct Ctx<'a> {
+        by: &'a HashMap<u32, &'a Proc>,
+        kids: &'a HashMap<u32, Vec<u32>>,
+        prefixes: &'a [(&'a Hint, String, String)],
+        by_pid_hint: &'a HashMap<u32, &'a Hint>,
+    }
+    fn node(pid: u32, cx: &Ctx, inherited: (Option<&str>, Option<&str>), depth: usize, count: &mut usize) -> Node {
+        static EMPTY: std::sync::OnceLock<Proc> = std::sync::OnceLock::new();
+        let p: &Proc = cx.by.get(&pid).copied().unwrap_or_else(|| EMPTY.get_or_init(Proc::default));
         *count += 1;
-        let agent = agent_of(&p);
-        let base = p.name.rsplit(['/', '\\']).next().unwrap_or(&p.name).trim_end_matches(".exe").to_string();
-        let kind = if agent.is_some() { "agent" } else if SHELLS.contains(&base.as_str()) { "terminal" } else { "process" };
+        let agent = agent_of(p);
+        let base = p.name.rsplit(['/', '\\']).next().unwrap_or(&p.name).trim_end_matches(".exe");
+        let kind = if agent.is_some() {
+            "agent"
+        } else if SHELLS.contains(&base) {
+            "terminal"
+        } else {
+            "process"
+        };
         // Workspace/conversa: pelo pid do agente do app, pelo cwd ou herdado do pai.
-        let by_pid = hints.iter().find(|h| h.pid == Some(pid));
-        let by_cwd = p.cwd.as_deref().and_then(|c| hints.iter().filter(|h| h.path.as_deref().is_some_and(|w| c == w || c.starts_with(&format!("{w}/")) || c.starts_with(&format!("{w}\\")))).max_by_key(|h| h.path.as_ref().map(|w| w.len())));
-        let ws = by_pid.filter(|h| !h.workspace_id.is_empty()).or(by_cwd).map(|h| h.workspace_id.clone()).or(inherited.0);
-        let chat = by_pid.and_then(|h| h.chat_id.clone()).or(inherited.1);
-        let mut children: Vec<Node> = if depth > 32 { vec![] } else { kids.get(&pid).map(|v| v.iter().map(|c| node(*c, by, kids, hints, (ws.clone(), chat.clone()), depth + 1, count)).collect()).unwrap_or_default() };
+        let by_pid = cx.by_pid_hint.get(&pid).copied();
+        let by_cwd =
+            p.cwd.as_deref().and_then(|c| cx.prefixes.iter().filter(|(h, a, b)| h.path.as_deref() == Some(c) || c.starts_with(a.as_str()) || c.starts_with(b.as_str())).max_by_key(|(h, _, _)| h.path.as_ref().map(|w| w.len())).map(|(h, _, _)| *h));
+        let ws: Option<&str> = by_pid.filter(|h| !h.workspace_id.is_empty()).or(by_cwd).map(|h| h.workspace_id.as_str()).or(inherited.0);
+        let chat: Option<&str> = by_pid.and_then(|h| h.chat_id.as_deref()).or(inherited.1);
+        let mut children: Vec<Node> = if depth > 32 { vec![] } else { cx.kids.get(&pid).map(|v| v.iter().map(|c| node(*c, cx, (ws, chat), depth + 1, count)).collect()).unwrap_or_default() };
         children.sort_by_key(|c| std::cmp::Reverse(c.mem));
         let cpu = p.cpu + children.iter().map(|c| c.cpu).sum::<f32>();
         let mem = p.mem + children.iter().map(|c| c.mem).sum::<u64>();
-        Node { pid, name: agent.clone().unwrap_or(base), cpu, mem, kind: kind.into(), agent, workspace_id: ws, chat_id: chat, children }
+        Node { pid, name: agent.clone().unwrap_or_else(|| base.to_string()), cpu, mem, kind: kind.into(), agent, workspace_id: ws.map(String::from), chat_id: chat.map(String::from), children }
     }
+    let cx = Ctx { by: &by_pid, kids: &kids, prefixes: &prefixes, by_pid_hint: &by_pid_hint };
     let mut count = 0;
-    let mut main = node(root, &by_pid, &kids, hints, (None, None), 0, &mut count);
+    let mut main = node(root, &cx, (None, None), 0, &mut count);
     main.kind = "main".into();
     main.name = "Principal".into();
     // O nó "Principal" mostra só o próprio processo; o "App" soma tudo.
@@ -118,9 +136,11 @@ pub fn processes() -> Vec<Proc> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, UpdateKind};
     let mut g = SYS.lock().unwrap();
     let sys = g.get_or_insert_with(sysinfo::System::new);
-    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_cpu().with_memory().with_cwd(UpdateKind::OnlyIfNotSet).with_cmd(UpdateKind::OnlyIfNotSet));
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_cpu().with_memory().with_cwd(UpdateKind::OnlyIfNotSet).with_cmd(UpdateKind::Always));
     sys.processes()
         .values()
+        // Zumbi já morreu (só falta o pai recolher): não é processo rodando.
+        .filter(|p| p.status() != sysinfo::ProcessStatus::Zombie)
         .map(|p| Proc {
             pid: p.pid().as_u32(),
             parent: p.parent().map(|x| x.as_u32()),
@@ -134,9 +154,29 @@ pub fn processes() -> Vec<Proc> {
         .collect()
 }
 
+/// Última amostra do sistema, compartilhada por quem pedir dentro de `max_age` (painel do app,
+/// kabuld, "Mostrar tudo"): uma varredura do sistema serve a todos. Nada amostra em segundo plano:
+/// só quando alguém pede (o painel de recursos aberto).
+pub fn sample(max_age: std::time::Duration) -> std::sync::Arc<Vec<Proc>> {
+    use std::sync::Arc;
+    use std::time::Instant;
+    static LAST: Mutex<Option<(Instant, Arc<Vec<Proc>>)>> = Mutex::new(None);
+    if let Some((at, v)) = LAST.lock().unwrap().as_ref() {
+        if at.elapsed() < max_age {
+            return v.clone();
+        }
+    }
+    let v = Arc::new(processes());
+    *LAST.lock().unwrap() = Some((Instant::now(), v.clone()));
+    v
+}
+
+/// Idade máxima da amostra usada pelo painel (o painel atualiza a cada ~1–2 s).
+pub const SNAPSHOT_MAX_AGE: std::time::Duration = std::time::Duration::from_millis(900);
+
 /// Árvore do processo atual (o app ou o `kabul serve`).
 pub fn snapshot(hints: &[Hint]) -> Snapshot {
-    build(&processes(), std::process::id(), hints)
+    build(&sample(SNAPSHOT_MAX_AGE), std::process::id(), hints)
 }
 
 #[cfg(test)]
@@ -160,10 +200,7 @@ mod tests {
             p(106, 100, "zsh", 0.0, 3, Some("/outro"), &[]),
             p(200, 1, "Safari", 50.0, 9000, None, &[]),
         ];
-        let hints = vec![
-            Hint { pid: Some(101), path: Some("/w/ws-a".into()), workspace_id: "a".into(), chat_id: Some("chat-1".into()) },
-            Hint { pid: None, path: Some("/w/ws-b".into()), workspace_id: "b".into(), chat_id: None },
-        ];
+        let hints = vec![Hint { pid: Some(101), path: Some("/w/ws-a".into()), workspace_id: "a".into(), chat_id: Some("chat-1".into()) }, Hint { pid: None, path: Some("/w/ws-b".into()), workspace_id: "b".into(), chat_id: None }];
         let s = build(&procs, 100, &hints);
         assert_eq!(s.count, 7, "só o app e os descendentes");
         assert_eq!(s.mem, 200 + 500 + 600 + 2 + 70 + 300 + 3);

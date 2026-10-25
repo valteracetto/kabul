@@ -1,9 +1,9 @@
-//! Terminais compartilhados: um cliente `tmux -C` por sessão, seja quantos forem os espectadores
-//! (desktop, celular, amigo). A saída vai para o barramento como `term-output`; a entrada é
-//! `send-keys -H` (bytes exatos). Ver docs/windows.md: no Windows entra um backend ConPTY.
+//! Terminais compartilhados: um stream por sessão, seja quantos forem os espectadores (desktop,
+//! celular, amigo). A saída vai para o barramento como `term-output`; a entrada são os bytes exatos.
+//! O backend é o do core (`kabul_core::term`): `tmux -C` no macOS/Linux, PTY próprio (ConPTY) no Windows.
 use crate::bus::Bus;
 use anyhow::{Context, Result};
-use kabul_core::tmux::{self, stream::TermStream};
+use kabul_core::term::{self, Stream};
 use serde::Serialize;
 use serde_json::json;
 use std::collections::HashMap;
@@ -20,8 +20,11 @@ pub struct TermInfo {
 
 pub struct TermHub {
     bus: Bus,
-    streams: Arc<Mutex<HashMap<String, TermStream>>>,
+    streams: Arc<Mutex<HashMap<String, Stream>>>,
 }
+
+/// Maior colagem aceita de uma vez no terminal (1 MB).
+pub const MAX_INPUT: usize = 1 << 20;
 
 /// Bytes de cada tecla da barra do celular.
 pub fn key_bytes(key: &str) -> Option<&'static [u8]> {
@@ -50,14 +53,7 @@ pub fn key_bytes(key: &str) -> Option<&'static [u8]> {
 }
 
 pub fn pane_size(pane: &str) -> (u16, u16) {
-    let o = std::process::Command::new("tmux").args(["display-message", "-p", "-t", pane, "#{pane_width} #{pane_height}"]).output();
-    o.ok()
-        .and_then(|o| {
-            let s = String::from_utf8_lossy(&o.stdout).to_string();
-            let mut it = s.split_whitespace();
-            Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
-        })
-        .unwrap_or((80, 24))
+    term::backend().info(pane).map(|i| (i.cols, i.rows)).unwrap_or((80, 24))
 }
 
 impl TermHub {
@@ -67,24 +63,26 @@ impl TermHub {
 
     /// Liga o stream da sessão (se ainda não houver) e devolve a tela atual.
     pub fn attach(&self, session: &str, workspace: Option<String>) -> Result<TermInfo> {
-        if !tmux::has_session(session) {
+        let b = term::backend();
+        if !b.has(session) {
             anyhow::bail!("sessão {session} não existe mais");
         }
-        let pane = tmux::list_panes()?.into_iter().filter(|p| p.session == session).max_by_key(|p| p.active).map(|p| p.pane_id).context("pane não encontrado")?;
-        let snapshot = tmux::screen(&pane).unwrap_or_default();
+        let pane = b.pane_of(session).context("pane não encontrado")?;
+        let snapshot = b.screen(&pane).unwrap_or_default();
         let (cols, rows) = pane_size(&pane);
         let mut streams = self.streams.lock().unwrap();
         if !streams.contains_key(session) {
-            let mut t = TermStream::attach(session)?;
+            let mut t = b.attach(session)?;
             let rx = t.output.take().context("stream")?;
             let bus = self.bus.clone();
             let s2 = session.to_string();
             let map = self.streams.clone();
             std::thread::spawn(move || {
-                for (pane, data) in rx {
+                // Saída juntada por quadro (um `term-output` a cada ~16 ms por pane, no máximo).
+                for (pane, data) in kabul_core::batch::coalesce(rx, kabul_core::batch::frame()) {
                     bus.emit("term-output", json!({ "session": s2, "pane": pane, "data": data }), workspace.clone(), Some(s2.clone()));
                 }
-                // Sessão acabou (ou o cliente -C caiu): o próximo attach liga um stream novo.
+                // Sessão acabou (ou o stream caiu): o próximo attach liga um stream novo.
                 map.lock().unwrap().remove(&s2);
                 bus.emit("term-closed", json!({ "session": s2 }), workspace, Some(s2.clone()));
             });
@@ -93,16 +91,25 @@ impl TermHub {
         Ok(TermInfo { session: session.into(), pane, snapshot, cols, rows })
     }
 
+    /// O pane pertence à sessão? A política confere a sessão; sem isto um convidado mandaria o
+    /// `session` do workspace dele e o `pane` de outra sessão qualquer (ex.: `%0`). Vale para os dois
+    /// backends (tmux e PTY usam ids `%N`).
+    pub fn pane_in_session(session: &str, pane: &str) -> bool {
+        term::is_pane_id(pane) && term::backend().list().map(|v| v.iter().any(|p| p.session == session && p.pane_id == pane)).unwrap_or(false)
+    }
+
     pub fn input(&self, session: &str, pane: &str, data: &[u8]) -> Result<()> {
+        anyhow::ensure!(data.len() <= MAX_INPUT, "entrada grande demais para o terminal");
+        anyhow::ensure!(Self::pane_in_session(session, pane), "pane {pane:?} não é da sessão {session}");
         match self.streams.lock().unwrap().get_mut(session) {
             Some(t) => t.input(pane, data),
-            None => tmux::send_bytes(pane, data),
+            None => term::backend().send(pane, data),
         }
     }
 
     /// Redimensiona a janela (só quando o usuário pede: mexe no tamanho para todos os espectadores).
     pub fn resize(&self, session: &str, cols: u16, rows: u16) -> Result<()> {
-        tmux::resize(&tmux::exact(session), cols.clamp(20, 400), rows.clamp(5, 200))
+        term::backend().resize(session, cols.clamp(20, 400), rows.clamp(5, 200))
     }
 
     pub fn close(&self, session: &str) {
@@ -110,7 +117,7 @@ impl TermHub {
     }
 
     pub fn snapshot(&self, pane: &str) -> Result<String> {
-        tmux::screen(pane)
+        term::backend().screen(pane)
     }
 }
 
@@ -126,14 +133,15 @@ mod tests {
         assert_eq!(key_bytes("rm -rf"), None);
     }
 
-    /// Dois espectadores da mesma sessão recebem a mesma saída (tmux real; pula sem tmux).
+    /// Dois espectadores da mesma sessão recebem a mesma saída (backend do sistema: tmux no macOS,
+    /// PTY no Windows ou sem tmux).
     #[test]
     fn stream_compartilhado() {
-        if kabul_core::harness::which("tmux").is_none() {
-            return;
-        }
+        use kabul_core::harness::CmdSpec;
+        use kabul_core::term::{Cmd, Launch, What};
         let name = format!("kabul-test-hub-{}", std::process::id());
-        tmux::new_session(&name, None, Some("sh")).unwrap();
+        let shell = if cfg!(windows) { CmdSpec::new("cmd.exe", ["/Q"]) } else { CmdSpec::new("sh", Vec::<String>::new()) };
+        term::backend().open(&Launch::new(&name, None, What::Exec(Cmd::Spec(shell)))).unwrap();
         let bus = Bus::new();
         let mut a = bus.subscribe();
         let mut b = bus.subscribe();
@@ -141,7 +149,8 @@ mod tests {
         let info = hub.attach(&name, None).unwrap();
         hub.attach(&name, None).unwrap(); // segundo espectador: mesmo stream
         assert_eq!(hub.streams.lock().unwrap().len(), 1);
-        hub.input(&name, &info.pane, b"echo kabul-$((40+2))\r").unwrap();
+        let line: &[u8] = if cfg!(windows) { b"echo kabul-4^2\r" } else { b"echo kabul-$((40+2))\r" };
+        hub.input(&name, &info.pane, line).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let (mut ga, mut gb) = (String::new(), String::new());
         while std::time::Instant::now() < deadline && !(ga.contains("kabul-42") && gb.contains("kabul-42")) {
@@ -156,7 +165,29 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         hub.close(&name);
-        let _ = tmux::kill_session(&name);
+        let _ = term::backend().kill(&name);
         assert!(ga.contains("kabul-42") && gb.contains("kabul-42"), "{ga:?} / {gb:?}");
+    }
+
+    /// Segurança: digitar exige que o pane seja da sessão informada (a que a política conferiu).
+    #[test]
+    fn pane_de_outra_sessao_recusado() {
+        use kabul_core::harness::CmdSpec;
+        use kabul_core::term::{Cmd, Launch, What};
+        let (a, b) = (format!("kabul-test-pa-{}", std::process::id()), format!("kabul-test-pb-{}", std::process::id()));
+        let shell = if cfg!(windows) { CmdSpec::new("cmd.exe", ["/Q"]) } else { CmdSpec::new("sh", Vec::<String>::new()) };
+        let be = term::backend();
+        be.open(&Launch::new(&a, None, What::Exec(Cmd::Spec(shell.clone())))).unwrap();
+        be.open(&Launch::new(&b, None, What::Exec(Cmd::Spec(shell)))).unwrap();
+        let hub = TermHub::new(Bus::new());
+        let pa = hub.attach(&a, None).unwrap().pane;
+        let pb = be.pane_of(&b).unwrap();
+        assert!(hub.input(&a, &pa, b"").is_ok());
+        assert!(hub.input(&a, &pb, b"x").is_err(), "pane da outra sessão");
+        assert!(hub.input(&a, &format!("{pa} ; run-shell true"), b"x").is_err());
+        assert!(hub.input(&a, &pa, &vec![b'x'; MAX_INPUT + 1]).is_err());
+        hub.close(&a);
+        let _ = be.kill(&a);
+        let _ = be.kill(&b);
     }
 }

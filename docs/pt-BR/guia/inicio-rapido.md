@@ -2,13 +2,57 @@
 
 # Início rápido
 
-1. **Instale o Kabul** (macOS) e pelo menos um CLI de agente, por exemplo o Claude Code (`claude`) ou o Codex (`codex`). Veja [Instalação](./instalacao.md).
-2. **Adicione um projeto.** Aperte `⌘N`, abra o seletor de projeto e escolha **Abrir projeto** (uma pasta git local), **Abrir projeto do GitHub** (um repositório da sua conta ou uma URL; o Kabul clona com a credencial do GitHub CLI) ou **Início rápido** (pasta nova com `git init`, README e o primeiro commit).
-3. **Crie um workspace.** Escreva no que quer trabalhar e aperte `↵`. O Kabul cria um git worktree numa branch nova (`<seu usuário do GitHub>/<cidade>`), copia os arquivos `.env*`, roda o script de setup e manda a primeira mensagem ao agente. `⌥↵` põe no backlog.
-4. **Converse com o agente.** Escolha o modelo com `⌘/`, anexe arquivos com `⌘U`, mencione arquivos com `@` e rode comandos com `/`. Aprove ferramentas com `↵`, sempre permita com `⌘↵`, negue com `⌫`.
-5. **Revise.** O painel direito mostra as alterações (`⌘⌥B` mostra/oculta). Abra um arquivo para ver o diff, comente numa linha e mande os comentários ao agente.
-6. **Entregue.** O botão do git acompanha o estado da branch: **Criar PR** (`⌘⇧P`), **Commit e push** (`⌘⇧Y`), **Pull** (`⌘⇧L`), **Corrigir erros** (`⌘⇧X`), **Merge** (`⌘⇧M`) e **Arquivar** (`⌘⇧A`).
+Do zero a um pull request escrito por um agente, em cinco passos. Você precisa do Kabul e de pelo menos um
+CLI de agente instalado e com login feito (veja [Instalação](./instalacao.md)).
 
-![Workspace com o menu do git](/screens/git-menu.png)
+## 1. Adicione um projeto
 
-Próximo: [Conceitos](./conceitos.md).
+Tecle `⌘N` e abra o seletor de projeto:
+
+- **Abrir projeto**: uma pasta local que seja um repositório git;
+- **Abrir projeto do GitHub**: escolha um repositório da sua conta ou cole uma URL; o Kabul clona com o login
+  do GitHub CLI;
+- **Início rápido**: uma pasta nova com `git init`, um README e o primeiro commit.
+
+O Kabul nunca mexe no checkout principal. Cada tarefa ganha o seu próprio worktree ao lado dele.
+
+## 2. Descreva a tarefa
+
+Escreva no que quer trabalhar e tecle `↵`. O Kabul:
+
+1. cria um git worktree numa branch nova (`<seu usuário do GitHub>/<cidade>`);
+2. copia os seus arquivos `.env*` (e o que estiver no `.worktreeinclude`);
+3. roda o script de setup do repositório, se houver;
+4. manda a sua mensagem para o agente.
+
+`⌥↵` põe a tarefa no backlog em vez de começar.
+
+## 3. Escolha o modelo
+
+`⌘/` abre o seletor de modelo: Claude, GPT, Gemini, Qwen e os seus modelos locais lado a lado, com nível de
+esforço e conta. O Kabul roda cada modelo no harness que combina com ele (veja
+[Agentes e harnesses](./agentes.md)). Dá para trocar a qualquer momento, até para outro provedor, sem perder a
+conversa (veja [Trocar de modelo ou conta](./trocar.md)).
+
+## 4. Conduza e revise
+
+- Aprove uma ferramenta com `↵`, libere sempre com `⌘↵`, negue com `⌫`. `⇧⇥` liga e desliga o plan mode.
+- Cite arquivos com `@`, rode comandos com `/`, anexe arquivos com `⌘U`, dite com `⌃⇧D`.
+- O painel da direita (`⌘⌥B`) mostra as alterações. Abra um arquivo para ver o diff, comente uma linha e mande
+  os comentários para o agente.
+- Cada mensagem enviada grava um checkpoint; restaure pela própria mensagem ou pela aba **Checkpoints**.
+
+## 5. Entregue
+
+O botão de git acompanha o estado da branch: **Criar PR** (`⌘⇧P`), **Commit e push** (`⌘⇧Y`), **Pull**
+(`⌘⇧L`), **Corrigir erros** (`⌘⇧X`, manda os logs dos checks que falharam para o agente), **Merge** (`⌘⇧M`) e
+**Arquivar** (`⌘⇧A`).
+
+![Workspace com o menu de git](/screens/git-menu.png)
+
+## Depois
+
+- Rode vários workspaces ao mesmo tempo: cada um é independente, com portas e terminal próprios.
+- Pareie o celular: **Configurações › Celular e remoto** (veja [Nuvem e celular](./nuvem-e-celular.md)).
+- Chame um amigo para um workspace (veja [Colaboração](./colaboracao.md)).
+- Aprenda o vocabulário: [Conceitos](./conceitos.md).

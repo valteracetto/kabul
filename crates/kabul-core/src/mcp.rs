@@ -16,12 +16,13 @@ pub struct McpEntry {
     pub transport: String,
     /// Comando ou URL (para exibir).
     pub target: String,
-    /// Configuração original (para montar `--mcp-config`).
+    /// Configuração original (para montar `--mcp-config`). Não vai para a interface: pode ter tokens.
+    #[serde(skip_serializing, default)]
     pub config: Value,
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    crate::paths::home()
 }
 
 fn entry(name: &str, cfg: &Value, scope: &str, source: &Path) -> McpEntry {
@@ -114,7 +115,11 @@ pub fn parse_agy_list(out: &str) -> Vec<McpEntry> {
 
 fn dedup(mut v: Vec<McpEntry>) -> Vec<McpEntry> {
     // Escopos mais específicos vencem (project > local > user).
-    let rank = |s: &str| match s { "project" => 0, "local" => 1, _ => 2 };
+    let rank = |s: &str| match s {
+        "project" => 0,
+        "local" => 1,
+        _ => 2,
+    };
     v.sort_by_key(|e| rank(&e.scope));
     let mut seen = std::collections::HashSet::new();
     v.retain(|e| seen.insert(e.name.clone()));

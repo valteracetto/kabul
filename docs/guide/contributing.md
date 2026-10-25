@@ -2,15 +2,38 @@ English · [Português](../pt-BR/guia/contribuir.md)
 
 # Contributing
 
-- `crates/kabul-core`: Rust core (worktrees, git, harnesses, transcript, settings, tmux).
-- `crates/kabul-cli`: `kabul` CLI and `kabul serve` (HTTP RPC used by the end-to-end tests against the real core).
-- `apps/web`: React UI (also the PWA). `apps/desktop`: Tauri shell.
+Issues and pull requests are welcome: bug reports with **Help › Diagnostics** attached, confirmations of agents
+marked "to be confirmed", Windows testing, translations and documentation.
+
+## Layout
+
+- `crates/kabul-core`: Rust core (worktrees, git, harnesses, transcript, settings, terminal backends, usage).
+- `crates/kabuld`: the server for the phone, other machines and collaboration.
+- `crates/kabul-cli`: `kabul` CLI, `kabul serve` (HTTP RPC used by the end-to-end tests against the real core)
+  and `kabul loadtest`.
+- `apps/web`: React UI (also the phone PWA in `src/mobile`). `apps/desktop`: Tauri shell.
+- `docs`: this site (VitePress), in English (`docs/guide`) and Portuguese (`docs/pt-BR/guia`), plus the
+  technical reference in Portuguese at the root of `docs/`.
+
+## Commands
 
 ```sh
-cargo test                         # core
-cd apps/web && npm run build       # UI
-cd apps/web && npm run e2e         # Playwright: mock backend and the real core through kabul serve
+cargo test                              # core, server and CLI
+cd apps/web && npm run build            # UI
+cd apps/web && npm run e2e              # Playwright: mock backend and the real core through kabul serve
+cd apps/web && npm run perf             # performance budgets (100 workspaces, 30 agents)
 cd apps/web && npm run docs:shortcuts   # regenerate the shortcut tables from src/i18n/shortcuts.json
+cd docs && npm ci && npm run docs:dev   # this site, with hot reload
+cd docs && npm run docs:build           # build the site (must pass before merging docs changes)
 ```
 
-Rules: no personal data in commits or fixtures (use the `dev` user and `/home/dev`), new macOS-only code goes behind an adapter and is listed in `docs/windows.md`, and UI text lives in `apps/web/src/i18n`.
+## Rules
+
+- No personal data in commits, fixtures or screenshots (use the `dev` user, `/home/dev` and example domains).
+- New macOS-only code goes behind an adapter and is listed in the [Windows reference](../windows.md).
+- UI text lives in `apps/web/src/i18n`.
+- Documentation changes go in both languages. Don't promise what isn't confirmed: mark it as beta or "to be
+  confirmed".
+
+Commits (Conventional Commits), versions, changelog, CI and releases: `CONTRIBUTING.md` at the root of the
+repository.

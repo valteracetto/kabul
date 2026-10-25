@@ -1,4 +1,5 @@
 import { noSuggest } from "../noSuggest";
+import { Floating } from "./Floating";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDismiss } from "./useDismiss";
 import { EFFORT_LABEL, HARNESS_LABEL, type HarnessKind, type Model } from "../api";
@@ -71,7 +72,7 @@ export function ModelPicker({ models, prefs, setPrefs, selected, effort, activeH
         <IChevronDown size={12} />
       </button>
       {open && (
-        <div className="popover picker-pop">
+        <Floating className="picker-pop" placement="top-start">
           <label className="pop-search">
             <ISearch />
             <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} ref={search} placeholder="Buscar modelos" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -123,7 +124,7 @@ export function ModelPicker({ models, prefs, setPrefs, selected, effort, activeH
             <span className="dim">{effort ? EFFORT_LABEL[effort] : "—"}</span>
             <IChevron size={13} />
             {effortOpen && selected && (
-              <div className="popover submenu">
+              <Floating className="submenu" placement="right-end">
                 {selected.efforts.map((e) => (
                   <div key={e} className={"pop-row" + (e === effort ? " on" : "")} onClick={(ev) => { ev.stopPropagation(); setPrefs((p) => ({ ...p, effort: e })); setEffortOpen(false); }}>
                     {EFFORT_LABEL[e]}
@@ -131,7 +132,7 @@ export function ModelPicker({ models, prefs, setPrefs, selected, effort, activeH
                     {e === effort && <span className="check">✓</span>}
                   </div>
                 ))}
-              </div>
+              </Floating>
             )}
           </div>
           <div className="pop-row setting" onClick={() => setPrefs((p) => ({ ...p, fast: !p.fast }))}>
@@ -145,7 +146,7 @@ export function ModelPicker({ models, prefs, setPrefs, selected, effort, activeH
             <span className="grow" />
             <kbd>⌘⇧/</kbd> <span className="dim">Alternar esforço</span>
           </div>
-        </div>
+        </Floating>
       )}
     </div>
   );

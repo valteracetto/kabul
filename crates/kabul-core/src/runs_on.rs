@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RunsOn {
     /// Neste Mac (tmux/stdio). `mirrored`: espelhada via remote-control (claude.ai/code, celular).
-    Local { #[serde(default)] mirrored: bool },
+    Local {
+        #[serde(default)]
+        mirrored: bool,
+    },
     /// Na nuvem do próprio provedor de IA (ex.: `claude --cloud` → claude.ai).
     ProviderCloud { provider: String },
     /// Nuvem própria do Kabul (futuro).

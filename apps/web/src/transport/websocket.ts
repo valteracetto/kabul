@@ -1,14 +1,20 @@
 import type { Transport } from "./types";
+import { compat as compatOf, helloInfo, type Compat, type PeerInfo } from "../version";
 
 /** Credencial de um aparelho pareado com um kabuld. */
 export interface Credential { device: string; key: string }
 
-export type ConnState = "connecting" | "open" | "closed" | "unauthorized" | "revoked";
+/** `incompatible`: o kabuld recusou este app por ser antigo demais (ver `version.ts`). */
+export type ConnState = "connecting" | "open" | "closed" | "unauthorized" | "revoked" | "incompatible";
 
 export interface WsTransport extends Transport {
   /** Quem o kabuld reconheceu nesta conexão (dono, editor, observador). */
   principal(): Principal | null;
   machine(): string | null;
+  /** Versão e protocolo do kabuld (do `hello`); `null` antes de conectar. */
+  server(): PeerInfo | null;
+  /** Compatibilidade de versão com o kabuld; `ok` enquanto não se sabe. */
+  compat(): Compat;
   state(): ConnState;
   /** Último erro do hello (credencial inválida, revogada, pareamento necessário). */
   lastError(): string | null;
@@ -34,6 +40,7 @@ export function websocketTransport(url: string, cred?: Credential | (() => Crede
   let lastErr: string | null = null;
   let who: Principal | null = null;
   let machine: string | null = null;
+  let server: PeerInfo | null = null;
   let closed = false;
   let retry = 0;
   let ready!: Promise<void>;
@@ -57,12 +64,18 @@ export function websocketTransport(url: string, cred?: Credential | (() => Crede
     let helloOk = false;
     sock.addEventListener("open", () => {
       const c = typeof cred === "function" ? cred() : cred;
-      sock.send(JSON.stringify({ hello: c ? { device: c.device, key: c.key } : {} }));
+      const client = helloInfo("web");
+      sock.send(JSON.stringify({ hello: c ? { device: c.device, key: c.key, client } : { client } }));
     });
     sock.addEventListener("message", (m) => {
       const msg = JSON.parse(m.data as string);
       if (msg.hello) {
-        if (msg.hello.ok) {
+        server = msg.hello.server ?? null;
+        if (msg.hello.incompatible) {
+          closed = true;
+          setState("incompatible", msg.hello.error);
+          rejectReady(msg.hello.error);
+        } else if (msg.hello.ok) {
           helloOk = true;
           retry = 0;
           who = msg.hello.principal;
@@ -140,6 +153,8 @@ export function websocketTransport(url: string, cred?: Credential | (() => Crede
     },
     principal: () => who,
     machine: () => machine,
+    server: () => server,
+    compat: () => (server ? compatOf(server, machine ? `O kabuld de ${machine}` : "O kabuld") : { kind: "ok" }),
     state: () => st,
     lastError: () => lastErr,
     onState(h) {

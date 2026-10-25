@@ -1,7 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Janela principal: eventos do core.",
-  "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-start-dragging"]
+  "description": "Janela principal e popover da barra do Kabul: só ouvir os eventos do core e arrastar/maximizar pela barra (menor privilégio; os comandos do Kabul são do próprio app), mais os plugins de notificação e deep-link.",
+  "windows": ["main", "tray"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "notification:default",
+    "deep-link:default"
+  ]
 }

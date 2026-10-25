@@ -18,10 +18,10 @@ const fire = (name: string, detail?: unknown) => window.dispatchEvent(new Custom
 const SETTINGS: [string, string][] = [["geral", "Geral"], ["contas", "Contas"], ["aparencia", "Aparência"], ["modelos", "Modelos"], ["git", "Git"], ["integracoes", "Integrações"], ["ambiente", "Ambiente"], ["repo", "Scripts do repositório"], ["acoes", "Ações (prompts)"], ["diversos", "Diversos do repositório"], ["remoto", "Máquinas"], ["avancado", "Avançado"], ["atalhos", "Atalhos de teclado"]];
 
 /** Paleta de comandos (⌘K): abas Tudo / Workspaces (ativos e arquivados) / Projetos / Ações / Configurações; Tab e ⇧Tab trocam. */
-export function Palette({ repos, workspaces, current, onClose, onRoute, onCreate, onChange }: { repos: Repo[]; workspaces: Workspace[]; current?: Workspace; onClose: () => void; onRoute: (r: Route) => void; onCreate: (o: { repo?: string; add?: boolean; from?: "prs" }) => void; onChange: () => void }) {
+export function Palette({ repos, workspaces, current, archived, onClose, onRoute, onCreate, onChange }: { repos: Repo[]; workspaces: Workspace[]; current?: Workspace; archived?: boolean; onClose: () => void; onRoute: (r: Route) => void; onCreate: (o: { repo?: string; add?: boolean; from?: "prs" }) => void; onChange: () => void }) {
   const [q, setQ] = useState("");
-  const [tab, setTab] = useState<PaletteTab>("all");
-  const [archivedTab, setArchivedTab] = useState(false);
+  const [tab, setTab] = useState<PaletteTab>(archived ? "workspaces" : "all");
+  const [archivedTab, setArchivedTab] = useState(!!archived);
   const [sel, setSel] = useState(0);
   const [hits, setHits] = useState<[string, string, string, string][]>([]);
   const input = useRef<HTMLInputElement>(null);

@@ -2,16 +2,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use kabul_core::auth::{self, AuthEvent, LoginSession};
-use kabul_core::import::sessions::{ImportedSession, ImportedWorkspace, SessionImporter};
 use kabul_core::harness::{self, HarnessKind, Running};
 use kabul_core::history::{self, SessionRecord, SessionSummary};
+use kabul_core::import::sessions::{ImportedSession, ImportedWorkspace, SessionImporter};
 use kabul_core::local::{self, CustomEndpoint, SourceStatus};
 use kabul_core::models::{self, Model};
 use kabul_core::registry::Registry;
 use kabul_core::settings::{self, AppSettings, Layer, Settings};
 use kabul_core::store::{self, Diff, DiffComment, FileChange, PrOptions, PrResult, Repo, Store, Workspace};
-use kabul_core::tmux::stream::TermStream;
-use kabul_core::{agent, checkpoint, speech, tmux};
+use kabul_core::term::{self, Cmd, Launch, Stream, What};
+use kabul_core::{agent, checkpoint, speech};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -20,7 +20,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 mod gitcmds;
 mod menu;
+mod os;
 mod remote;
+mod tray;
+mod updates;
 
 type R<T> = Result<T, String>;
 
@@ -33,10 +36,14 @@ struct App {
     store: Mutex<Store>,
     chats: Mutex<HashMap<String, Arc<Mutex<Running>>>>,
     logins: Mutex<HashMap<HarnessKind, LoginSession>>,
-    terms: Mutex<HashMap<String, TermStream>>,
+    terms: Mutex<HashMap<String, Stream>>,
     gh_login: Mutex<Option<LoginSession>>,
     account_logins: Mutex<HashMap<String, LoginSession>>,
     seq: Mutex<u64>,
+    /// Processos deixados pelos agentes que o usuário manteve rodando.
+    kept: kabul_core::procs::Kept,
+    /// Workspace/modelo de cada conversa viva (barra do Kabul: "agentes rodando agora").
+    chat_meta: Mutex<HashMap<String, tray::ChatInfo>>,
 }
 
 impl App {
@@ -64,18 +71,16 @@ fn ws_repo(app: &App, id: &str) -> R<(Workspace, Repo)> {
     Ok((w, r))
 }
 
-fn run_in_tmux(name: &str, cwd: &str, script: &str, env: &[(String, String)], log: Option<&Path>) -> R<String> {
-    if tmux::has_session(name) {
-        let _ = tmux::kill_session(name);
-    }
-    let exports: String = env.iter().map(|(k, v)| format!("export {k}={}; ", harness::shell_quote(v))).collect();
-    let tail = match log {
-        Some(l) => format!(" 2>&1 | tee -a {}; echo \"[kabul] saiu com $pipestatus[1]\" | tee -a {}", harness::shell_quote(&l.display().to_string()), harness::shell_quote(&l.display().to_string())),
-        None => "; echo \"[kabul] saiu com $?\"".into(),
-    };
-    let line = format!("{exports}zsh -lc {}{tail}; exec zsh -l", harness::shell_quote(script));
-    tmux::new_session(name, Some(cwd), Some(&format!("zsh -c {}", harness::shell_quote(&line)))).map_err(e)?;
-    Ok(name.into())
+/// Roda o comando numa sessão de terminal própria (recriada se já existir), com `[kabul] saiu com N` no
+/// fim e um shell depois. tmux ou PTY, conforme o backend.
+fn run_script(name: &str, cwd: &str, cmd: Cmd, env: &[(String, String)], log: Option<&Path>) -> R<String> {
+    term::backend().replace(&Launch::new(name, Some(cwd), What::Run { cmd, log: log.map(Path::to_path_buf) }).env(env)).map_err(e)
+}
+
+/// Sessões do workspace (`<sessão>` e `<sessão>-*`).
+fn workspace_sessions(w: &Workspace) -> Vec<String> {
+    let main = w.tmux_session();
+    term::backend().sessions().into_iter().filter(|s| s == &main || s.starts_with(&format!("{main}-"))).collect()
 }
 
 // ---------------- repos ----------------
@@ -138,7 +143,7 @@ async fn workspace_create(handle: AppHandle, app: State<'_, App>, repo_id: Strin
     let (set, _) = settings::load(Path::new(&r.path), &r.default_branch);
     if let Some(script) = set.scripts.setup {
         let log = Path::new(&w.path).join(".context/setup-logs.txt");
-        run_in_tmux(&format!("{}-setup", w.tmux_session()), &w.path, &script, &w.full_env(&r), Some(&log))?;
+        run_script(&format!("{}-setup", w.tmux_session()), &w.path, Cmd::Line(script), &w.full_env(&r), Some(&log))?;
         // Acompanha o fim do setup para trocar o estado.
         let (id, h) = (w.id.clone(), handle.clone());
         std::thread::spawn(move || {
@@ -221,13 +226,14 @@ async fn workspace_archive(app: State<'_, App>, id: String, close_pr: Option<boo
     }
     let (set, _) = settings::load(Path::new(&r.path), &r.default_branch);
     if let (Some(script), true) = (set.scripts.archive, Path::new(&w.path).exists()) {
-        let o = std::process::Command::new("zsh").args(["-lc", &script]).current_dir(&w.path).envs(w.full_env(&r)).output().map_err(e)?;
+        let sh = kabul_core::shell::Shell::for_scripts();
+        let o = kabul_core::shell::command(&sh.program).args(sh.run_args(&script, false)).current_dir(&w.path).envs(w.full_env(&r)).output().map_err(e)?;
         let log = Path::new(&w.path).join(".context/archive-logs.txt");
         let _ = std::fs::write(log, [o.stdout, o.stderr].concat());
     }
     app.store.lock().unwrap().archive_workspace_opts(&id, app_set.delete_branch_on_archive).map_err(e)?;
-    for s in tmux::list_panes().unwrap_or_default().into_iter().map(|p| p.session).filter(|s| s == &w.tmux_session() || s.starts_with(&format!("{}-", w.tmux_session()))) {
-        let _ = tmux::kill_session(&s);
+    for s in workspace_sessions(&w) {
+        let _ = term::backend().kill(&s);
     }
     Ok(())
 }
@@ -382,7 +388,7 @@ fn attach_bytes(app: State<App>, workspace_id: String, name: String, data: Vec<u
 
 // ---------------- scripts ----------------
 
-/// Roda setup | run | archive numa sessão tmux própria e devolve o nome da sessão.
+/// Roda setup | run | archive numa sessão de terminal própria e devolve o nome da sessão.
 #[tauri::command]
 fn script_run(app: State<App>, workspace_id: String, which: String, run_id: Option<String>) -> R<String> {
     let (w, r) = ws_repo(&app, &workspace_id)?;
@@ -394,20 +400,20 @@ fn script_run(app: State<App>, workspace_id: String, which: String, run_id: Opti
             let id = run_id.or_else(|| set.scripts.run.iter().find(|(_, s)| s.default).map(|(k, _)| k.clone())).or_else(|| set.scripts.run.keys().next().cloned()).ok_or("nenhum run script configurado")?;
             if set.scripts.run_mode.as_deref() == Some("nonconcurrent") {
                 let pre = format!("{}-run-", w.tmux_session());
-                for s in tmux::list_panes().unwrap_or_default().into_iter().map(|p| p.session).filter(|s| s.starts_with(&pre)) {
-                    let _ = tmux::kill_session(&s);
+                for s in term::backend().sessions().into_iter().filter(|s| s.starts_with(&pre)) {
+                    let _ = term::backend().kill(&s);
                 }
             }
             (format!("{}-run-{id}", w.tmux_session()), set.scripts.run.get(&id).map(|s| s.command.clone()), None)
         }
     };
     let script = script.ok_or_else(|| format!("nenhum script de {which} configurado"))?;
-    run_in_tmux(&name, &w.path, &script, &w.full_env(&r), log.as_deref())
+    run_script(&name, &w.path, Cmd::Line(script), &w.full_env(&r), log.as_deref())
 }
 
 #[tauri::command]
 fn script_stop(session: String) -> R<()> {
-    tmux::kill_session(&session).map_err(e)
+    term::backend().kill(&session).map_err(e)
 }
 
 // ---------------- terminal (stream) ----------------
@@ -426,33 +432,33 @@ struct TermInfo {
     snapshot: String,
 }
 
-/// Abre (ou cria) a sessão tmux e liga o stream. `name` nulo = terminal principal do workspace.
+/// Abre (ou cria) a sessão de terminal e liga o stream. `name` nulo = terminal principal do workspace.
 #[tauri::command]
 fn term_open(handle: AppHandle, app: State<App>, workspace_id: String, name: Option<String>) -> R<TermInfo> {
     let (w, r) = ws_repo(&app, &workspace_id)?;
     let session = name.unwrap_or_else(|| w.tmux_session());
-    if !tmux::has_session(&session) {
-        let exports: String = w.full_env(&r).iter().map(|(k, v)| format!("export {k}={}; ", harness::shell_quote(v))).collect();
-        tmux::new_session(&session, Some(&w.path), Some(&format!("zsh -c {}", harness::shell_quote(&format!("{exports}exec zsh -l"))))).map_err(e)?;
+    let b = term::backend();
+    if !b.has(&session) {
+        b.open(&Launch::new(&session, Some(&w.path), What::Shell).env(&w.full_env(&r))).map_err(e)?;
     }
     // A sessão acabou de nascer: espera o pane aparecer (até ~1 s) antes de desistir.
     let mut pane = None;
     for _ in 0..20 {
-        pane = tmux::list_panes().map_err(e)?.into_iter().find(|p| p.session == session).map(|p| p.pane_id);
+        pane = b.pane_of(&session);
         if pane.is_some() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    let pane = pane.ok_or_else(|| format!("o terminal {session} não abriu (a sessão do tmux terminou logo ao iniciar)"))?;
-    let snapshot = tmux::screen(&pane).unwrap_or_default();
+    let pane = pane.ok_or_else(|| format!("o terminal {session} não abriu (a sessão terminou logo ao iniciar)"))?;
+    let snapshot = b.screen(&pane).unwrap_or_default();
     let mut terms = app.terms.lock().unwrap();
     if !terms.contains_key(&session) {
-        let mut t = TermStream::attach(&session).map_err(e)?;
+        let mut t = b.attach(&session).map_err(e)?;
         let rx = t.output.take().unwrap();
         let s2 = session.clone();
         std::thread::spawn(move || {
-            for (pane, data) in rx {
+            for (pane, data) in kabul_core::batch::coalesce(rx, kabul_core::batch::frame()) {
                 let _ = handle.emit("term-output", TermOut { session: s2.clone(), pane, data });
             }
         });
@@ -465,7 +471,7 @@ fn term_open(handle: AppHandle, app: State<App>, workspace_id: String, name: Opt
 fn term_input(app: State<App>, session: String, pane: String, data: String) -> R<()> {
     match app.terms.lock().unwrap().get_mut(&session) {
         Some(t) => t.input(&pane, data.as_bytes()).map_err(e),
-        None => tmux::send_bytes(&pane, data.as_bytes()).map_err(e),
+        None => term::backend().send(&pane, data.as_bytes()).map_err(e),
     }
 }
 
@@ -485,7 +491,7 @@ fn term_close(app: State<App>, session: String) {
 /// Captura (para o agente ou para a PWA): tela atual do pane.
 #[tauri::command]
 async fn term_capture(target: String) -> R<String> {
-    tmux::screen(&target).map_err(e)
+    term::backend().screen(&target).map_err(e)
 }
 
 // ---------------- modelos, IAs locais e registro ----------------
@@ -532,13 +538,13 @@ fn local_endpoint_remove(app: State<App>, id: String) -> R<()> {
     local::save_endpoints(&app.file("endpoints.json"), &v).map_err(e)
 }
 
-/// Baixa um modelo numa sessão tmux visível (a UI pede confirmação antes).
+/// Baixa um modelo numa sessão de terminal visível (a UI pede confirmação antes).
 #[tauri::command]
 fn local_pull(source: String, model: String) -> R<String> {
     let rt = local::runtime(&source).ok_or("runtime desconhecido")?;
     let spec = rt.pull_command(&model).ok_or("este runtime não baixa modelos")?;
     let name = format!("kabul-pull-{}", store::slug(&model));
-    tmux::new_session(&name, None, Some(&spec.shell_line())).map_err(e)?;
+    term::backend().open(&Launch::new(&name, None, What::Exec(Cmd::Spec(spec)))).map_err(e)?;
     Ok(name)
 }
 
@@ -554,7 +560,7 @@ async fn local_start(source: String) -> R<()> {
 fn harness_install(kind: String) -> R<String> {
     let k = self::kind(&kind)?;
     let name = format!("kabul-install-{}", k.binary());
-    tmux::new_session(&name, None, Some(&format!("zsh -lc {}; exec zsh -l", harness::shell_quote(k.install_command())))).map_err(e)?;
+    term::backend().replace(&Launch::new(&name, None, What::Run { cmd: Cmd::Line(k.install_command().into()), log: None })).map_err(e)?;
     Ok(name)
 }
 
@@ -589,11 +595,25 @@ struct ChatStarted {
     harness: HarnessKind,
     approvals: bool,
     note: Option<String>,
+    /// Como o plan mode chega a este agente: `native` ou `emulated` (só leitura + instrução).
+    plan: kabul_core::harness::PlanSupport,
 }
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-async fn chat_start(handle: AppHandle, app: State<'_, App>, workspace_id: String, model: Model, effort: Option<String>, fast: Option<bool>, resume: Option<String>, plan: Option<bool>, disabled_mcp: Option<Vec<String>>, fork: Option<bool>, account: Option<String>) -> R<ChatStarted> {
+async fn chat_start(
+    handle: AppHandle,
+    app: State<'_, App>,
+    workspace_id: String,
+    model: Model,
+    effort: Option<String>,
+    fast: Option<bool>,
+    resume: Option<String>,
+    plan: Option<bool>,
+    disabled_mcp: Option<Vec<String>>,
+    fork: Option<bool>,
+    account: Option<String>,
+) -> R<ChatStarted> {
     let (w, r) = ws_repo(&app, &workspace_id)?;
     let req = kabul_core::chat::ChatRequest { model: None, effort, fast, resume, plan, disabled_mcp, fork, account };
     // Mesmo caminho do `kabul serve` (core): harness, ambiente, conta e opções.
@@ -602,6 +622,16 @@ async fn chat_start(handle: AppHandle, app: State<'_, App>, workspace_id: String
     let (_tx, dummy) = std::sync::mpsc::channel();
     let rx = std::mem::replace(&mut running.events, dummy);
     let id = app.next("chat");
+    // Uso: cada fim de turno vira um registro (tokens, custo, duração) e atualiza a barra.
+    let meta = kabul_core::usage::Meta::for_chat(&app.home, p.kind, &model, req.account.as_deref(), &w.id);
+    app.chat_meta.lock().unwrap().insert(id.clone(), tray::ChatInfo { workspace_id: w.id.clone(), model: model.label.clone(), harness: meta.harness.clone(), since: store::now(), working: false });
+    let (h3, c3) = (handle.clone(), id.clone());
+    let rx = kabul_core::usage::tap(rx, kabul_core::usage::Recorder::new(&app.home, meta), move |_| {
+        if let Some(m) = h3.state::<App>().chat_meta.lock().unwrap().get_mut(&c3) {
+            m.working = false;
+        }
+        tray::changed(&h3);
+    });
     let running = Arc::new(Mutex::new(running));
     app.chats.lock().unwrap().insert(id.clone(), running.clone());
     remote::mirror_chat(&handle, &id, &w, p.kind, &model.label, p.opts.approvals_via_app, running.clone());
@@ -609,7 +639,8 @@ async fn chat_start(handle: AppHandle, app: State<'_, App>, workspace_id: String
     let caffeinate = app.app_settings().caffeinate;
     let log = app.file("logs/agents.log");
     std::thread::spawn(move || {
-        let coffee = caffeinate.then(|| std::process::Command::new("caffeinate").args(["-i", "-w", &std::process::id().to_string()]).spawn().ok()).flatten();
+        // Mantém o computador acordado enquanto o agente roda (criado e solto nesta thread).
+        let coffee = if caffeinate { kabul_core::power::KeepAwake::start() } else { None };
         let h2 = handle.clone();
         let emit = |ev: serde_json::Value| {
             let _ = handle.emit("chat-event", ChatPayload { chat_id: cid.clone(), event: ev });
@@ -621,11 +652,10 @@ async fn chat_start(handle: AppHandle, app: State<'_, App>, workspace_id: String
         let tap = |ev: &kabul_core::harness::Event| remote::feed(&h2, &cid, ev);
         kabul_core::chat::pump_with(rx, tap, emit, stopped, move || r2.lock().unwrap().wait(), Some((log, format!("{header} · {cid}"))));
         remote::close_chat(&h2, &cid);
-        if let Some(mut c) = coffee {
-            let _ = c.kill();
-        }
+        h2.state::<App>().chat_meta.lock().unwrap().remove(&cid);
+        drop(coffee);
     });
-    Ok(ChatStarted { chat_id: id, harness: p.kind, approvals: p.opts.approvals_via_app, note: p.note })
+    Ok(ChatStarted { chat_id: id, harness: p.kind, approvals: p.opts.approvals_via_app, note: p.note, plan: p.kind.harness().plan_support() })
 }
 
 fn chat(app: &App, id: &str) -> R<Arc<Mutex<Running>>> {
@@ -635,15 +665,26 @@ fn chat(app: &App, id: &str) -> R<Arc<Mutex<Running>>> {
 #[tauri::command]
 fn chat_send(handle: AppHandle, app: State<App>, chat_id: String, text: String) -> R<()> {
     chat(&app, &chat_id)?.lock().unwrap().send(&text).map_err(e)?;
+    if let Some(m) = app.chat_meta.lock().unwrap().get_mut(&chat_id) {
+        m.working = true;
+    }
     remote::local_send(&handle, &chat_id, &text);
     Ok(())
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn chat_approve(handle: AppHandle, app: State<App>, chat_id: String, request_id: String, allow: bool, tool: Option<String>, updated_input: Option<serde_json::Value>, always: Option<bool>) -> R<()> {
     chat(&app, &chat_id)?.lock().unwrap().approve_ext(&request_id, allow, tool.as_deref().unwrap_or(""), updated_input, always.unwrap_or(false)).map_err(e)?;
     remote::local_approval(&handle, &chat_id, &request_id, allow);
     Ok(())
+}
+
+/// Troca o modo da sessão ao vivo (ex.: sair do plan mode ao aprovar o plano). `false`: o agente não
+/// troca sem reiniciar (o app retoma a sessão com o modo novo).
+#[tauri::command]
+fn chat_set_mode(app: State<App>, chat_id: String, mode: String) -> R<bool> {
+    chat(&app, &chat_id)?.lock().unwrap().set_mode(&mode).map_err(e)
 }
 
 #[tauri::command]
@@ -652,6 +693,51 @@ fn chat_stop(app: State<App>, chat_id: String) -> R<()> {
         let _ = c.lock().unwrap().kill();
     }
     Ok(())
+}
+
+/// "Parar": interrompe só o turno pelo protocolo do agente (a sessão continua e é retomável) e devolve o
+/// que ficou rodando. Se o agente saiu, a conversa sai da lista (o próximo envio retoma com --resume).
+#[tauri::command]
+async fn chat_interrupt(app: State<'_, App>, chat_id: String) -> R<kabul_core::procs::StopReport> {
+    let Some(r) = app.chats.lock().unwrap().get(&chat_id).cloned() else { return Ok(Default::default()) };
+    let rep = tauri::async_runtime::spawn_blocking(move || kabul_core::procs::stop_turn(&r, std::time::Duration::from_millis(1500))).await.map_err(e)?;
+    if !rep.alive {
+        app.chats.lock().unwrap().remove(&chat_id);
+    }
+    Ok(rep)
+}
+
+/// Processos que as conversas abriram e que continuariam vivos ao encerrá-las (fechar aba, arquivar, sair).
+#[tauri::command]
+async fn chat_processes(app: State<'_, App>, chat_ids: Vec<String>) -> R<Vec<kabul_core::procs::Leftover>> {
+    let rs: Vec<_> = {
+        let c = app.chats.lock().unwrap();
+        chat_ids.iter().filter_map(|id| c.get(id).cloned()).collect()
+    };
+    tauri::async_runtime::spawn_blocking(move || rs.iter().flat_map(|r| kabul_core::procs::session_leftovers(r)).collect()).await.map_err(e)
+}
+
+#[tauri::command]
+fn processes_keep(app: State<App>, items: Vec<kabul_core::procs::Leftover>, workspace_id: Option<String>) {
+    app.kept.keep(items, workspace_id);
+}
+
+#[tauri::command]
+async fn processes_kept(app: State<'_, App>) -> R<Vec<kabul_core::procs::Leftover>> {
+    Ok(app.kept.alive())
+}
+
+/// Encerra os processos escolhidos e os filhos deles (SIGTERM, depois SIGKILL).
+#[tauri::command]
+async fn process_kill(app: State<'_, App>, keys: Vec<kabul_core::procs::Key>) -> R<usize> {
+    app.kept.forget(&keys);
+    let k = keys.clone();
+    tauri::async_runtime::spawn_blocking(move || kabul_core::procs::terminate(&k, std::time::Duration::from_secs(2))).await.map_err(e)
+}
+
+#[tauri::command]
+async fn docker_stop(id: String) -> R<()> {
+    tauri::async_runtime::spawn_blocking(move || kabul_core::procs::docker_stop(&id)).await.map_err(e)?.map_err(e)
 }
 
 /// Ao primeiro envio: renomeia a branch a partir da mensagem, se o usuário não fixou um nome.
@@ -705,7 +791,7 @@ fn slash_commands(app: State<App>, workspace_id: String) -> R<Vec<(String, Strin
 #[derive(Serialize)]
 struct TmuxSession {
     #[serde(flatten)]
-    pane: tmux::Pane,
+    pane: term::Pane,
     agent: &'static str,
 }
 
@@ -719,7 +805,10 @@ struct Sessions {
 
 #[tauri::command]
 async fn sessions_list() -> R<Sessions> {
-    let tmux = tmux::list_panes().map_err(e)?.into_iter().map(|p| TmuxSession { agent: agent::detect_pane(&p.command, p.pid).label(), pane: p }).collect();
+    let panes = term::backend().list().map_err(e)?;
+    // Uma leitura da tabela de processos para todos os panes (antes: uma por pane).
+    let agents = agent::detect_panes(&panes);
+    let tmux = panes.into_iter().zip(agents).map(|(p, a)| TmuxSession { agent: a.label(), pane: p }).collect();
     let (mut cw, mut cs, mut err) = (vec![], vec![], None);
     match SessionImporter::open_detected(None).and_then(|db| Ok((db.workspaces()?, db.sessions()?))) {
         Ok((w, s)) => (cw, cs) = (w, s),
@@ -791,12 +880,9 @@ fn auth_cancel(app: State<App>, kind: String) -> R<()> {
 
 // ---------------- nuvem, teleport e espelhamento ----------------
 
-fn pane_of(session: &str) -> R<String> {
-    tmux::list_panes().map_err(e)?.into_iter().find(|p| p.session == session).map(|p| p.pane_id).ok_or_else(|| format!("sessão {session} não encontrada"))
-}
-
 fn capture(session: &str) -> String {
-    pane_of(session).ok().and_then(|p| tmux::capture_pane(&p, 400).ok()).unwrap_or_default()
+    let b = term::backend();
+    b.pane_of(session).and_then(|p| b.capture(&p, 400).ok()).unwrap_or_default()
 }
 
 #[derive(Serialize)]
@@ -805,12 +891,12 @@ struct CloudStarted {
     info: kabul_core::cloud::CloudInfo,
 }
 
-/// `claude --cloud` exige TTY: roda numa sessão tmux e lê o id/URL da saída (até 90 s).
+/// `claude --cloud` exige TTY: roda numa sessão de terminal e lê o id/URL da saída (até 90 s).
 #[tauri::command]
 async fn cloud_start(app: State<'_, App>, workspace_id: String, prompt: String, environment: Option<String>) -> R<CloudStarted> {
     let (w, r) = ws_repo(&app, &workspace_id)?;
     let name = format!("{}-cloud-{}", w.tmux_session(), store::now() % 100000);
-    run_in_tmux(&name, &w.path, &kabul_core::cloud::cloud_line(&prompt, environment.as_deref().filter(|e| !e.trim().is_empty())), &w.full_env(&r), None)?;
+    run_script(&name, &w.path, Cmd::Spec(kabul_core::cloud::cloud_spec(&prompt, environment.as_deref().filter(|e| !e.trim().is_empty()))), &w.full_env(&r), None)?;
     for _ in 0..180 {
         std::thread::sleep(std::time::Duration::from_millis(500));
         let info = kabul_core::cloud::parse(&capture(&name));
@@ -826,17 +912,23 @@ fn cloud_poll(tmux: String) -> kabul_core::cloud::CloudInfo {
     kabul_core::cloud::parse(&capture(&tmux))
 }
 
-/// Roda um comando numa sessão tmux do workspace (ex.: `claude --teleport <id>`).
-#[tauri::command]
-fn term_run(app: State<App>, workspace_id: String, name: String, command: String) -> R<String> {
-    let (w, r) = ws_repo(&app, &workspace_id)?;
-    let session = format!("{}-{}", w.tmux_session(), store::slug(&name));
-    run_in_tmux(&session, &w.path, &command, &w.full_env(&r), None)
+fn run_in_workspace(app: &App, workspace_id: &str, name: &str, cmd: Cmd) -> R<String> {
+    let (w, r) = ws_repo(app, workspace_id)?;
+    let session = format!("{}-{}", w.tmux_session(), store::slug(name));
+    run_script(&session, &w.path, cmd, &w.full_env(&r), None)
 }
 
+/// Roda uma linha de shell numa sessão de terminal do workspace.
+#[tauri::command]
+fn term_run(app: State<App>, workspace_id: String, name: String, command: String) -> R<String> {
+    run_in_workspace(&app, &workspace_id, &name, Cmd::Line(command))
+}
+
+/// Traz a sessão da nuvem para cá (`claude --teleport <id>`).
 #[tauri::command]
 fn teleport(app: State<App>, workspace_id: String, id: String) -> R<String> {
-    term_run(app, workspace_id, format!("teleport-{}", &id[id.len().saturating_sub(6)..]), kabul_core::cloud::teleport_line(&id))
+    let tail: String = id.chars().rev().take(6).collect::<Vec<_>>().into_iter().rev().collect();
+    run_in_workspace(&app, &workspace_id, &format!("teleport-{tail}"), Cmd::Spec(kabul_core::cloud::teleport_spec(&id)))
 }
 
 #[derive(Serialize)]
@@ -854,7 +946,7 @@ fn mirror_name(w: &Workspace) -> String {
 fn mirror_status(app: State<App>, workspace_id: String) -> R<Mirror> {
     let (w, _) = ws_repo(&app, &workspace_id)?;
     let name = mirror_name(&w);
-    let running = tmux::has_session(&name);
+    let running = term::backend().has(&name);
     Ok(Mirror { link: running.then(|| kabul_core::cloud::parse_remote_link(&capture(&name))).flatten(), running, tmux: name })
 }
 
@@ -864,7 +956,7 @@ fn mirror_status(app: State<App>, workspace_id: String) -> R<Mirror> {
 async fn mirror_start(app: State<'_, App>, workspace_id: String, resume: Option<String>) -> R<Mirror> {
     let (w, r) = ws_repo(&app, &workspace_id)?;
     let name = mirror_name(&w);
-    run_in_tmux(&name, &w.path, &kabul_core::cloud::remote_control_line(&w.tmux_session(), resume.as_deref()), &w.full_env(&r), None)?;
+    run_script(&name, &w.path, Cmd::Spec(kabul_core::cloud::remote_control_spec(&w.tmux_session(), resume.as_deref())), &w.full_env(&r), None)?;
     // A TUI do Claude não imprime o link (confirmado): a sessão aparece como `kabul-<ws>` em claude.ai/code.
     for _ in 0..6 {
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -872,13 +964,13 @@ async fn mirror_start(app: State<'_, App>, workspace_id: String, resume: Option<
             return Ok(Mirror { running: true, tmux: name, link: Some(link) });
         }
     }
-    Ok(Mirror { running: tmux::has_session(&name), tmux: name, link: None })
+    Ok(Mirror { running: term::backend().has(&name), tmux: name, link: None })
 }
 
 #[tauri::command]
 fn mirror_stop(app: State<App>, workspace_id: String) -> R<()> {
     let (w, _) = ws_repo(&app, &workspace_id)?;
-    tmux::kill_session(&mirror_name(&w)).map_err(e)
+    term::backend().kill(&mirror_name(&w)).map_err(e)
 }
 
 /// Fork para um workspace novo: worktree no commit do checkpoint, arquivos do checkpoint e a sessão
@@ -888,7 +980,7 @@ async fn workspace_fork(handle: AppHandle, app: State<'_, App>, workspace_id: St
     let (w, r) = ws_repo(&app, &workspace_id)?;
     let ck = checkpoint_id.and_then(|c| checkpoint::list(Path::new(&w.path)).ok()?.into_iter().find(|x| x.id == c));
     let base = ck.as_ref().map(|c| c.head.clone()).unwrap_or_else(|| "HEAD".into());
-    let base = if base == "HEAD" { std::process::Command::new("git").arg("-C").arg(&w.path).args(["rev-parse", "HEAD"]).output().map_err(e).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())? } else { base };
+    let base = if base == "HEAD" { kabul_core::shell::command("git").arg("-C").arg(&w.path).args(["rev-parse", "HEAD"]).output().map_err(e).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())? } else { base };
     let prefix = app.app_settings().branch_prefix();
     let nw = {
         let mut st = app.store.lock().unwrap();
@@ -1050,7 +1142,7 @@ async fn repo_branches(app: State<'_, App>, repo_id: String) -> R<Vec<String>> {
 #[tauri::command]
 async fn repo_prs(app: State<'_, App>, repo_id: String) -> R<Vec<serde_json::Value>> {
     let r = app.store.lock().unwrap().repo(&repo_id).map_err(e)?.clone();
-    let o = std::process::Command::new("gh").args(["pr", "list", "--limit", "40", "--json", "number,title,headRefName,author,isDraft,updatedAt,url"]).current_dir(&r.path).output().map_err(e)?;
+    let o = kabul_core::shell::command("gh").args(["pr", "list", "--limit", "40", "--json", "number,title,headRefName,author,isDraft,updatedAt,url"]).current_dir(&r.path).output().map_err(e)?;
     if !o.status.success() {
         return Err(String::from_utf8_lossy(&o.stderr).trim().to_string());
     }
@@ -1090,6 +1182,50 @@ async fn mcp_list(app: State<'_, App>, workspace_id: String, harness: String) ->
 fn mcp_add(app: State<App>, workspace_id: String, name: String, command: String, args: Vec<String>) -> R<()> {
     let (w, _) = ws_repo(&app, &workspace_id)?;
     kabul_core::mcp::add_project(Path::new(&w.path), name.trim(), command.trim(), &args, &[]).map_err(e)
+}
+
+/// Registro único de MCP (todas as configs nativas), com origem, compartilhamento e peso em cache.
+#[tauri::command]
+async fn mcp_shared(app: State<'_, App>, workspace_id: String) -> R<Vec<kabul_core::mcp_share::View>> {
+    let (w, r) = ws_repo(&app, &workspace_id)?;
+    let all = kabul_core::mcp_share::shared(Path::new(&w.path), Path::new(&r.path));
+    Ok(kabul_core::mcp_share::views(&app.home, &all, &kabul_core::mcp_share::Prefs::load(&app.home)))
+}
+
+/// Mede o peso de um MCP (abre o servidor stdio e pede `tools/list`); guarda em cache.
+#[tauri::command]
+async fn mcp_weigh(app: State<'_, App>, workspace_id: String, name: String) -> R<kabul_core::mcp_share::Weight> {
+    let (w, r) = ws_repo(&app, &workspace_id)?;
+    let all = kabul_core::mcp_share::shared(Path::new(&w.path), Path::new(&r.path));
+    let sv = all.into_iter().find(|x| x.server.name == name).ok_or_else(|| format!("MCP {name} não encontrado"))?.server;
+    let home = app.home.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let wt = kabul_core::mcp_share::weigh(&sv, std::time::Duration::from_secs(15)).map_err(e)?;
+        kabul_core::mcp_share::store_weight(&home, &sv, wt).map_err(e)?;
+        Ok(wt)
+    })
+    .await
+    .map_err(e)?
+}
+
+/// "Disponível em todas as IAs" de um MCP.
+#[tauri::command]
+fn mcp_set_shared(app: State<App>, workspace_id: String, name: String, on: bool) -> R<()> {
+    let (w, r) = ws_repo(&app, &workspace_id)?;
+    let all = kabul_core::mcp_share::shared(Path::new(&w.path), Path::new(&r.path));
+    let sv = all.into_iter().find(|x| x.server.name == name).ok_or_else(|| format!("MCP {name} não encontrado"))?.server;
+    let mut p = kabul_core::mcp_share::Prefs::load(&app.home);
+    p.set_shared(&sv, on);
+    p.save(&app.home).map_err(e)
+}
+
+/// Exporta um MCP para a config global do Antigravity (com backup). Devolve o caminho do backup.
+#[tauri::command]
+fn mcp_export_agy(app: State<App>, workspace_id: String, name: String) -> R<Option<String>> {
+    let (w, r) = ws_repo(&app, &workspace_id)?;
+    let all = kabul_core::mcp_share::shared(Path::new(&w.path), Path::new(&r.path));
+    let sv = all.into_iter().find(|x| x.server.name == name).ok_or_else(|| format!("MCP {name} não encontrado"))?.server;
+    Ok(kabul_core::mcp_share::export_agy(&sv, &kabul_core::mcp_share::agy_config_file()).map_err(e)?.map(|b| b.display().to_string()))
 }
 
 // ---------------- Linear ----------------
@@ -1150,27 +1286,13 @@ async fn workspace_from_issue(handle: AppHandle, app: State<'_, App>, repo_id: S
 
 // ---------------- abrir em (Finder, editores, terminais) ----------------
 
-const OPEN_APPS: &[(&str, &str, &str, &[&str])] = &[
-    ("finder", "Finder", "finder", &["/System/Library/CoreServices/Finder.app"]),
-    ("vscode", "VS Code", "editor", &["/Applications/Visual Studio Code.app"]),
-    ("cursor", "Cursor", "editor", &["/Applications/Cursor.app"]),
-    ("zed", "Zed", "editor", &["/Applications/Zed.app", "/Applications/Zed Preview.app"]),
-    ("windsurf", "Windsurf", "editor", &["/Applications/Windsurf.app"]),
-    ("sublime", "Sublime Text", "editor", &["/Applications/Sublime Text.app"]),
-    ("xcode", "Xcode", "editor", &["/Applications/Xcode.app"]),
-    ("terminal", "Terminal", "terminal", &["/System/Applications/Utilities/Terminal.app"]),
-    ("iterm", "iTerm", "terminal", &["/Applications/iTerm.app"]),
-    ("warp", "Warp", "terminal", &["/Applications/Warp.app"]),
-    ("ghostty", "Ghostty", "terminal", &["/Applications/Ghostty.app"]),
-];
-
 #[derive(Serialize)]
 struct OpenTarget {
     id: &'static str,
     name: &'static str,
     kind: &'static str,
     app: String,
-    /// PNG do ícone real do app (data URL), extraído com NSWorkspace.
+    /// PNG do ícone real do app (data URL), extraído com NSWorkspace (só no macOS por enquanto).
     icon: Option<String>,
 }
 
@@ -1186,44 +1308,21 @@ fn b64(data: &[u8]) -> String {
     o
 }
 
-/// Extrai os ícones que faltam no cache (um osascript JXA para todos).
-fn ensure_icons(dir: &Path, apps: &[(String, String)]) {
-    let missing: Vec<&(String, String)> = apps.iter().filter(|(id, _)| !dir.join(format!("{id}.png")).exists()).collect();
-    if missing.is_empty() {
-        return;
-    }
-    let _ = std::fs::create_dir_all(dir);
-    let pairs: Vec<String> = missing.iter().map(|(id, app)| format!("[{:?},{:?}]", app, dir.join(format!("{id}.png")).display().to_string())).collect();
-    let js = format!(
-        "ObjC.import('AppKit'); [{}].forEach(function(p){{ var img = $.NSWorkspace.sharedWorkspace.iconForFile(p[0]); img.setSize($.NSMakeSize(64,64)); var rep = $.NSBitmapImageRep.imageRepWithData(img.TIFFRepresentation); var png = rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $()); png.writeToFileAtomically(p[1], true); }});",
-        pairs.join(",")
-    );
-    let _ = std::process::Command::new("osascript").args(["-l", "JavaScript", "-e", &js]).output();
-}
-
 #[tauri::command]
 async fn open_targets(app: State<'_, App>) -> R<Vec<OpenTarget>> {
-    let found: Vec<(&OpenTargetSpec, String)> = OPEN_APPS.iter().filter_map(|t| t.3.iter().find(|p| Path::new(p).exists()).map(|p| (t, p.to_string()))).collect();
+    let found: Vec<(os::AppSpec, String)> = os::open_apps().into_iter().filter_map(|t| t.found().map(|p| p.display().to_string()).map(|p| (t, p))).collect();
     let dir = app.file("icons");
-    ensure_icons(&dir, &found.iter().map(|(t, p)| (t.0.to_string(), p.clone())).collect::<Vec<_>>());
-    Ok(found
-        .into_iter()
-        .map(|(t, p)| OpenTarget { id: t.0, name: t.1, kind: t.2, icon: std::fs::read(dir.join(format!("{}.png", t.0))).ok().map(|b| format!("data:image/png;base64,{}", b64(&b))), app: p })
-        .collect())
+    os::ensure_icons(&dir, &found.iter().map(|(t, p)| (t.id.to_string(), p.clone())).collect::<Vec<_>>());
+    Ok(found.into_iter().map(|(t, p)| OpenTarget { id: t.id, name: t.name, kind: t.kind, icon: std::fs::read(dir.join(format!("{}.png", t.id))).ok().map(|b| format!("data:image/png;base64,{}", b64(&b))), app: p }).collect())
 }
-
-type OpenTargetSpec = (&'static str, &'static str, &'static str, &'static [&'static str]);
 
 #[tauri::command]
 fn open_in(target: String, path: String) -> R<()> {
-    let t = OPEN_APPS.iter().find(|t| t.0 == target).ok_or("app desconhecido")?;
-    let app_path = t.3.iter().find(|p| Path::new(p).exists()).ok_or("app não instalado")?;
-    let mut c = std::process::Command::new("open");
-    if t.0 != "finder" {
-        c.args(["-a", app_path]);
-    }
-    c.arg(&path).spawn().map_err(e)?;
-    Ok(())
+    let t = os::open_apps().into_iter().find(|t| t.id == target).ok_or("app desconhecido")?;
+    let app_path = t.found().cloned().ok_or("app não instalado")?;
+    // Só caminho absoluto real; terminal só recebe pasta ([`kabul_core::open::open_in_path`]).
+    let path = kabul_core::open::open_in_path(&path, t.kind).map_err(e)?;
+    os::open_in(&t, &app_path, &path.display().to_string())
 }
 
 // ---------------- checks do PR ----------------
@@ -1237,7 +1336,7 @@ struct PrChecks {
 #[tauri::command]
 async fn pr_checks(app: State<'_, App>, workspace_id: String) -> R<PrChecks> {
     let (w, _) = ws_repo(&app, &workspace_id)?;
-    let (checks, message) = kabul_core::gitops::pr_checks(&w).map_err(e)?;
+    let (checks, message) = kabul_core::gitops::pr_checks_cached(&w).map_err(e)?;
     Ok(PrChecks { checks, message })
 }
 
@@ -1249,20 +1348,38 @@ fn app_settings_get(app: State<App>) -> AppSettings {
 }
 
 #[tauri::command]
-fn app_settings_save(app: State<App>, settings: AppSettings) -> R<()> {
+fn app_settings_save(handle: AppHandle, app: State<App>, settings: AppSettings) -> R<()> {
     settings.apply_bin_overrides();
-    settings.save(&app.file("app-settings.json")).map_err(e)
+    settings.save(&app.file("app-settings.json")).map_err(e)?;
+    // Liga/desliga o ícone da barra de menus na hora.
+    tray::apply(&handle);
+    Ok(())
 }
 
 #[tauri::command]
-fn notify(app: State<App>, title: String, body: String) -> R<()> {
+fn notify(handle: AppHandle, app: State<App>, title: String, body: String) -> R<()> {
+    send_notification(&handle, &app, &title, &body)
+}
+
+/// Notificação do sistema (respeita Configurações › Notificações): conversas e alertas de uso da barra.
+fn send_notification(handle: &AppHandle, app: &App, title: &str, body: &str) -> R<()> {
     let s = app.app_settings();
     if !s.notifications {
         return Ok(());
     }
-    let esc = |x: &str| x.replace('\\', "\\\\").replace('"', "\\\"");
-    let sound = if s.sound && s.completion_sound != "none" { format!(" sound name \"{}\"", esc(&s.completion_sound)) } else { String::new() };
-    std::process::Command::new("osascript").args(["-e", &format!("display notification \"{}\" with title \"{}\"{sound}", esc(&body), esc(&title))]).spawn().map_err(e)?;
+    // Plugin de notificação do Tauri (macOS, Windows, Linux): a notificação sai em nome do app, então o
+    // clique traz o Kabul para a frente e o frontend abre a conversa que avisou (ver `useNotifyFocus`).
+    let sound = (s.sound && s.completion_sound != "none").then_some(s.completion_sound.as_str());
+    os::notify(handle, title, body, sound)
+}
+
+/// Contador no ícone do Dock/barra de tarefas (conversas que terminaram ou pedem atenção fora da tela).
+#[tauri::command]
+fn badge_set(handle: AppHandle, count: i64) -> R<()> {
+    if let Some(w) = handle.get_webview_window("main") {
+        // macOS e Linux: número no ícone. Windows: sem número (o Tauri usa ícone de sobreposição); ver docs/windows.md.
+        let _ = w.set_badge_count(if count > 0 { Some(count) } else { None });
+    }
     Ok(())
 }
 
@@ -1277,7 +1394,7 @@ struct Diagnostics {
 async fn diagnostics() -> Diagnostics {
     let checks = kabul_core::diagnostics::run();
     let report = kabul_core::diagnostics::report(&checks);
-    let redacted = kabul_core::diagnostics::redact(&report, &std::env::var("HOME").unwrap_or_default(), &std::env::var("USER").unwrap_or_default(), &kabul_core::machine::computer_name());
+    let redacted = kabul_core::diagnostics::redact(&report, &kabul_core::paths::home().display().to_string(), &kabul_core::machine::user_name(), &kabul_core::machine::computer_name());
     Diagnostics { checks, report, redacted }
 }
 
@@ -1304,20 +1421,19 @@ async fn machine_info() -> kabul_core::machine::MachineInfo {
     kabul_core::machine::info()
 }
 
-/// Toca um som do sistema ("Test" do som de conclusão). Só macOS por enquanto (ver docs/windows.md).
+/// Toca o som de conclusão ("Testar" nas configurações).
 #[tauri::command]
 fn sound_play(name: String) -> R<()> {
-    if name == "none" || name.contains('/') || name.contains("..") {
-        return Ok(());
-    }
-    std::process::Command::new("afplay").arg(format!("/System/Library/Sounds/{name}.aiff")).spawn().map_err(e)?;
-    Ok(())
+    os::play_sound(&name)
 }
 
 #[tauri::command]
 fn open_external(target: String) -> R<()> {
-    std::process::Command::new("open").arg(&target).spawn().map_err(e)?;
-    Ok(())
+    // Links vêm de texto de fora (agente, Linear, PR): só web e e-mail ([`kabul_core::open`]).
+    if !kabul_core::open::external_url_ok(&target) {
+        return Err(format!("link não aberto (só http, https e mailto): {}", target.chars().take(80).collect::<String>()));
+    }
+    os::open_external(target.trim())
 }
 
 #[tauri::command]
@@ -1326,33 +1442,26 @@ async fn transcribe(audio: Vec<u8>, ext: String) -> R<String> {
 }
 
 #[tauri::command]
-async fn pick_folder() -> R<Option<String>> {
-    osascript_choose("POSIX path of (choose folder with prompt \"Repositório git\")")
+async fn pick_folder(handle: AppHandle) -> R<Option<String>> {
+    os::pick(&handle, true)
 }
 
 #[tauri::command]
-async fn pick_file() -> R<Option<String>> {
-    osascript_choose("POSIX path of (choose file with prompt \"Anexar ao chat\")")
-}
-
-fn osascript_choose(script: &str) -> R<Option<String>> {
-    let o = std::process::Command::new("osascript").args(["-e", script]).output().map_err(e)?;
-    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-    Ok((o.status.success() && !s.is_empty()).then_some(s))
+async fn pick_file(handle: AppHandle) -> R<Option<String>> {
+    os::pick(&handle, false)
 }
 
 fn shellexpand(p: &str) -> String {
-    match (p.strip_prefix("~"), std::env::var("HOME")) {
-        (Some(rest), Ok(h)) => format!("{h}{rest}"),
-        _ => p.to_string(),
-    }
+    kabul_core::paths::expand_tilde(p)
 }
 
-
 fn main() {
-    // Aberto pelo Dock o app herda um ambiente mínimo: carrega o do shell de login (PATH, LANG...).
-    let home = std::env::var("HOME").unwrap_or_default();
-    kabul_core::shell_env::apply(&[format!("{home}/.local/bin"), format!("{home}/.cargo/bin"), format!("{home}/.opencode/bin"), format!("{home}/.lmstudio/bin"), "/opt/homebrew/bin".into(), "/usr/local/bin".into()]);
+    // Aberto pelo Dock o app herda um ambiente mínimo: carrega o do shell de login (PATH, LANG...). No
+    // Windows, o PATH do usuário e do sistema direto do registro (CLIs instalados depois do login).
+    let home = kabul_core::paths::home();
+    let mut extra = vec![home.join(".local").join("bin"), home.join(".cargo").join("bin")];
+    extra.extend(harness::extra_bin_dirs());
+    kabul_core::shell_env::apply(&extra.iter().map(|p| p.display().to_string()).collect::<Vec<_>>());
     if let Some(t) = kabul_core::github::get_token() {
         std::env::set_var("GH_TOKEN", t);
     }
@@ -1365,29 +1474,219 @@ fn main() {
     AppSettings::load(&home.join("app-settings.json")).apply_bin_overrides();
     let prefix = AppSettings::load(&home.join("app-settings.json")).branch_prefix();
     let store = Store::open(file, root, prefix).expect("abrindo o estado do Kabul");
-    tauri::Builder::default()
-        .manage(App { home, store: Mutex::new(store), chats: Default::default(), logins: Default::default(), terms: Default::default(), gh_login: Default::default(), account_logins: Default::default(), seq: Default::default() })
+    let builder = tauri::Builder::default();
+    // Seletor de arquivos pelo plugin fora do macOS (lá continua o osascript).
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_dialog::init());
+    builder
+        .manage(App {
+            home,
+            store: Mutex::new(store),
+            chats: Default::default(),
+            logins: Default::default(),
+            terms: Default::default(),
+            gh_login: Default::default(),
+            account_logins: Default::default(),
+            seq: Default::default(),
+            kept: Default::default(),
+            chat_meta: Default::default(),
+        })
         .manage(remote::Remote::default())
+        .manage(tray::TrayState::default())
+        .manage(updates::Pending::default())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             remote::autostart(app.handle());
+            tray::apply(app.handle());
+            tray::start_loop(app.handle());
+            updates::autocheck(app.handle());
+            // Links kabul:// (abrir workspace/conversa, criar workspace): repassados ao frontend.
+            use tauri_plugin_deep_link::DeepLinkExt;
+            let h = app.handle().clone();
+            if let Ok(Some(urls)) = app.deep_link().get_current() {
+                let first: Vec<String> = urls.iter().map(|u| u.to_string()).collect();
+                let h2 = h.clone();
+                // O frontend ainda está carregando: entrega depois que a janela abrir.
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    for u in first {
+                        let _ = h2.emit("deep-link", u);
+                    }
+                });
+            }
+            app.deep_link().on_open_url(move |ev| {
+                for u in ev.urls() {
+                    let _ = h.emit("deep-link", u.to_string());
+                }
+                if let Some(w) = h.get_webview_window("main") {
+                    let _ = w.set_focus();
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            repos_list, repo_add, repo_clone, repo_remove, repo_settings, repo_settings_save,
-            workspaces_list, workspace_create, workspace_update, workspace_rename_branch, workspace_archive, workspace_unarchive,
-            resources_get, external_sessions, workspace_diff, workspace_changes, workspace_file_diff, workspace_files, workspace_read_file, workspace_busy, workspaces_stats, workspace_pr, workspace_auto_branch,
-            comments_list, comment_add, comment_update, checkpoints_list, checkpoint_create, checkpoint_restore, attach_file, attach_bytes,
-            script_run, script_stop, term_open, term_input, term_resize, term_close, term_capture,
-            models_list, local_overview, local_endpoint_save, local_endpoint_remove, local_pull, local_start, harness_install, registry_get, registry_save, registry_reset,
-            chat_start, chat_send, chat_approve, chat_stop, history_list, history_load, history_save, history_delete, history_search, slash_commands,
-            sessions_list, open_targets, open_in, pr_checks, mcp_list, mcp_add, repo_branches, repo_prs, workspace_create_ex, cloud_start, cloud_poll, term_run, teleport, mirror_status, mirror_start, mirror_stop, workspace_fork,
-            accounts_list, account_add, account_update, account_login, account_code, account_cancel,
-            github_status, github_login, github_cancel, github_switch, github_token, github_token_set, github_repo_access, linear_status, linear_connect, linear_disconnect, linear_issues, workspace_from_issue, auth_status, auth_login, auth_code, auth_cancel, app_settings_get, app_settings_save, notify, open_external, transcribe, pick_folder, pick_file, sound_play, machine_info, diagnostics, open_devtools, app_quit,
-            gitcmds::git_status, gitcmds::git_pull, gitcmds::git_push, gitcmds::workspace_discard, gitcmds::workspace_grep, gitcmds::pr_view, gitcmds::pr_merge, gitcmds::pr_ready, gitcmds::pr_edit,
-            gitcmds::checks_rerun, gitcmds::check_log, gitcmds::sections_list, gitcmds::section_save, gitcmds::section_delete, gitcmds::repo_update, gitcmds::repo_env_layers, gitcmds::gh_repos, gitcmds::repo_clone_to, gitcmds::repo_quick_start, gitcmds::git_identity, gitcmds::git_identity_set, gitcmds::repo_remotes, gitcmds::pr_open_url,
-            remote::kabuld_status, remote::kabuld_start, remote::kabuld_stop, remote::kabuld_call
+            repos_list,
+            repo_add,
+            repo_clone,
+            repo_remove,
+            repo_settings,
+            repo_settings_save,
+            workspaces_list,
+            workspace_create,
+            workspace_update,
+            workspace_rename_branch,
+            workspace_archive,
+            workspace_unarchive,
+            resources_get,
+            external_sessions,
+            workspace_diff,
+            workspace_changes,
+            workspace_file_diff,
+            workspace_files,
+            workspace_read_file,
+            workspace_busy,
+            workspaces_stats,
+            workspace_pr,
+            workspace_auto_branch,
+            comments_list,
+            comment_add,
+            comment_update,
+            checkpoints_list,
+            checkpoint_create,
+            checkpoint_restore,
+            attach_file,
+            attach_bytes,
+            script_run,
+            script_stop,
+            term_open,
+            term_input,
+            term_resize,
+            term_close,
+            term_capture,
+            models_list,
+            local_overview,
+            local_endpoint_save,
+            local_endpoint_remove,
+            local_pull,
+            local_start,
+            harness_install,
+            registry_get,
+            registry_save,
+            registry_reset,
+            chat_start,
+            chat_send,
+            chat_approve,
+            chat_stop,
+            chat_interrupt,
+            chat_processes,
+            processes_keep,
+            processes_kept,
+            process_kill,
+            docker_stop,
+            history_list,
+            history_load,
+            history_save,
+            history_delete,
+            history_search,
+            slash_commands,
+            sessions_list,
+            open_targets,
+            open_in,
+            pr_checks,
+            chat_set_mode,
+            mcp_list,
+            mcp_add,
+            mcp_shared,
+            mcp_weigh,
+            mcp_set_shared,
+            mcp_export_agy,
+            repo_branches,
+            repo_prs,
+            workspace_create_ex,
+            cloud_start,
+            cloud_poll,
+            term_run,
+            teleport,
+            mirror_status,
+            mirror_start,
+            mirror_stop,
+            workspace_fork,
+            accounts_list,
+            account_add,
+            account_update,
+            account_login,
+            account_code,
+            account_cancel,
+            github_status,
+            github_login,
+            github_cancel,
+            github_switch,
+            github_token,
+            github_token_set,
+            github_repo_access,
+            linear_status,
+            linear_connect,
+            linear_disconnect,
+            linear_issues,
+            workspace_from_issue,
+            auth_status,
+            auth_login,
+            auth_code,
+            auth_cancel,
+            app_settings_get,
+            app_settings_save,
+            notify,
+            badge_set,
+            open_external,
+            transcribe,
+            pick_folder,
+            pick_file,
+            sound_play,
+            machine_info,
+            diagnostics,
+            open_devtools,
+            app_quit,
+            gitcmds::git_status,
+            gitcmds::git_pull,
+            gitcmds::git_push,
+            gitcmds::workspace_discard,
+            gitcmds::workspace_grep,
+            gitcmds::pr_view,
+            gitcmds::pr_merge,
+            gitcmds::pr_ready,
+            gitcmds::pr_edit,
+            gitcmds::checks_rerun,
+            gitcmds::check_log,
+            gitcmds::sections_list,
+            gitcmds::section_save,
+            gitcmds::section_delete,
+            gitcmds::repo_update,
+            gitcmds::repo_env_layers,
+            gitcmds::gh_repos,
+            gitcmds::repo_clone_to,
+            gitcmds::repo_quick_start,
+            gitcmds::git_identity,
+            gitcmds::git_identity_set,
+            gitcmds::repo_remotes,
+            gitcmds::pr_open_url,
+            remote::kabuld_status,
+            remote::kabuld_start,
+            remote::kabuld_stop,
+            remote::kabuld_call,
+            tray::usage_overview,
+            tray::usage_refresh,
+            tray::usage_csv,
+            tray::usage_csv_save,
+            tray::agents_running,
+            tray::tray_action,
+            tray::tray_hide,
+            updates::app_version,
+            updates::update_check,
+            updates::update_install
         ])
-        .menu(|app| menu::build(app))
+        .menu(menu::build)
         .on_menu_event(|app, ev| menu::on_event(app, ev.id().as_ref()))
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o Kabul");

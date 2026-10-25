@@ -10,6 +10,7 @@ use crate::auth::Principal;
 use crate::bus::Bus;
 use crate::sessions::Status;
 use anyhow::{bail, Context, Result};
+use kabul_core::governor::{Admission, Governor};
 use kabul_core::harness::{Event, HarnessKind, Running};
 use kabul_core::transcript::{handoff_prompt, Author, Entry, EntryKind, HandoffInput, Transcript};
 use serde::Serialize;
@@ -17,14 +18,25 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 /// O processo do agente (no app: `harness::Running`; nos testes: um falso).
 pub trait AgentProc: Send {
     fn send(&self, text: &str) -> Result<()>;
     fn approve(&self, request_id: &str, allow: bool, tool: &str, always: bool) -> Result<()>;
     fn kill(&mut self) -> Result<()>;
+    /// "Parar": interrompe só o turno pelo protocolo do agente (a sessão continua). Padrão: encerrar.
+    fn interrupt(&mut self) -> Result<()> {
+        self.kill()
+    }
+    /// Processo do agente (prioridade de segundo plano).
+    fn pid(&self) -> Option<u32> {
+        None
+    }
 }
+
+/// Recria o agente de um chat encerrado por ociosidade, retomando a sessão (`resume`).
+pub type Respawn = Box<dyn Fn(&ChatMeta, Option<String>) -> Result<(Box<dyn AgentProc>, Receiver<Event>)> + Send + Sync>;
 
 impl AgentProc for Running {
     fn send(&self, text: &str) -> Result<()> {
@@ -35,6 +47,12 @@ impl AgentProc for Running {
     }
     fn kill(&mut self) -> Result<()> {
         Running::kill(self)
+    }
+    fn interrupt(&mut self) -> Result<()> {
+        Running::interrupt(self)
+    }
+    fn pid(&self) -> Option<u32> {
+        Running::pid(self)
     }
 }
 
@@ -90,6 +108,10 @@ pub struct ChatView {
     pub detail: Option<String>,
     pub queue: Vec<Queued>,
     pub pending: Vec<PendingApproval>,
+    /// A próxima mensagem espera vaga (limite de agentes simultâneos).
+    pub waiting_slot: bool,
+    /// Agente encerrado por ociosidade; volta (retomando a sessão) no próximo envio.
+    pub suspended: bool,
 }
 
 struct ChatState {
@@ -103,12 +125,14 @@ struct ChatState {
     agent: Box<dyn AgentProc>,
     /// Geração do agente: eventos de um agente já trocado são ignorados.
     gen: u64,
+    slot_wait: bool,
+    suspended: bool,
 }
 
 impl ChatState {
     fn view(&self) -> ChatView {
         let detail = self.pending.first().map(|p| format!("Pede aprovação: {}", p.tool));
-        ChatView { meta: self.meta.clone(), status: self.status, detail, queue: self.queue.iter().cloned().collect(), pending: self.pending.clone() }
+        ChatView { meta: self.meta.clone(), status: self.status, detail, queue: self.queue.iter().cloned().collect(), pending: self.pending.clone(), waiting_slot: self.slot_wait, suspended: self.suspended }
     }
 }
 
@@ -116,6 +140,10 @@ pub struct ChatHub {
     bus: Bus,
     chats: Mutex<HashMap<String, Arc<Mutex<ChatState>>>>,
     seq: AtomicU64,
+    /// Limite de agentes simultâneos, fila "aguardando vaga", foco e ociosos.
+    pub governor: Arc<Governor>,
+    me: Weak<ChatHub>,
+    respawn: Mutex<Option<Respawn>>,
 }
 
 fn author_of(e: &Entry) -> Value {
@@ -127,8 +155,116 @@ fn author_of(e: &Entry) -> Value {
 }
 
 impl ChatHub {
+    /// Sem auto-referência: retomar um chat suspenso não funciona (use [`ChatHub::new_arc`]).
     pub fn new(bus: Bus) -> Self {
-        Self { bus, chats: Mutex::new(HashMap::new()), seq: AtomicU64::new(0) }
+        Self { bus, chats: Mutex::new(HashMap::new()), seq: AtomicU64::new(0), governor: Arc::new(Governor::new(kabul_core::governor::Config::from_env())), me: Weak::new(), respawn: Mutex::new(None) }
+    }
+
+    pub fn new_arc(bus: Bus) -> Arc<Self> {
+        Arc::new_cyclic(|me| Self { me: me.clone(), ..Self::new(bus) })
+    }
+
+    /// Como recriar o agente de um chat suspenso (o hub do kabuld instala).
+    pub fn set_respawn(&self, f: Respawn) {
+        *self.respawn.lock().unwrap() = Some(f);
+    }
+
+    /// Estado da governança para o frontend (`agents_status`) e o evento `agents-status`.
+    pub fn emit_agents(&self) {
+        self.bus.emit("agents-status", serde_json::to_value(self.governor.status()).unwrap_or_default(), None, None);
+    }
+
+    /// Chats que ganharam vaga: a mensagem que esperava sai agora (fora do lock de quem liberou).
+    pub fn start_granted(&self, ids: Vec<String>) {
+        if ids.is_empty() {
+            return;
+        }
+        for id in ids {
+            let Ok(st) = self.get(&id) else {
+                self.start_granted(self.governor.remove(&id));
+                continue;
+            };
+            let mut st = st.lock().unwrap();
+            if !st.slot_wait {
+                continue;
+            }
+            match st.queue.pop_front() {
+                Some(q) => {
+                    self.bus.emit("chat-queue", json!({"chat_id": st.meta.id, "queue": st.queue}), Some(st.meta.workspace_id.clone()), None);
+                    if let Err(e) = self.dispatch(&mut st, q) {
+                        self.emit(&st, json!({"type": "error", "message": format!("{e:#}")}));
+                        st.status = Status::Idle;
+                        let more = self.governor.release(&id);
+                        drop(st);
+                        self.start_granted(more);
+                    }
+                }
+                None => {
+                    st.slot_wait = false;
+                    let more = self.governor.release(&id);
+                    drop(st);
+                    self.start_granted(more);
+                }
+            }
+        }
+        self.emit_agents();
+    }
+
+    /// Workspace em foco: passa na frente na fila; os agentes dos outros ficam com prioridade baixa.
+    pub fn set_focus(&self, ws: Option<String>) {
+        self.governor.set_focus(ws.clone());
+        if self.governor.config().nice_background {
+            let pids: Vec<(u32, bool)> = self.chats.lock().unwrap().values().filter_map(|c| c.try_lock().ok().and_then(|c| c.agent.pid().map(|p| (p, ws.is_some() && ws.as_deref() != Some(c.meta.workspace_id.as_str()))))).collect();
+            std::thread::spawn(move || {
+                for (pid, bg) in pids {
+                    kabul_core::governor::set_background(pid, bg);
+                }
+            });
+        }
+        self.emit_agents();
+    }
+
+    /// Encerra os agentes parados há mais que o limite (o chat continua; retoma no próximo envio).
+    pub fn reap_idle(&self) -> usize {
+        self.reap_idle_at(std::time::Instant::now())
+    }
+
+    pub fn reap_idle_at(&self, now: std::time::Instant) -> usize {
+        let mut n = 0;
+        for id in self.governor.idle_at(now) {
+            let Ok(st) = self.get(&id) else {
+                self.governor.remove(&id);
+                continue;
+            };
+            let mut st = st.lock().unwrap();
+            if st.status != Status::Idle || !st.queue.is_empty() || st.suspended || st.slot_wait {
+                continue;
+            }
+            let _ = st.agent.kill();
+            st.gen += 1;
+            st.suspended = true;
+            self.governor.set_suspended(&id, true);
+            self.emit(&st, json!({"type": "suspended"}));
+            self.emit_status(&st);
+            n += 1;
+        }
+        if n > 0 {
+            self.emit_agents();
+        }
+        n
+    }
+
+    /// "Parar em lote" (painel Agentes).
+    pub fn interrupt_many(&self, ids: &[String]) -> Value {
+        let mut stopped = vec![];
+        let mut errors = vec![];
+        for id in ids {
+            match self.stop(id) {
+                Ok(()) => stopped.push(id.clone()),
+                Err(e) => errors.push(json!({"chat_id": id, "error": format!("{e:#}")})),
+            }
+        }
+        json!({"stopped": stopped, "errors": errors})
     }
 
     fn next(&self, p: &str) -> String {
@@ -160,7 +296,7 @@ impl ChatHub {
         }
         let mut transcript = Transcript { id: meta.id.clone(), workspace_id: meta.workspace_id.clone(), ..Default::default() };
         transcript.start_segment(meta.harness, &meta.model, None);
-        let st = ChatState { meta: meta.clone(), transcript, status: Status::Idle, queue: VecDeque::new(), pending: vec![], handoff: None, agent, gen: 0 };
+        let st = ChatState { meta: meta.clone(), transcript, status: Status::Idle, queue: VecDeque::new(), pending: vec![], handoff: None, agent, gen: 0, slot_wait: false, suspended: false };
         let view = st.view();
         let st = Arc::new(Mutex::new(st));
         self.chats.lock().unwrap().insert(meta.id.clone(), st.clone());
@@ -173,7 +309,7 @@ impl ChatHub {
     pub fn attach_external(&self, meta: ChatMeta, agent: Box<dyn AgentProc>) -> ChatView {
         let mut transcript = Transcript { id: meta.id.clone(), workspace_id: meta.workspace_id.clone(), ..Default::default() };
         transcript.start_segment(meta.harness, &meta.model, None);
-        let st = ChatState { meta: meta.clone(), transcript, status: Status::Idle, queue: VecDeque::new(), pending: vec![], handoff: None, agent, gen: 0 };
+        let st = ChatState { meta: meta.clone(), transcript, status: Status::Idle, queue: VecDeque::new(), pending: vec![], handoff: None, agent, gen: 0, slot_wait: false, suspended: false };
         let view = st.view();
         self.chats.lock().unwrap().insert(meta.id, Arc::new(Mutex::new(st)));
         view
@@ -182,7 +318,8 @@ impl ChatHub {
     /// Evento de um chat externo (o app já mostrou na própria tela).
     pub fn feed(&self, id: &str, ev: &Event) {
         if let Ok(st) = self.get(id) {
-            self.on_event(&mut st.lock().unwrap(), ev);
+            let granted = self.on_event(&mut st.lock().unwrap(), ev);
+            self.start_granted(granted);
         }
     }
 
@@ -221,13 +358,15 @@ impl ChatHub {
     fn pump(self: &Arc<Self>, id: String, gen: u64, events: Receiver<Event>) {
         let hub = self.clone();
         std::thread::spawn(move || {
-            for ev in events {
+            for ev in kabul_core::batch::coalesce(events, kabul_core::batch::frame()) {
                 let Ok(st) = hub.get(&id) else { return };
                 let mut st = st.lock().unwrap();
                 if st.gen != gen {
                     return;
                 }
-                hub.on_event(&mut st, &ev);
+                let granted = hub.on_event(&mut st, &ev);
+                drop(st);
+                hub.start_granted(granted);
             }
             if let Ok(st) = hub.get(&id) {
                 let mut st = st.lock().unwrap();
@@ -236,13 +375,19 @@ impl ChatHub {
                     st.pending.clear();
                     hub.emit(&st, json!({"type": "exited", "code": null}));
                     hub.emit_status(&st);
+                    let granted = hub.governor.release(&id);
+                    drop(st);
+                    hub.start_granted(granted);
                 }
             }
         });
     }
 
-    fn on_event(&self, st: &mut ChatState, ev: &Event) {
+    /// Aplica um evento; devolve os chats que ganharam vaga (o chamador os inicia sem este lock).
+    fn on_event(&self, st: &mut ChatState, ev: &Event) -> Vec<String> {
         st.transcript.apply(ev);
+        self.governor.touch(&st.meta.id);
+        let mut granted = vec![];
         let mut changed = false;
         match ev {
             Event::ApprovalRequest { request_id, tool, input } => {
@@ -254,6 +399,7 @@ impl ChatHub {
                 st.status = Status::Idle;
                 st.pending.clear();
                 changed = true;
+                granted = self.governor.release(&st.meta.id);
             }
             _ => {}
         }
@@ -269,10 +415,36 @@ impl ChatHub {
                 }
             }
         }
+        if !granted.is_empty() {
+            self.emit_agents();
+        }
+        granted
     }
 
     /// Entrega a mensagem ao agente agora (registra no transcript com autor).
     fn dispatch(&self, st: &mut ChatState, q: Queued) -> Result<()> {
+        // Vaga: acima do limite, a mensagem espera na frente da fila do chat.
+        if let Admission::Queued { position } = self.governor.request(&st.meta.id, &st.meta.workspace_id) {
+            st.queue.push_front(q);
+            st.slot_wait = true;
+            self.emit(st, json!({"type": "queued", "position": position, "limit": self.governor.config().limit}));
+            self.bus.emit("chat-queue", json!({"chat_id": st.meta.id, "queue": st.queue}), Some(st.meta.workspace_id.clone()), None);
+            self.emit_agents();
+            return Ok(());
+        }
+        if st.slot_wait {
+            st.slot_wait = false;
+            self.emit(st, json!({"type": "slot_acquired"}));
+        }
+        if st.suspended {
+            self.resume(st)?;
+        }
+        if self.governor.config().nice_background {
+            if let (Some(pid), Some(focus)) = (st.agent.pid(), self.governor.focus()) {
+                let bg = focus != st.meta.workspace_id;
+                std::thread::spawn(move || kabul_core::governor::set_background(pid, bg));
+            }
+        }
         st.transcript.user_message(&q.author.name, &q.author.device, &q.text, None);
         let seq = st.transcript.entries.last().map(|e| e.seq).unwrap_or(0);
         self.emit(st, json!({"type": "user_message", "id": q.id, "seq": seq, "text": q.text, "author": q.author}));
@@ -285,6 +457,24 @@ impl ChatHub {
         st.agent.send(&text)
     }
 
+    /// Recria o agente encerrado por ociosidade, retomando a sessão dele.
+    fn resume(&self, st: &mut ChatState) -> Result<()> {
+        let hub = self.me.upgrade().context("retomada indisponível")?;
+        let session = st.transcript.current().and_then(|s| s.agent_session.clone());
+        let (agent, rx) = {
+            let f = self.respawn.lock().unwrap();
+            let f = f.as_ref().context("retomada indisponível neste servidor")?;
+            f(&st.meta, session)?
+        };
+        st.agent = agent;
+        st.gen += 1;
+        st.suspended = false;
+        self.governor.set_suspended(&st.meta.id, false);
+        hub.pump(st.meta.id.clone(), st.gen, rx);
+        self.emit(st, json!({"type": "resumed"}));
+        Ok(())
+    }
+
     /// Manda (ou enfileira) uma mensagem. Devolve `queued: true` se foi para a fila.
     pub fn send(&self, id: &str, who: &Principal, text: &str) -> Result<Value> {
         let text = text.trim();
@@ -294,9 +484,13 @@ impl ChatHub {
         let st = self.get(id)?;
         let mut st = st.lock().unwrap();
         let q = Queued { id: self.next("m"), text: text.into(), author: who.into(), at: crate::auth::now() };
-        if st.status == Status::Idle && st.queue.is_empty() {
+        if st.status == Status::Idle && st.queue.is_empty() && !st.slot_wait {
             let qid = q.id.clone();
             self.dispatch(&mut st, q)?;
+            if st.slot_wait {
+                let position = self.governor.positions().iter().find(|(c, _)| c == id).map(|(_, p)| *p).unwrap_or(1);
+                return Ok(json!({"queued": true, "waiting_slot": true, "id": qid, "position": position}));
+            }
             return Ok(json!({"queued": false, "id": qid}));
         }
         let qid = q.id.clone();
@@ -346,25 +540,33 @@ impl ChatHub {
     pub fn stop(&self, id: &str) -> Result<()> {
         let st = self.get(id)?;
         let mut st = st.lock().unwrap();
-        st.agent.kill()?;
+        if !st.suspended {
+            st.agent.interrupt()?;
+        }
         st.status = Status::Idle;
         st.pending.clear();
         self.emit_status(&st);
+        let granted = self.governor.release(id);
+        drop(st);
+        self.start_granted(granted);
         Ok(())
     }
 
     /// Tira da lista um chat externo que acabou (sem matar: o processo é do app).
     pub fn close_external(&self, id: &str) {
         self.chats.lock().unwrap().remove(id);
+        self.start_granted(self.governor.remove(id));
     }
 
     /// Fecha o chat de vez.
     pub fn close(&self, id: &str) {
-        if let Some(c) = self.chats.lock().unwrap().remove(id) {
+        let removed = self.chats.lock().unwrap().remove(id);
+        if let Some(c) = removed {
             let mut c = c.lock().unwrap();
             let _ = c.agent.kill();
             c.gen += 1;
         }
+        self.start_granted(self.governor.remove(id));
     }
 
     /// Troca de modelo/harness/conta no mesmo chat: novo segmento + handoff no próximo envio.
@@ -398,11 +600,14 @@ impl ChatHub {
             st.agent = agent;
             st.status = Status::Idle;
             st.pending.clear();
+            st.suspended = false;
+            self.governor.set_suspended(id, false);
             let last = st.transcript.entries.last().map(|e| (author_of(e), e.kind.clone()));
             self.emit(&st, json!({"type": "handoff", "to": format!("{model} · {}", harness.label()), "entry": last.map(|(a, k)| json!({"author": a, "kind": k}))}));
             self.emit_status(&st);
             st.gen
         };
+        self.start_granted(self.governor.release(id));
         self.pump(id.to_string(), gen, events);
         let v = st.lock().unwrap().view();
         Ok(v)
@@ -459,7 +664,7 @@ pub mod tests {
     type Setup = (Arc<ChatHub>, String, Sender<Event>, Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<(String, bool)>>>);
 
     fn setup() -> Setup {
-        let hub = Arc::new(ChatHub::new(Bus::new()));
+        let hub = ChatHub::new_arc(Bus::new());
         let (tx, rx) = channel();
         let sent = Arc::new(Mutex::new(vec![]));
         let approvals = Arc::new(Mutex::new(vec![]));
@@ -513,7 +718,7 @@ pub mod tests {
 
     #[test]
     fn chat_externo_espelhado() {
-        let hub = Arc::new(ChatHub::new(Bus::new()));
+        let hub = ChatHub::new_arc(Bus::new());
         let sent = Arc::new(Mutex::new(vec![]));
         let approvals = Arc::new(Mutex::new(vec![]));
         let mut m = meta();
@@ -533,6 +738,78 @@ pub mod tests {
         hub.record_local_approval("chat-1", &dono, "r1", true);
         assert!(hub.approve("chat-1", &bia, "r1", true, false).unwrap_err().to_string().contains("aprovado por Dev"));
         assert!(approvals.lock().unwrap().is_empty(), "a aprovação do app já foi direto ao agente");
+    }
+
+    #[test]
+    fn limite_de_agentes_fila_aguardando_vaga() {
+        let bus = Bus::new();
+        let mut rx_bus = bus.subscribe();
+        let hub = ChatHub::new_arc(bus);
+        hub.governor.set_config(kabul_core::governor::Config { limit: Some(1), idle_minutes: None, nice_background: false });
+        let mk = |ws: &str| {
+            let (tx, rx) = channel();
+            let sent = Arc::new(Mutex::new(vec![]));
+            let mut m = meta();
+            m.workspace_id = ws.into();
+            let v = hub.start(m, Box::new(Fake { sent: sent.clone(), approvals: Default::default() }), rx);
+            (v.meta.id, tx, sent)
+        };
+        let (a, ta, sa) = mk("w1");
+        let (b, _tb, sb) = mk("w2");
+        let ana = person("d1", "Ana", Role::Owner);
+        assert_eq!(hub.send(&a, &ana, "um").unwrap()["queued"], false);
+        let r = hub.send(&b, &ana, "dois").unwrap();
+        assert_eq!((r["queued"].as_bool(), r["waiting_slot"].as_bool(), r["position"].as_u64()), (Some(true), Some(true), Some(1)));
+        assert!(sb.lock().unwrap().is_empty(), "b espera vaga");
+        assert!(hub.list(Some("w2"))[0].waiting_slot);
+        let st = hub.governor.status();
+        assert_eq!((st.running, st.queued.len()), (1, 1));
+        // Mensagem nova no chat em espera não fura a fila.
+        assert_eq!(hub.send(&b, &ana, "três").unwrap()["queued"], true);
+        ta.send(Event::TurnCompleted { result: None, input_tokens: None, output_tokens: None, cost_usd: None }).unwrap();
+        wait(|| sb.lock().unwrap().len() == 1);
+        assert_eq!(sb.lock().unwrap()[0], "dois");
+        assert_eq!(sa.lock().unwrap().len(), 1);
+        assert!(!hub.list(Some("w2"))[0].waiting_slot);
+        let mut kinds = vec![];
+        while let Ok(ev) = rx_bus.try_recv() {
+            if ev.channel == "chat-event" {
+                kinds.push(ev.payload["event"]["type"].as_str().unwrap_or_default().to_string());
+            }
+        }
+        assert!(kinds.iter().any(|k| k == "queued") && kinds.iter().any(|k| k == "slot_acquired"), "{kinds:?}");
+    }
+
+    #[test]
+    fn ocioso_encerrado_e_retomado() {
+        let hub = ChatHub::new_arc(Bus::new());
+        let respawned = Arc::new(Mutex::new(vec![]));
+        let (sent2, r2) = (Arc::new(Mutex::new(vec![])), respawned.clone());
+        let s2 = sent2.clone();
+        hub.set_respawn(Box::new(move |m, resume| {
+            r2.lock().unwrap().push((m.id.clone(), resume));
+            let (_tx, rx) = channel();
+            std::mem::forget(_tx);
+            Ok((Box::new(Fake { sent: s2.clone(), approvals: Default::default() }) as Box<dyn AgentProc>, rx))
+        }));
+        let (tx, rx) = channel();
+        let v = hub.start(meta(), Box::new(Fake { sent: Default::default(), approvals: Default::default() }), rx);
+        let id = v.meta.id;
+        tx.send(Event::SessionStarted { session_id: "sess-1".into(), model: None }).unwrap();
+        wait(|| hub.transcript(&id).unwrap()["transcript"]["segments"][0]["agent_session"] == "sess-1");
+        hub.governor.set_config(kabul_core::governor::Config { limit: None, idle_minutes: Some(1), nice_background: false });
+        // Sem esperar um minuto: ociosos calculados "daqui a 2 min".
+        let later = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        assert_eq!(hub.governor.idle_at(later), vec![id.clone()]);
+        assert_eq!(hub.reap_idle(), 0, "ainda não passou o tempo");
+        assert_eq!(hub.reap_idle_at(later), 1);
+        assert!(hub.list(None)[0].suspended);
+        assert_eq!(hub.reap_idle_at(later), 0, "já suspenso");
+        let ana = person("d1", "Ana", Role::Owner);
+        hub.send(&id, &ana, "voltei").unwrap();
+        assert_eq!(*respawned.lock().unwrap(), vec![(id.clone(), Some("sess-1".to_string()))]);
+        assert_eq!(*sent2.lock().unwrap(), vec!["voltei".to_string()]);
+        assert!(!hub.list(None)[0].suspended);
     }
 
     #[test]

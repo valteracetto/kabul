@@ -1,7 +1,19 @@
 import { transport } from "../transport";
 import type { Principal, WsTransport } from "../transport/websocket";
 import type { RunsOn } from "../components/RunsOn";
-import type { Model } from "../api";
+import type { Model, Repo, Section, Workspace } from "../api";
+
+/** Opções de início/troca de modelo (mesmas do app desktop). */
+export interface StartOpts { effort?: string | null; fast?: boolean; account?: string | null; plan?: boolean }
+export interface Account { id: string; provider: string; nickname: string; email: string | null; plan: string | null; default: boolean; logged_in: boolean | null }
+
+/** Conta de cada harness (`accounts::provider_of` no core). */
+export const ACCOUNT_PROVIDER: Record<string, string> = { claude: "claude", codex: "codex", antigravity: "agy", gemini: "gemini", opencode: "opencode", qwen: "qwen" };
+export const EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"];
+export const EFFORT_PT: Record<string, string> = { low: "Baixo", medium: "Médio", high: "Alto", xhigh: "Muito alto", max: "Máximo", ultra: "Ultra" };
+
+/** Versão e nome do kabuld (rota HTTP pública `/api/health`). */
+export const health = (): Promise<{ kabuld: boolean; name: string; version: string } | null> => fetch("/api/health").then((r) => r.json(), () => null).catch(() => null);
 
 export type Status = "working" | "waiting" | "idle";
 export interface Group { key: string; repo: string; workspace: string | null; workspace_id: string | null }
@@ -46,7 +58,18 @@ export const k = {
   termInput: (session: string, pane: string, data: string) => kcall<void>("term_input", { session, pane, data }),
   termKeys: (session: string, pane: string, keys: string[]) => kcall<void>("term_keys", { session, pane, keys }),
   termFit: (session: string, cols: number, rows: number) => kcall<void>("term_resize", { session, cols, rows, apply: true }),
-  chatStart: (workspaceId: string, model: Model, resume?: string) => kcall<ChatView>("chat_start", { workspaceId, model, resume }),
+  chatStart: (workspaceId: string, model: Model, resume?: string, o: StartOpts = {}) => kcall<ChatView>("chat_start", { workspaceId, model, resume, ...o }),
+  chatSwitch: (chatId: string, model: Model, o: StartOpts = {}) => kcall<ChatView>("chat_switch", { chatId, model, ...o }),
+  chatClose: (chatId: string) => kcall<void>("chat_close", { chatId }),
+  chatList: () => kcall<ChatView[]>("chat_list"),
+  repos: () => kcall<Repo[]>("repos_list"),
+  sections: () => kcall<Section[]>("sections_list"),
+  workspaceCreate: (repoId: string, title?: string) => kcall<Workspace>("workspace_create", { repoId, title }),
+  workspaceArchive: (id: string, archive: boolean) => kcall<Workspace>(archive ? "workspace_archive" : "workspace_unarchive", { id }),
+  workspaceUpdate: (id: string, patch: { pinned?: boolean; pin_order?: number | null; title?: string; section?: string }) => kcall<Workspace>("workspace_update", { id, patch }),
+  accounts: (provider: string) => kcall<Account[]>("accounts_list", { provider }),
+  accountDefault: (id: string) => kcall<void>("account_update", { id, makeDefault: true }),
+  cloudStart: (workspaceId: string, prompt: string) => kcall<{ tmux: string }>("cloud_start", { workspaceId, prompt }),
   external: () => kcall<import("../api").ExternalSessions>("external_sessions"),
   workspaces: () => kcall<import("../api").Workspace[]>("workspaces_list"),
   chatSend: (chatId: string, text: string) => kcall<{ queued: boolean; id: string; position?: number }>("chat_send", { chatId, text }),

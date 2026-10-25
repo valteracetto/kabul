@@ -1,0 +1,217 @@
+# Release: push a tag vX.Y.Z (or vX.Y.Z-beta.N) and this workflow
+#   1. checks that the tag matches every manifest (scripts/version.mjs check --tag) and drafts a
+#      GitHub Release whose notes are the CHANGELOG.md section of that version (git-cliff fallback);
+#   2. builds the desktop app with tauri-action: macOS aarch64 and x86_64 (.app, .dmg) and
+#      Windows x86_64 (.msi, NSIS .exe), uploading everything to the draft;
+#   3. when the key is configured, signs the update bundles and uploads latest.json (auto-update).
+# When a release is published, latest.json is also copied to the rolling `beta` release, which is the
+# endpoint of the beta update channel (stable reads releases/latest, which skips pre-releases).
+#
+# Secrets (all optional; whatever is missing is skipped):
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD  update signatures + latest.json
+#   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#   APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID         macOS signing + notarization
+#   WINDOWS_CERTIFICATE (base64 .pfx), WINDOWS_CERTIFICATE_PASSWORD Windows Authenticode signing
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build (e.g. v0.9.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  draft:
+    name: Draft release
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tag matches the manifests
+        run: node scripts/version.mjs check --tag "$TAG"
+      - id: meta
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: Release notes
+        run: |
+          if ! node scripts/release-notes.mjs "$TAG" > notes.md; then
+            echo "No CHANGELOG.md section for $TAG; generating with git-cliff."
+            npx --yes git-cliff@2 --latest --strip all > notes.md
+          fi
+          cat notes.md
+      - name: Create draft
+        id: create
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=false
+          case "$TAG" in *-*) pre=true ;; esac
+          id=$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
+            -f tag_name="$TAG" -f name="Kabul ${TAG#v}" -F body=@notes.md \
+            -F draft=true -F prerelease="$pre" --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: draft
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+          - name: macOS Intel
+            os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+          - name: Windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: msi,nsis
+    env:
+      # Owner/repo of the update endpoints compiled into the app (apps/desktop/src-tauri/src/updates.rs).
+      KABUL_UPDATE_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            apps/web/package-lock.json
+            apps/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install JS dependencies
+        shell: bash
+        run: npm ci --prefix apps/web && npm ci --prefix apps/desktop
+
+      # Optional signing: each block only runs when its secrets exist, and only then exports the
+      # variables Tauri reads (an empty APPLE_CERTIFICATE would make the build try to import it).
+      - name: Signing configuration
+        id: sign
+        shell: bash
+        env:
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          UPDATER_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          conf='{"bundle":{'
+          if [ -n "$UPDATER_KEY" ]; then
+            {
+              echo "TAURI_SIGNING_PRIVATE_KEY<<KABUL_EOF"; echo "$UPDATER_KEY"; echo "KABUL_EOF"
+              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$UPDATER_KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+            conf+='"createUpdaterArtifacts":true,'
+            echo "updater=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::TAURI_SIGNING_PRIVATE_KEY not set: building without update signatures or latest.json"
+            echo "updater=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+              {
+                echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE"
+                echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+                echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
+              } >> "$GITHUB_ENV"
+              if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+                { echo "APPLE_ID=$APPLE_ID"; echo "APPLE_PASSWORD=$APPLE_PASSWORD"; echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"; } >> "$GITHUB_ENV"
+              else
+                echo "::notice::Apple ID secrets not set: signed but not notarized"
+              fi
+            else
+              # Ad-hoc signature: Apple Silicon refuses to run unsigned binaries.
+              echo "::notice::Apple certificate not set: ad-hoc signature (Gatekeeper will warn)"
+              conf+='"macOS":{"signingIdentity":"-"},'
+            fi
+          fi
+          conf="${conf%,}}}"
+          echo "$conf" > apps/desktop/src-tauri/tauri.release.conf.json
+          cat apps/desktop/src-tauri/tauri.release.conf.json
+
+      - name: Windows certificate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) { Write-Output "::notice::WINDOWS_CERTIFICATE not set: unsigned installers"; exit 0 }
+          $pfx = Join-Path $env:RUNNER_TEMP "kabul.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $pass = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pass
+          Remove-Item $pfx
+          $path = "apps/desktop/src-tauri/tauri.release.conf.json"
+          $conf = Get-Content $path -Raw | ConvertFrom-Json
+          $win = @{ certificateThumbprint = $cert.Thumbprint; digestAlgorithm = "sha256"; timestampUrl = "http://timestamp.digicert.com" }
+          $conf.bundle | Add-Member -NotePropertyName windows -NotePropertyValue $win -Force
+          $conf | ConvertTo-Json -Depth 5 | Set-Content $path
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: npx tauri
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.conf.json
+          releaseId: ${{ needs.draft.outputs.release_id }}
+          includeUpdaterJson: ${{ steps.sign.outputs.updater == 'true' }}
+          updaterJsonPreferNsis: true
+
+  beta-channel:
+    name: Update the beta channel
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Copy latest.json to the rolling beta release
+        run: |
+          if [ "$RELEASE_TAG" = "beta" ]; then exit 0; fi
+          if ! gh release download "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" -p latest.json -D channel; then
+            echo "::notice::$RELEASE_TAG has no latest.json (no updater key at build time); beta channel unchanged"
+            exit 0
+          fi
+          if ! gh release view beta -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create beta -R "$GITHUB_REPOSITORY" --prerelease --target "${{ github.sha }}" \
+              --title "Beta channel" --notes "Update manifest of the beta channel (latest.json). Not a release: download Kabul from the versioned releases."
+          fi
+          gh release upload beta channel/latest.json -R "$GITHUB_REPOSITORY" --clobber

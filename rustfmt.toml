@@ -1,0 +1,4 @@
+max_width = 250
+use_small_heuristics = "Max"
+fn_call_width = 250
+chain_width = 250

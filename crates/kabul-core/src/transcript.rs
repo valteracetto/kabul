@@ -10,24 +10,62 @@ use serde_json::Value;
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Author {
     /// Pessoa (local ou, no futuro, um colaborador conectado). `device`: "mac", "celular", ...
-    User { name: String, device: String },
-    Agent { harness: HarnessKind, model: String },
+    User {
+        name: String,
+        device: String,
+    },
+    Agent {
+        harness: HarnessKind,
+        model: String,
+    },
     System,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EntryKind {
-    UserMessage { text: String, #[serde(default)] attachments: Vec<String> },
-    AssistantText { text: String },
-    Reasoning { text: String },
-    ToolCall { call_id: String, name: String, input: Value, output: Option<String>, is_error: bool },
-    Approval { request_id: String, tool: String, input: Value, decision: Option<String> },
+    UserMessage {
+        text: String,
+        #[serde(default)]
+        attachments: Vec<String>,
+    },
+    AssistantText {
+        text: String,
+    },
+    Reasoning {
+        text: String,
+    },
+    ToolCall {
+        call_id: String,
+        name: String,
+        input: Value,
+        output: Option<String>,
+        is_error: bool,
+    },
+    Approval {
+        request_id: String,
+        tool: String,
+        input: Value,
+        decision: Option<String>,
+    },
     /// Troca de LLM/harness no mesmo chat.
-    Handoff { from: Option<String>, to: String, summary: String },
-    TurnEnd { duration_ms: Option<u64>, input_tokens: Option<u64>, output_tokens: Option<u64>, cost_usd: Option<f64> },
-    Notice { text: String },
-    Error { text: String },
+    Handoff {
+        from: Option<String>,
+        to: String,
+        summary: String,
+    },
+    TurnEnd {
+        duration_ms: Option<u64>,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+        cost_usd: Option<f64>,
+    },
+    Notice {
+        text: String,
+    },
+    Error {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -51,12 +89,33 @@ pub struct Segment {
     pub started_seq: u64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transcript {
+    /// Versão do formato (ver `crate::schema`); ausente = 0. Leia com [`Transcript::from_json`].
+    #[serde(default)]
+    pub schema_version: u32,
     pub id: String,
     pub workspace_id: String,
     pub entries: Vec<Entry>,
     pub segments: Vec<Segment>,
+}
+
+impl Default for Transcript {
+    fn default() -> Self {
+        Self { schema_version: crate::schema::TRANSCRIPT, id: String::new(), workspace_id: String::new(), entries: vec![], segments: vec![] }
+    }
+}
+
+impl Transcript {
+    /// Lê um transcript gravado (ou recebido de outro kabuld), migrando formatos antigos.
+    /// Formato mais novo que este Kabul: lido no melhor esforço (campos novos ignorados).
+    pub fn from_json(text: &str) -> anyhow::Result<Self> {
+        let mut doc: Value = serde_json::from_str(text)?;
+        crate::schema::migrate(&mut doc, crate::schema::TRANSCRIPT, crate::schema::TRANSCRIPT_MIGRATIONS)?;
+        let mut t: Self = serde_json::from_value(doc)?;
+        t.schema_version = crate::schema::TRANSCRIPT;
+        Ok(t)
+    }
 }
 
 fn now() -> u64 {
@@ -94,10 +153,17 @@ impl Transcript {
         }
     }
 
-    /// Aplica um evento normalizado do harness atual.
+    /// Autor "agente" do segmento atual.
+    fn agent(&self) -> Option<Author> {
+        self.current().map(|seg| Author::Agent { harness: seg.harness, model: seg.model.clone() })
+    }
+
+    /// Aplica um evento normalizado do harness atual. Caminho quente (cada delta de texto passa
+    /// aqui): o autor só é montado quando uma entrada nova nasce.
     pub fn apply(&mut self, ev: &Event) {
-        let Some(seg) = self.current().cloned() else { return };
-        let agent = Author::Agent { harness: seg.harness, model: seg.model.clone() };
+        if self.current().is_none() {
+            return;
+        }
         match ev {
             Event::SessionStarted { session_id, .. } => {
                 if let Some(s) = self.segments.last_mut() {
@@ -105,19 +171,23 @@ impl Transcript {
                 }
             }
             Event::Text { text } => {
-                self.push(agent, EntryKind::AssistantText { text: text.clone() });
+                let a = self.agent().unwrap();
+                self.push(a, EntryKind::AssistantText { text: text.clone() });
             }
             Event::TextDelta { text } => match self.entries.last_mut() {
                 Some(Entry { kind: EntryKind::AssistantText { text: t }, .. }) => t.push_str(text),
                 _ => {
-                    self.push(agent, EntryKind::AssistantText { text: text.clone() });
+                    let a = self.agent().unwrap();
+                    self.push(a, EntryKind::AssistantText { text: text.clone() });
                 }
             },
             Event::Reasoning { text } if !text.trim().is_empty() => {
-                self.push(agent, EntryKind::Reasoning { text: text.clone() });
+                let a = self.agent().unwrap();
+                self.push(a, EntryKind::Reasoning { text: text.clone() });
             }
             Event::ToolUse { id, name, input } => {
-                self.push(agent, EntryKind::ToolCall { call_id: id.clone(), name: name.clone(), input: input.clone(), output: None, is_error: false });
+                let a = self.agent().unwrap();
+                self.push(a, EntryKind::ToolCall { call_id: id.clone(), name: name.clone(), input: input.clone(), output: None, is_error: false });
             }
             Event::ToolResult { id, output, is_error } => {
                 if let Some(EntryKind::ToolCall { output: o, is_error: e, .. }) = self.entries.iter_mut().rev().map(|x| &mut x.kind).find(|k| matches!(k, EntryKind::ToolCall { call_id, .. } if call_id == id)) {
@@ -126,7 +196,8 @@ impl Transcript {
                 }
             }
             Event::ApprovalRequest { request_id, tool, input } => {
-                self.push(agent, EntryKind::Approval { request_id: request_id.clone(), tool: tool.clone(), input: input.clone(), decision: None });
+                let a = self.agent().unwrap();
+                self.push(a, EntryKind::Approval { request_id: request_id.clone(), tool: tool.clone(), input: input.clone(), decision: None });
             }
             Event::TurnCompleted { input_tokens, output_tokens, cost_usd, .. } => {
                 self.push(Author::System, EntryKind::TurnEnd { duration_ms: None, input_tokens: *input_tokens, output_tokens: *output_tokens, cost_usd: *cost_usd });
@@ -166,7 +237,16 @@ pub fn handoff_prompt(h: &HandoffInput) -> String {
         .filter_map(|e| match (&e.author, &e.kind) {
             (Author::User { name, .. }, EntryKind::UserMessage { text, .. }) => Some(format!("**{name}:** {text}")),
             (Author::Agent { model, .. }, EntryKind::AssistantText { text }) => Some(format!("**Agente ({model}):** {text}")),
-            (_, EntryKind::ToolCall { name, output, is_error, .. }) => Some(format!("_(ferramenta {name}{})_", if *is_error { ", falhou" } else if output.is_some() { ", ok" } else { "" })),
+            (_, EntryKind::ToolCall { name, output, is_error, .. }) => Some(format!(
+                "_(ferramenta {name}{})_",
+                if *is_error {
+                    ", falhou"
+                } else if output.is_some() {
+                    ", ok"
+                } else {
+                    ""
+                }
+            )),
             _ => None,
         })
         .collect();
@@ -212,5 +292,17 @@ mod tests {
         assert!(p.contains("**dev:** corrija o login") && p.contains("**Agente (opus):** Corrigi.") && p.contains("_(ferramenta Edit, ok)_"));
         assert!(p.contains("dev/login") && p.contains("src/auth.ts") && p.contains("[LINEAR]-ENG-1.md"));
         assert_eq!(t.upto(2).len(), 1);
+        // Ida e volta pelo JSON mantém tudo e a versão.
+        assert_eq!(Transcript::from_json(&serde_json::to_string(&t).unwrap()).unwrap(), t);
+    }
+
+    #[test]
+    fn transcript_sem_versao_migra() {
+        let v0 = r#"{"id":"chat-1","workspace_id":"w1","entries":[{"seq":1,"at":5,"author":{"kind":"system"},"segment":0,"kind":{"type":"notice","text":"oi"}}],"segments":[]}"#;
+        let t = Transcript::from_json(v0).unwrap();
+        assert_eq!((t.schema_version, t.id.as_str(), t.entries.len()), (crate::schema::TRANSCRIPT, "chat-1", 1));
+        assert_eq!(Transcript::default().schema_version, crate::schema::TRANSCRIPT);
+        let novo = r#"{"schema_version":50,"id":"c","workspace_id":"w","entries":[],"segments":[],"futuro":1}"#;
+        assert_eq!(Transcript::from_json(novo).unwrap().id, "c");
     }
 }

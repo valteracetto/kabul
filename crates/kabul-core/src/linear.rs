@@ -1,9 +1,8 @@
-//! Linear: chave de API no Keychain do macOS e GraphQL (api.linear.app/graphql) via curl.
+//! Linear: chave de API no Keychain do macOS e GraphQL (api.linear.app/graphql) por HTTPS.
 //! O contexto da issue vai para `.context/[LINEAR]-<ID>.md` no workspace (arquivo Markdown com título, estado e descrição).
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::process::Command;
 
 const SERVICE: &str = "kabul-linear";
 
@@ -27,38 +26,43 @@ pub struct Issue {
     pub team: Option<String>,
 }
 
+/// Chave da API no cofre do sistema (Keychain, Credential Manager, Secret Service).
 pub fn get_key() -> Option<String> {
-    let o = Command::new("security").args(["find-generic-password", "-s", SERVICE, "-w"]).output().ok()?;
-    let k = String::from_utf8_lossy(&o.stdout).trim().to_string();
-    (o.status.success() && !k.is_empty()).then_some(k)
+    crate::secrets::get(SERVICE)
 }
 
+/// Grava a chave sem passá-la na linha de comando ([`crate::secrets`]; no macOS, [`crate::keychain`]).
 pub fn set_key(key: &str) -> Result<()> {
-    let o = Command::new("security").args(["add-generic-password", "-U", "-s", SERVICE, "-a", "kabul", "-w", key.trim()]).output()?;
-    if !o.status.success() {
-        bail!("Keychain: {}", String::from_utf8_lossy(&o.stderr).trim());
-    }
-    Ok(())
+    crate::secrets::set(SERVICE, key)
 }
 
 pub fn clear_key() {
-    let _ = Command::new("security").args(["delete-generic-password", "-s", SERVICE]).output();
+    crate::secrets::delete(SERVICE)
 }
 
 fn gql(query: &str, vars: Value) -> Result<Value> {
     let key = get_key().context("Linear não conectado")?;
     let body = json!({ "query": query, "variables": vars }).to_string();
-    let o = Command::new("curl").args(["-sS", "-m", "15", "https://api.linear.app/graphql", "-H", "content-type: application/json", "-H", &format!("authorization: {key}"), "--data-binary", "@-"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().and_then(|mut c| {
-        use std::io::Write;
-        c.stdin.take().unwrap().write_all(body.as_bytes())?;
-        c.wait_with_output()
-    })?;
-    let v: Value = serde_json::from_slice(&o.stdout).with_context(|| format!("resposta inválida do Linear: {}", String::from_utf8_lossy(&o.stderr)))?;
+    // HTTP no próprio processo: a chave vai no cabeçalho, nunca na linha de comando (`ps`).
+    let text = match ureq::post(GRAPHQL).timeout(std::time::Duration::from_secs(15)).set("content-type", "application/json").set("authorization", &key).send_string(&body) {
+        Ok(r) => r.into_string()?,
+        Err(ureq::Error::Status(code, r)) => {
+            let t = r.into_string().unwrap_or_default();
+            if serde_json::from_str::<Value>(&t).is_err() {
+                bail!("Linear respondeu {code}");
+            }
+            t
+        }
+        Err(e) => bail!("Linear: {e}"),
+    };
+    let v: Value = serde_json::from_str(&text).context("resposta inválida do Linear")?;
     if let Some(e) = v.get("errors").and_then(|e| e.get(0)) {
         bail!("Linear: {}", e.get("message").and_then(Value::as_str).unwrap_or("erro"));
     }
     Ok(v["data"].clone())
 }
+
+const GRAPHQL: &str = "https://api.linear.app/graphql";
 
 const FIELDS: &str = "id identifier title url description branchName priorityLabel state { name } assignee { name } team { key }";
 
@@ -87,7 +91,9 @@ pub fn viewer() -> Result<String> {
 pub fn issues(search: Option<&str>) -> Result<Vec<Issue>> {
     let d = match search.filter(|s| !s.trim().is_empty()) {
         Some(q) => gql(&format!("query($q: String!) {{ searchIssues(term: $q, first: 25) {{ nodes {{ {FIELDS} }} }} }}"), json!({ "q": q }))?["searchIssues"]["nodes"].clone(),
-        None => gql(&format!("query {{ viewer {{ assignedIssues(first: 40, filter: {{ state: {{ type: {{ nin: [\"completed\", \"canceled\"] }} }} }}, orderBy: updatedAt) {{ nodes {{ {FIELDS} }} }} }} }}"), json!({}))?["viewer"]["assignedIssues"]["nodes"].clone(),
+        None => gql(&format!("query {{ viewer {{ assignedIssues(first: 40, filter: {{ state: {{ type: {{ nin: [\"completed\", \"canceled\"] }} }} }}, orderBy: updatedAt) {{ nodes {{ {FIELDS} }} }} }} }}"), json!({}))?["viewer"]["assignedIssues"]
+            ["nodes"]
+            .clone(),
     };
     Ok(d.as_array().into_iter().flatten().filter_map(parse_issue).collect())
 }

@@ -155,11 +155,7 @@ pub fn running(procs: &[Proc], own: u32, now: u64, claude_live: &HashMap<u32, St
 
 /// `claude agents --json`: pid → id da sessão das sessões vivas.
 pub fn parse_claude_agents(json: &str) -> HashMap<u32, String> {
-    serde_json::from_str::<Vec<Value>>(json)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|v| Some((v.get("pid").and_then(|p| p.as_u64().or_else(|| p.as_str()?.parse().ok()))? as u32, v.get("sessionId")?.as_str()?.to_string())))
-        .collect()
+    serde_json::from_str::<Vec<Value>>(json).unwrap_or_default().iter().filter_map(|v| Some((v.get("pid").and_then(|p| p.as_u64().or_else(|| p.as_str()?.parse().ok()))? as u32, v.get("sessionId")?.as_str()?.to_string()))).collect()
 }
 
 fn mtime(p: &Path) -> i64 {
@@ -275,7 +271,15 @@ fn opencode_sessions(home: &Path, limit: usize) -> Vec<Recent> {
     let Ok(mut st) = c.prepare("select id, title, directory, time_updated from session where parent_id is null order by time_updated desc limit ?1") else { return vec![] };
     st.query_map([limit as i64], |r| {
         let cwd: Option<String> = r.get(2)?;
-        Ok(Recent { agent: "opencode".into(), id: r.get(0)?, title: clip(&r.get::<_, Option<String>>(1)?.unwrap_or_default()), repo: cwd.as_deref().and_then(|c| Path::new(c).file_name()).map(|n| n.to_string_lossy().into_owned()), branch: None, cwd, updated: r.get::<_, i64>(3)? / 1000 })
+        Ok(Recent {
+            agent: "opencode".into(),
+            id: r.get(0)?,
+            title: clip(&r.get::<_, Option<String>>(1)?.unwrap_or_default()),
+            repo: cwd.as_deref().and_then(|c| Path::new(c).file_name()).map(|n| n.to_string_lossy().into_owned()),
+            branch: None,
+            cwd,
+            updated: r.get::<_, i64>(3)? / 1000,
+        })
     })
     .map(|it| it.flatten().collect())
     .unwrap_or_default()
@@ -283,13 +287,24 @@ fn opencode_sessions(home: &Path, limit: usize) -> Vec<Recent> {
 
 fn agy_sessions(home: &Path, limit: usize) -> Vec<Recent> {
     let Some(c) = sqlite_ro(&home.join(".gemini/antigravity-cli/conversation_summaries.db")) else { return vec![] };
-    let Ok(mut st) = c.prepare("select conversation_id, title, preview, workspace_uris, cast(strftime('%s', last_modified_time) as integer) from conversation_summaries where parent_conversation_id = '' order by last_modified_time desc limit ?1") else { return vec![] };
+    let Ok(mut st) = c.prepare("select conversation_id, title, preview, workspace_uris, cast(strftime('%s', last_modified_time) as integer) from conversation_summaries where parent_conversation_id = '' order by last_modified_time desc limit ?1")
+    else {
+        return vec![];
+    };
     st.query_map([limit as i64], |r| {
         let uris: String = r.get(3)?;
         let cwd = uris.split([',', ';', '\n', '"', '[', ']']).map(str::trim).find(|u| u.starts_with("file://") || u.starts_with('/')).map(|u| u.trim_start_matches("file://").to_string());
         let title: String = r.get(1)?;
         let preview: String = r.get(2)?;
-        Ok(Recent { agent: "agy".into(), id: r.get(0)?, title: clip(if title.is_empty() { &preview } else { &title }), repo: cwd.as_deref().and_then(|c| Path::new(c).file_name()).map(|n| n.to_string_lossy().into_owned()), branch: None, cwd, updated: r.get::<_, Option<i64>>(4)?.unwrap_or(0) })
+        Ok(Recent {
+            agent: "agy".into(),
+            id: r.get(0)?,
+            title: clip(if title.is_empty() { &preview } else { &title }),
+            repo: cwd.as_deref().and_then(|c| Path::new(c).file_name()).map(|n| n.to_string_lossy().into_owned()),
+            branch: None,
+            cwd,
+            updated: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
+        })
     })
     .map(|it| it.flatten().collect())
     .unwrap_or_default()
@@ -298,7 +313,13 @@ fn agy_sessions(home: &Path, limit: usize) -> Vec<Recent> {
 /// Sessões recentes dos CLIs (mais novas primeiro), sem as que já são conversas do Kabul.
 pub fn recent(home: &Path, limit: usize, known: &HashSet<String>) -> Vec<Recent> {
     let mut v: Vec<Recent> = vec![];
-    let mut claude: Vec<PathBuf> = std::fs::read_dir(home.join(".claude/projects")).into_iter().flatten().flatten().flat_map(|d| std::fs::read_dir(d.path()).into_iter().flatten().flatten().map(|e| e.path())).filter(|p| p.extension().and_then(|x| x.to_str()) == Some("jsonl")).collect();
+    let mut claude: Vec<PathBuf> = std::fs::read_dir(home.join(".claude/projects"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .flat_map(|d| std::fs::read_dir(d.path()).into_iter().flatten().flatten().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("jsonl"))
+        .collect();
     claude.sort_by_key(|p| std::cmp::Reverse(mtime(p)));
     v.extend(claude.iter().take(limit).filter_map(|p| claude_session(p)));
     v.extend(newest_files(&home.join(".codex/sessions"), "jsonl", limit, 3).iter().filter_map(|p| codex_session(p)));
@@ -376,8 +397,12 @@ mod tests {
         let cp = home.join(".claude/projects/-w-repo");
         std::fs::create_dir_all(&cp).unwrap();
         std::fs::write(cp.join("aaaa-1111.jsonl"), include_str!("../tests/fixtures/ext_claude.jsonl")).unwrap();
-        std::fs::write(cp.join("bbbb-2222.jsonl"), r#"{"type":"user","cwd":"/w/repo","gitBranch":"","message":{"role":"user","content":[{"type":"text","text":"<system_instruction>x</system_instruction>"}]}}
-{"type":"user","cwd":"/w/repo","message":{"role":"user","content":"corrige o login no Safari"}}"#).unwrap();
+        std::fs::write(
+            cp.join("bbbb-2222.jsonl"),
+            r#"{"type":"user","cwd":"/w/repo","gitBranch":"","message":{"role":"user","content":[{"type":"text","text":"<system_instruction>x</system_instruction>"}]}}
+{"type":"user","cwd":"/w/repo","message":{"role":"user","content":"corrige o login no Safari"}}"#,
+        )
+        .unwrap();
         let cx = home.join(".codex/sessions/2026/10/24");
         std::fs::create_dir_all(&cx).unwrap();
         std::fs::write(cx.join("rollout-2026-10-24T10-00-00-cccc.jsonl"), include_str!("../tests/fixtures/ext_codex.jsonl")).unwrap();

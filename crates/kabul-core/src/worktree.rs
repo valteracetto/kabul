@@ -2,7 +2,6 @@
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::path::Path;
-use std::process::Command;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct Worktree {
@@ -14,7 +13,7 @@ pub struct Worktree {
 }
 
 fn git(repo: &Path, args: &[&str]) -> Result<String> {
-    let out = Command::new("git").arg("-C").arg(repo).args(args).output().context("falha ao executar git")?;
+    let out = crate::shell::command("git").arg("-C").arg(repo).args(args).output().context("falha ao executar git")?;
     if !out.status.success() {
         bail!("git {:?}: {}", args, String::from_utf8_lossy(&out.stderr).trim());
     }
@@ -53,9 +52,11 @@ pub fn list(repo: &Path) -> Result<Vec<Worktree>> {
 
 /// Cria worktree em `path` com branch nova `branch` a partir de `base` (ex.: `origin/main`).
 pub fn add(repo: &Path, path: &Path, branch: &str, base: Option<&str>) -> Result<()> {
+    anyhow::ensure!(crate::store::valid_branch(branch), "nome de branch inválido: {branch:?}");
     let p = path.to_string_lossy();
     let mut args = vec!["worktree", "add", "-b", branch, p.as_ref()];
     if let Some(b) = base {
+        anyhow::ensure!(!b.starts_with('-'), "base inválida: {b:?}");
         args.push(b);
     }
     git(repo, &args).map(|_| ())
@@ -89,7 +90,7 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("kabul-wt-{}", std::process::id()));
         let repo = tmp.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
-        let g = |a: &[&str]| assert!(Command::new("git").arg("-C").arg(&repo).args(a).output().unwrap().status.success(), "{a:?}");
+        let g = |a: &[&str]| assert!(crate::shell::command("git").arg("-C").arg(&repo).args(a).output().unwrap().status.success(), "{a:?}");
         g(&["init", "-q", "-b", "main"]);
         g(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"]);
         let wt = tmp.join("wt");

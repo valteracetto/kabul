@@ -7,6 +7,7 @@ import { IMonitor, IMoon, ISun, RepoMark } from "../icons";
 import { DEFAULT_PROMPTS, PROMPT_LABEL } from "../components/useGit";
 import { Row, Toggle, useAppSettings, useLocalPref } from "./settingsUi";
 import { applyZoom } from "../App";
+import { UpdatesSection } from "../components/Updates";
 import type { Route } from "../App";
 
 const SOUNDS = ["none", "Glass", "Ping", "Pop", "Purr", "Hero", "Submarine", "Funk", "Tink", "Bottle", "Frog", "Morse", "Sosumi", "Blow", "Basso"];
@@ -32,6 +33,19 @@ export function GeneralPage({ onError }: { onError: (e: string) => void }) {
       </Row>
       <Toggle s={s} save={save} k="show_resources" label="Mostrar uso de recursos na barra lateral" hint="Memória e CPU do Kabul e dos agentes; o detalhe abre com um clique" />
       <Toggle s={s} save={save} k="caffeinate" label="Manter o Mac acordado com agentes rodando" hint="Usa caffeinate enquanto houver uma sessão ativa" />
+      <Toggle s={s} save={save} k="tray" label="Ícone na barra de menus" hint="Limites e gasto de IA, agentes rodando e ações rápidas (bandeja no Windows)" />
+      <Row label="Avisar perto do limite" hint="Notifica quando uma janela de uso (5 h, semana, mês) passar disto" id="usage_alert_pct">
+        <select value={s.usage_alert_pct ?? 80} onChange={(e) => save({ ...s, usage_alert_pct: Number(e.target.value) })} data-testid="usage-alert-pct">
+          {[50, 70, 80, 90, 95].map((p) => <option key={p} value={p}>{p}%</option>)}
+        </select>
+      </Row>
+      <Row label="Orçamento de IA (US$)" hint="Avisa em 80% e em 100%; só conta o custo que o agente reporta" id="usage_budget">
+        <div className="row">
+          <input type="number" min={0} step={1} placeholder="por dia" defaultValue={s.usage_daily_budget ?? ""} style={{ width: 90 }} onBlur={(e) => save({ ...s, usage_daily_budget: e.target.value ? Number(e.target.value) : null })} data-testid="usage-daily-budget" />
+          <input type="number" min={0} step={1} placeholder="por mês" defaultValue={s.usage_monthly_budget ?? ""} style={{ width: 90 }} onBlur={(e) => save({ ...s, usage_monthly_budget: e.target.value ? Number(e.target.value) : null })} data-testid="usage-monthly-budget" />
+        </div>
+      </Row>
+      <Toggle s={s} save={save} k="usage_codexbar" label="Ler o CodexBar quando instalado" hint="Limites de mais provedores, status e créditos pelo CLI do CodexBar (opcional)" />
       <Toggle s={s} save={save} k="always_show_context" label="Sempre mostrar o uso de contexto" hint="Sem isso, o anel só aparece acima de 70%" />
       <Toggle s={s} save={save} k="auto_convert_long_text" label="Converter texto longo em anexo" hint="Colar mais de 5.000 caracteres vira um arquivo em .context/attachments" />
       <Toggle s={s} save={save} k="not_absolutely_right" label="Esconder “You're absolutely right!”" hint="Tira a frase do começo das respostas" />
@@ -83,6 +97,7 @@ export function AppearancePage() {
       <Row label="Fonte do terminal" hint="Vazio = Menlo"><input {...noSuggest} autoComplete="off" value={tfont} onChange={(e) => setTfont(e.target.value)} placeholder="ex.: JetBrains Mono" data-testid="term-font" /></Row>
       <Row label="Tamanho da fonte do terminal" hint="10 a 20 px; vale para terminais abertos depois"><input type="number" min={10} max={20} value={tsize} onChange={(e) => setTsize(String(Math.min(20, Math.max(10, Number(e.target.value) || 12))))} data-testid="term-size" style={{ width: 70 }} /></Row>
       <div className="term-preview" style={{ fontFamily: `${tfont ? `"${tfont}", ` : ""}Menlo, monospace`, fontSize: Number(tsize) }}>dev@mac kabul % echo $KABUL_PORT<br />41000</div>
+      <BigTerminalPreset />
     </div>
   );
 }
@@ -233,7 +248,7 @@ export function MiscPage({ repos, repoId, onError, onRoute, onChange }: { repos:
   );
 }
 
-/** Avançado: pasta de estado, executáveis dos agentes, scrollback do terminal. */
+/** Avançado: pasta de estado, executáveis dos agentes, scrollback do terminal e atualizações. */
 export function AdvancedPage({ onError }: { onError: (e: string) => void }) {
   const [s, save] = useAppSettings(onError);
   if (!s) return null;
@@ -249,8 +264,29 @@ export function AdvancedPage({ onError }: { onError: (e: string) => void }) {
       <Row label="Limite do scrollback do terminal" hint="Em MB; vale para terminais abertos depois">
         <input type="number" min={1} max={200} defaultValue={s.scrollback_mb ?? 10} onBlur={(e) => { const v = Math.max(1, Number(e.target.value) || 10); localStorage.setItem("kabul.term.scrollback", String(v)); save({ ...s, scrollback_mb: v }); }} style={{ width: 80 }} data-testid="scrollback" />
       </Row>
+      <UpdatesSection s={s} save={save} />
     </div>
   );
 }
 
 export type { AppSettings };
+
+/** Terminal grande (aba ⌘⇧T no centro): comando que já roda ao abrir a aba. */
+import { TERM_PRESETS, termPreset } from "../components/chatPrefs";
+export { TERM_PRESETS, termPreset };
+function BigTerminalPreset() {
+  const [k, setK] = useState(localStorage.getItem("kabul.bigTerminal.preset") ?? "none");
+  const [cmd, setCmd] = useState(localStorage.getItem("kabul.bigTerminal.command") ?? "");
+  useEffect(() => void localStorage.setItem("kabul.bigTerminal.preset", k), [k]);
+  useEffect(() => void localStorage.setItem("kabul.bigTerminal.command", cmd), [cmd]);
+  return (
+    <>
+      <Row label="Aba de terminal (⌘⇧T) abre com" hint="O comando roda assim que a aba abre, no worktree do workspace">
+        <select value={k} onChange={(e) => setK(e.target.value)} data-testid="term-preset">
+          <option value="none">Nada (só o shell)</option><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="agy">Gemini (Antigravity)</option><option value="opencode">OpenCode</option><option value="custom">Comando…</option>
+        </select>
+      </Row>
+      {k === "custom" && <Row label="Comando"><input {...noSuggest} autoComplete="off" value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder="ex.: npm run dev" data-testid="term-preset-cmd" /></Row>}
+    </>
+  );
+}

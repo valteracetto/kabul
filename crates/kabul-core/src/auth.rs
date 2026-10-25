@@ -11,7 +11,6 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use serde::Serialize;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::mpsc::{channel, Receiver};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -35,7 +34,7 @@ pub enum AuthEvent {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    crate::paths::home()
 }
 
 pub fn agy_token_path() -> PathBuf {
@@ -49,11 +48,7 @@ pub fn codex_auth_path() -> PathBuf {
 /// Lê só `loggedIn`/`authMethod` de `claude auth status --json`.
 pub fn parse_claude_status(json: &str) -> Option<AuthStatus> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
-    Some(AuthStatus {
-        logged_in: v.get("loggedIn")?.as_bool()?,
-        source: "claude auth status".into(),
-        method: v.get("authMethod").and_then(|m| m.as_str()).map(String::from),
-    })
+    Some(AuthStatus { logged_in: v.get("loggedIn")?.as_bool()?, source: "claude auth status".into(), method: v.get("authMethod").and_then(|m| m.as_str()).map(String::from) })
 }
 
 pub fn status(kind: HarnessKind) -> Result<AuthStatus> {
@@ -67,9 +62,11 @@ pub fn status(kind: HarnessKind) -> Result<AuthStatus> {
             let p = codex_auth_path();
             Ok(AuthStatus { logged_in: std::fs::metadata(&p).map(|m| m.is_file()).unwrap_or(false), source: p.display().to_string(), method: None })
         }
-        HarnessKind::OpenCode | HarnessKind::QwenCode | HarnessKind::GeminiCli | HarnessKind::Goose | HarnessKind::Cursor => Ok(AuthStatus { logged_in: kind.installed(), source: if kind.installed() { "instalado (credenciais do próprio CLI)".into() } else { "não instalado".into() }, method: None }),
+        HarnessKind::OpenCode | HarnessKind::QwenCode | HarnessKind::GeminiCli | HarnessKind::Goose | HarnessKind::Cursor => {
+            Ok(AuthStatus { logged_in: kind.installed(), source: if kind.installed() { "instalado (credenciais do próprio CLI)".into() } else { "não instalado".into() }, method: None })
+        }
         HarnessKind::Claude => {
-            let o = Command::new("claude").args(["auth", "status", "--json"]).output().context("claude auth status")?;
+            let o = crate::harness::CmdSpec::new("claude", ["auth", "status", "--json"]).command().output().context("claude auth status")?;
             parse_claude_status(&String::from_utf8_lossy(&o.stdout)).ok_or_else(|| anyhow!("saída inesperada de claude auth status"))
         }
     }
@@ -81,9 +78,11 @@ pub fn login_command(kind: HarnessKind) -> Vec<&'static str> {
         HarnessKind::Claude => vec!["claude", "auth", "login"],
         HarnessKind::Codex => vec!["codex", "login"],
         HarnessKind::OpenCode => vec!["opencode", "auth", "login"],
-        HarnessKind::QwenCode => vec!["qwen", "--auth"],
+        // `qwen auth` saiu (0.26.1: "Configure authentication (removed)") e `--auth` não existe; a conta
+        // vem de `--auth-type` + variáveis/`settings.json`, então o login abre o `qwen` interativo.
+        HarnessKind::QwenCode => vec!["qwen"],
         HarnessKind::GeminiCli => vec!["gemini"],
-        // A confirmar: `goose configure` e `cursor-agent login`.
+        // `goose configure` confirmado no --help (1.55); `cursor-agent login` a confirmar.
         HarnessKind::Goose => vec!["goose", "configure"],
         HarnessKind::Cursor => vec!["cursor-agent", "login"],
         // Sem subcomando de login: um print curto em modo plan dispara o OAuth se faltar token.
@@ -206,8 +205,10 @@ pub fn login_argv(argv: &[&str], kick: &[u8], env: &[(String, String)], check: L
     let pty = native_pty_system().openpty(PtySize { rows: 40, cols: 4000, pixel_width: 0, pixel_height: 0 })?;
     // Caminho completo (o app aberto pelo Finder pode não ter ~/.local/bin no PATH).
     let program = crate::harness::which(argv[0]).map(|p| p.display().to_string()).unwrap_or_else(|| argv[0].to_string());
-    let mut cmd = CommandBuilder::new(program);
-    cmd.args(&argv[1..]);
+    // No Windows, `claude.cmd` do npm vai pelo cmd (o CreateProcess não roda .cmd direto).
+    let spec = crate::term::pty::windows_batch(crate::harness::CmdSpec::new(&program, argv[1..].iter().copied()), cfg!(windows));
+    let mut cmd = CommandBuilder::new(&spec.program);
+    cmd.args(&spec.args);
     cmd.env("BROWSER", "true");
     for (k, v) in env {
         cmd.env(k, v);

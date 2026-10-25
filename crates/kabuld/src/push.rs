@@ -32,6 +32,21 @@ pub struct Push {
     subs: Mutex<Vec<Subscription>>,
 }
 
+const MAX_SUBS_PER_DEVICE: usize = 5;
+
+/// Serviços de Web Push dos navegadores (Chrome/Edge/Firefox/Safari) e os de `KABULD_PUSH_HOSTS`.
+const PUSH_HOSTS: &[&str] = &["fcm.googleapis.com", "updates.push.services.mozilla.com", ".push.services.mozilla.com", ".push.apple.com", ".notify.windows.com"];
+
+pub fn push_host_allowed(endpoint: &str) -> bool {
+    let Some(host) = endpoint.strip_prefix("https://").and_then(|r| r.split(['/', '?', '#']).next()) else { return false };
+    if host.contains('@') || host.contains(':') {
+        return false;
+    }
+    let host = host.to_lowercase();
+    let extra: Vec<String> = std::env::var("KABULD_PUSH_HOSTS").unwrap_or_default().split(',').map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect();
+    PUSH_HOSTS.iter().map(|s| s.to_string()).chain(extra).any(|p| if p.starts_with('.') { host.ends_with(&p) } else { host == p })
+}
+
 fn b64d(s: &str) -> Result<Vec<u8>> {
     URL_SAFE_NO_PAD.decode(s.trim_end_matches('=')).context("base64")
 }
@@ -73,10 +88,20 @@ impl Push {
         if !endpoint.starts_with("https://") {
             anyhow::bail!("endpoint de push precisa ser https");
         }
+        // O kabuld faz POST no endpoint: só serviços de push conhecidos (senão um convidado usaria o
+        // kabuld para chamar endereços internos da rede).
+        if !push_host_allowed(&endpoint) {
+            anyhow::bail!("serviço de push desconhecido");
+        }
         let s = Subscription { device_id: device_id.into(), endpoint, p256dh: sub["keys"]["p256dh"].as_str().context("p256dh")?.into(), auth: sub["keys"]["auth"].as_str().context("auth")?.into(), scope };
         build(&s, &self.keypair, &self.subject, b"teste")?; // valida as chaves agora
         let mut subs = self.subs.lock().unwrap();
         subs.retain(|x| x.endpoint != s.endpoint);
+        // Poucos navegadores por aparelho: as inscrições mais antigas saem.
+        while subs.iter().filter(|x| x.device_id == s.device_id).count() >= MAX_SUBS_PER_DEVICE {
+            let i = subs.iter().position(|x| x.device_id == s.device_id).unwrap();
+            subs.remove(i);
+        }
         subs.push(s);
         self.save(&subs)
     }
@@ -196,9 +221,20 @@ mod tests {
         // Inscrição sintética: chave do "navegador" gerada aqui.
         let ua = ES256KeyPair::generate();
         let ua_pub = URL_SAFE_NO_PAD.encode(ua.public_key().public_key().to_bytes_uncompressed());
-        let sub = json!({"endpoint": "https://push.example.test/abc", "keys": {"p256dh": ua_pub, "auth": URL_SAFE_NO_PAD.encode([7u8; 16])}});
+        let keys = json!({"p256dh": ua_pub, "auth": URL_SAFE_NO_PAD.encode([7u8; 16])});
+        let sub = json!({"endpoint": "https://fcm.googleapis.com/fcm/send/abc", "keys": keys});
         p.subscribe("d1", Scope::All, &sub).unwrap();
         assert_eq!(p.count(), 1);
+        // Segurança: o kabuld não faz POST para endereço qualquer (SSRF).
+        for bad in ["https://push.example.test/abc", "https://169.254.169.254/latest", "https://fcm.googleapis.com.evil.example/x", "https://x@fcm.googleapis.com/x", "https://fcm.googleapis.com:8443/x"] {
+            assert!(p.subscribe("d1", Scope::All, &json!({"endpoint": bad, "keys": keys})).is_err(), "{bad}");
+        }
+        assert!(push_host_allowed("https://web.push.apple.com/QW"));
+        for i in 0..10 {
+            p.subscribe("d2", Scope::All, &json!({"endpoint": format!("https://web.push.apple.com/{i}"), "keys": keys})).unwrap();
+        }
+        assert_eq!(p.subs.lock().unwrap().iter().filter(|s| s.device_id == "d2").count(), MAX_SUBS_PER_DEVICE);
+        p.unsubscribe_device("d2");
         assert!(p.subscribe("d1", Scope::All, &json!({"endpoint": "http://inseguro"})).is_err());
         let s = p.subs.lock().unwrap()[0].clone();
         let req = build(&s, &p.keypair, &p.subject, b"oi").unwrap();

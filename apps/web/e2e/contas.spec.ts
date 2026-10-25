@@ -36,10 +36,10 @@ test("várias contas: adicionar, entrar, renomear, padrão, remover; trocar no m
   await chat(page).getByTestId("composer").fill("primeira");
   await chat(page).getByTestId("composer").press("Enter");
   await expect(chat(page).locator(".turn-meta")).toHaveCount(1);
-  await chat(page).getByTestId("account-chip").click();
+  await page.getByTestId("account-chip").click();
   await expect(page.getByTestId("account-option")).toHaveCount(2);
   await page.getByTestId("account-option").filter({ hasText: "Padrão do sistema" }).click();
-  await expect(chat(page).getByTestId("account-chip")).toContainText("Padrão do sistema");
+  await expect(page.getByTestId("account-chip")).toContainText("Padrão do sistema");
   await chat(page).getByTestId("composer").fill("segunda");
   await chat(page).getByTestId("composer").press("Enter");
   await expect(chat(page).getByTestId("handoff")).toContainText("Trocou para a conta Padrão do sistema");

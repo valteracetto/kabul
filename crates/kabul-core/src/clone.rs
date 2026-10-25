@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct GhRepo {
@@ -47,7 +47,7 @@ pub fn parse_repo_list(json: &str) -> Vec<GhRepo> {
 }
 
 fn gh_out(env: &[(String, String)], args: &[&str]) -> Result<String> {
-    let o = Command::new(gh()).args(args).envs(env.iter().cloned()).output().context("gh não encontrado")?;
+    let o = crate::shell::command(gh()).args(args).envs(env.iter().cloned()).output().context("gh não encontrado")?;
     if !o.status.success() {
         bail!("{}", friendly_error(&String::from_utf8_lossy(&o.stderr)));
     }
@@ -103,7 +103,7 @@ pub fn friendly_error(stderr: &str) -> String {
     } else if s.contains("gh auth login") || s.contains("not logged") {
         "GitHub não conectado. Entre em Configurações › Contas › GitHub.".into()
     } else {
-        stderr.lines().filter(|l| !l.trim().is_empty()).last().unwrap_or("falha ao clonar").trim().to_string()
+        stderr.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("falha ao clonar").trim().to_string()
     }
 }
 
@@ -123,8 +123,8 @@ pub fn clone(input: &str, dir: &Path, env: &[(String, String)], mut on_progress:
     }
     std::fs::create_dir_all(dir).with_context(|| format!("criando {}", dir.display()))?;
     let helper = format!("credential.https://github.com.helper=!{} auth git-credential", gh());
-    let mut child = Command::new("git")
-        .args(["-c", "credential.helper=", "-c", &helper, "clone", "--progress", &url])
+    let mut child = crate::shell::command("git")
+        .args(["-c", "credential.helper=", "-c", &helper, "clone", "--progress", "--", &url])
         .arg(&dest)
         .envs(env.iter().cloned())
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -172,7 +172,7 @@ pub fn quick_start(dir: &Path, name: &str) -> Result<PathBuf> {
     std::fs::write(dest.join("README.md"), format!("# {name}\n"))?;
     std::fs::write(dest.join(".gitignore"), ".env*\n.DS_Store\nnode_modules/\ntarget/\n")?;
     for args in [vec!["init", "-q", "-b", "main"], vec!["add", "."], vec!["-c", "user.name=Kabul", "-c", "user.email=kabul@localhost", "commit", "-qm", "Início"]] {
-        let o = Command::new("git").arg("-C").arg(&dest).args(&args).output()?;
+        let o = crate::shell::command("git").arg("-C").arg(&dest).args(&args).output()?;
         if !o.status.success() {
             bail!("git {}: {}", args.join(" "), String::from_utf8_lossy(&o.stderr).trim());
         }
@@ -182,8 +182,8 @@ pub fn quick_start(dir: &Path, name: &str) -> Result<PathBuf> {
 
 /// `~` no começo vira a pasta do usuário.
 pub fn expand_home(p: &str) -> PathBuf {
-    match (p.strip_prefix('~'), std::env::var_os("HOME")) {
-        (Some(rest), Some(h)) => PathBuf::from(h).join(rest.trim_start_matches('/')),
+    match p.strip_prefix('~') {
+        Some(rest) if !crate::paths::home().as_os_str().is_empty() => crate::paths::home().join(rest.trim_start_matches(['/', '\\'])),
         _ => PathBuf::from(p),
     }
 }

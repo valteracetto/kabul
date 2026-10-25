@@ -76,7 +76,9 @@ test("pareamento por QR, lista agrupada com agente, onde roda e status, terminal
   // Notificações: sem HTTPS ou fora da Tela de Início, o app explica o que falta.
   await page.getByTestId("m-back").click();
   await page.getByTestId("m-menu").click();
-  await expect(page.getByTestId("m-push-why")).toContainText(/HTTPS|Tela de Início/);
+  // iPhone fora da Tela de Início explica o que falta; o Chrome do Android em localhost já permite ligar.
+  if (test.info().project.name === "android") await expect(page.getByTestId("m-push")).toBeEnabled();
+  else await expect(page.getByTestId("m-push-why")).toContainText(/HTTPS|Tela de Início/);
   await shot(page, "menu");
 });
 

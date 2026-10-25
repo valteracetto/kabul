@@ -4,10 +4,9 @@
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::path::Path;
-use std::process::Command;
 
 fn git(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
-    let o = Command::new("git").arg("-C").arg(dir).args(args).envs(env.iter().copied()).output().context("git")?;
+    let o = crate::shell::command("git").arg("-C").arg(dir).args(args).envs(env.iter().copied()).output().context("git")?;
     if !o.status.success() {
         bail!("git {}: {}", args.join(" "), String::from_utf8_lossy(&o.stderr).trim());
     }

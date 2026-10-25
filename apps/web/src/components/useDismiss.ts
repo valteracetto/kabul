@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { logicallyContains } from "./Floating";
 
 /**
  * Popovers, menus e dropdowns abertos fecham ao clicar fora (o clique segue para o alvo, sem ser
@@ -13,7 +14,8 @@ export function useDismiss(ref: RefObject<HTMLElement | null>, open: boolean, cl
     if (!open) return;
     const me = Symbol("popover");
     stack.push(me);
-    const inside = (t: EventTarget | null) => !!t && [ref.current, extra?.current].some((el) => el?.contains(t as Node));
+    // Portais do <Floating> contam como dentro da âncora (o popover não fica no DOM do dono).
+    const inside = (t: EventTarget | null) => !!t && [ref.current, extra?.current].some((el) => logicallyContains(el, t as Node));
     // Fase de captura: um stopPropagation em outro lugar não impede o fechamento.
     const down = (e: PointerEvent | MouseEvent) => !inside(e.target) && closeRef.current("outside");
     const key = (e: KeyboardEvent) => {

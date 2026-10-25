@@ -26,17 +26,17 @@ pub struct SessionSummary {
 }
 
 fn dir(root: &Path, ws: &str) -> PathBuf {
-    root.join("sessions").join(ws.replace(['/', '.'], "_"))
+    root.join("sessions").join(ws.replace(['/', '\\', '.'], "_"))
 }
 
 pub fn save(root: &Path, r: &SessionRecord) -> Result<()> {
     let d = dir(root, &r.workspace_id);
     std::fs::create_dir_all(&d)?;
-    std::fs::write(d.join(format!("{}.json", r.id.replace(['/', '.'], "_"))), serde_json::to_vec(r)?).context("salvando sessão")
+    std::fs::write(d.join(format!("{}.json", r.id.replace(['/', '\\', '.'], "_"))), serde_json::to_vec(r)?).context("salvando sessão")
 }
 
 pub fn load(root: &Path, ws: &str, id: &str) -> Result<SessionRecord> {
-    Ok(serde_json::from_slice(&std::fs::read(dir(root, ws).join(format!("{}.json", id.replace(['/', '.'], "_"))))?)?)
+    Ok(serde_json::from_slice(&std::fs::read(dir(root, ws).join(format!("{}.json", id.replace(['/', '\\', '.'], "_"))))?)?)
 }
 
 pub fn list(root: &Path, ws: &str) -> Vec<SessionSummary> {
@@ -66,7 +66,7 @@ pub fn agent_sessions(root: &Path) -> std::collections::HashSet<String> {
 }
 
 pub fn delete(root: &Path, ws: &str, id: &str) -> Result<()> {
-    std::fs::remove_file(dir(root, ws).join(format!("{}.json", id.replace(['/', '.'], "_")))).context("apagando sessão")
+    std::fs::remove_file(dir(root, ws).join(format!("{}.json", id.replace(['/', '\\', '.'], "_")))).context("apagando sessão")
 }
 
 /// Busca texto nas sessões de todos os workspaces (para ⌘K): (workspace, sessão, título, trecho).
@@ -78,7 +78,7 @@ pub fn search(root: &Path, q: &str) -> Vec<(String, String, String, String)> {
             let Some(r) = std::fs::read(f.path()).ok().and_then(|b| serde_json::from_slice::<SessionRecord>(&b).ok()) else { continue };
             let text = r.items.to_string();
             if let Some(i) = text.to_lowercase().find(&q) {
-                let start = text.char_indices().map(|(i, _)| i).filter(|&j| j <= i.saturating_sub(30)).last().unwrap_or(0);
+                let start = text.char_indices().map(|(i, _)| i).rfind(|&j| j <= i.saturating_sub(30)).unwrap_or(0);
                 let snippet: String = text[start..].chars().take(90).collect();
                 out.push((r.workspace_id.clone(), r.id.clone(), r.title.clone(), snippet));
             }
@@ -89,17 +89,12 @@ pub fn search(root: &Path, q: &str) -> Vec<(String, String, String, String)> {
 
 /// `/comandos`: embutidos do harness + `.claude/commands/*.md` do repo e do usuário.
 pub fn slash_commands(workspace: &Path) -> Vec<(String, String)> {
-    let mut v: Vec<(String, String)> = [
-        ("/compact", "resumir a conversa para liberar contexto"),
-        ("/clear", "nova conversa (mantém o workspace)"),
-        ("/review", "revisar as mudanças do workspace"),
-        ("/init", "gerar CLAUDE.md/AGENTS.md do projeto"),
-        ("/plan", "alternar plan mode"),
-    ]
-    .iter()
-    .map(|(a, b)| (a.to_string(), b.to_string()))
-    .collect();
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let mut v: Vec<(String, String)> =
+        [("/compact", "resumir a conversa para liberar contexto"), ("/clear", "nova conversa (mantém o workspace)"), ("/review", "revisar as mudanças do workspace"), ("/init", "gerar CLAUDE.md/AGENTS.md do projeto"), ("/plan", "alternar plan mode")]
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
+    let home = crate::paths::home();
     for d in [workspace.join(".claude/commands"), home.join(".claude/commands")] {
         for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
             let p = e.path();

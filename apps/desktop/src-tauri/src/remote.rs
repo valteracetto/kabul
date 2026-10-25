@@ -121,6 +121,9 @@ impl kabuld::chat::AgentProc for Shared {
     fn kill(&mut self) -> anyhow::Result<()> {
         self.0.lock().unwrap().kill()
     }
+    fn interrupt(&mut self) -> anyhow::Result<()> {
+        self.0.lock().unwrap().interrupt()
+    }
 }
 
 fn hub(handle: &AppHandle) -> Option<Arc<kabuld::hub::Hub>> {

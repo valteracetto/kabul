@@ -5,7 +5,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct RunScript {
@@ -30,6 +29,10 @@ pub struct Scripts {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
+    /// Versão do formato (ver `crate::schema`); ausente = 0. Arquivos compartilhados no repo não
+    /// são regravados: a migração acontece na leitura.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<u32>,
     #[serde(default)]
     pub scripts: Scripts,
     /// Arquivos ignorados pelo git a copiar para o worktree novo (além de `.worktreeinclude` e `.env*`).
@@ -117,6 +120,16 @@ pub fn parse_env(text: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Lê um `settings.toml` aplicando as migrações do formato (ver `crate::schema`).
+pub fn parse_toml(text: &str) -> Option<Settings> {
+    let t: toml::Value = toml::from_str(text).ok()?;
+    let mut doc = serde_json::to_value(t).ok()?;
+    if let crate::schema::Outcome::Newer { found } = crate::schema::migrate(&mut doc, crate::schema::REPO_SETTINGS, crate::schema::REPO_SETTINGS_MIGRATIONS).ok()? {
+        eprintln!("kabul: settings.toml no formato v{found} (este Kabul entende até v{}); lido no melhor esforço", crate::schema::REPO_SETTINGS);
+    }
+    serde_json::from_value(doc).ok()
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Layer {
     pub name: String,
@@ -129,6 +142,7 @@ pub fn merge(lo: Settings, hi: Settings) -> Settings {
     let mut run = lo.scripts.run;
     run.extend(hi.scripts.run);
     Settings {
+        schema_version: hi.schema_version.max(lo.schema_version),
         scripts: Scripts { setup: hi.scripts.setup.or(lo.scripts.setup), archive: hi.scripts.archive.or(lo.scripts.archive), run_mode: hi.scripts.run_mode.or(lo.scripts.run_mode), run },
         file_include_globs: if hi.file_include_globs.is_empty() { lo.file_include_globs } else { hi.file_include_globs },
         target_branch: hi.target_branch.or(lo.target_branch),
@@ -136,7 +150,11 @@ pub fn merge(lo: Settings, hi: Settings) -> Settings {
         remote: hi.remote.or(lo.remote),
         delete_branch_on_archive: hi.delete_branch_on_archive.or(lo.delete_branch_on_archive),
         archive_on_merge: hi.archive_on_merge.or(lo.archive_on_merge),
-        env: { let mut e = lo.env; e.extend(hi.env); e },
+        env: {
+            let mut e = lo.env;
+            e.extend(hi.env);
+            e
+        },
         prompts: Prompts::merge(lo.prompts, hi.prompts),
         preview_url: hi.preview_url.or(lo.preview_url),
     }
@@ -145,25 +163,37 @@ pub fn merge(lo: Settings, hi: Settings) -> Settings {
 /// Cada camada lida (nome, settings) — para mostrar herança no ambiente por escopo.
 pub fn load_layers(repo: &Path, default_branch: &str) -> Vec<(String, Settings)> {
     let d = dir_for(repo);
-    let shared = Command::new("git").arg("-C").arg(repo).args(["show", &format!("origin/{default_branch}:{d}/settings.toml")]).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).or_else(|| std::fs::read_to_string(repo.join(format!("{d}/settings.toml"))).ok());
+    let shared = crate::shell::command("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["show", &format!("origin/{default_branch}:{d}/settings.toml")])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .or_else(|| std::fs::read_to_string(repo.join(format!("{d}/settings.toml"))).ok());
     let local = std::fs::read_to_string(repo.join(format!("{d}/settings.local.toml"))).ok();
-    [("repo", shared), ("repo local", local)].into_iter().map(|(n, t)| (n.to_string(), t.and_then(|t| toml::from_str(&t).ok()).unwrap_or_default())).collect()
+    [("repo", shared), ("repo local", local)].into_iter().map(|(n, t)| (n.to_string(), t.and_then(|t| parse_toml(&t)).unwrap_or_default())).collect()
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    crate::paths::home()
 }
 
 fn dir_for(repo: &Path) -> String {
     let legacy = crate::compat::legacy_dir();
-    if repo.join(".kabul").is_dir() || !repo.join(&legacy).is_dir() { ".kabul".into() } else { legacy }
+    if repo.join(".kabul").is_dir() || !repo.join(&legacy).is_dir() {
+        ".kabul".into()
+    } else {
+        legacy
+    }
 }
 
 /// Lê as camadas e devolve settings efetivos + quais arquivos foram encontrados.
 pub fn load(repo: &Path, default_branch: &str) -> (Settings, Vec<Layer>) {
     let d = dir_for(repo);
     let shared_rel = format!("{d}/settings.toml");
-    let remote = Command::new("git").arg("-C").arg(repo).args(["show", &format!("origin/{default_branch}:{shared_rel}")]).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    let remote = crate::shell::command("git").arg("-C").arg(repo).args(["show", &format!("origin/{default_branch}:{shared_rel}")]).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
     let layers: Vec<(String, PathBuf, Option<String>)> = vec![
         ("usuário".into(), home().join(".kabul/settings.toml"), None),
         (if remote.is_some() { format!("repo (origin/{default_branch})") } else { "repo".into() }, repo.join(&shared_rel), remote),
@@ -176,7 +206,7 @@ pub fn load(repo: &Path, default_branch: &str) -> (Settings, Vec<Layer>) {
         let text = content.or_else(|| std::fs::read_to_string(&path).ok());
         info.push(Layer { name, path: path.display().to_string(), found: text.is_some() });
         if let Some(t) = text {
-            if let Ok(layer) = toml::from_str::<Settings>(&t) {
+            if let Some(layer) = parse_toml(&t) {
                 s = merge(s, layer);
             }
         }
@@ -188,7 +218,8 @@ pub fn load(repo: &Path, default_branch: &str) -> (Settings, Vec<Layer>) {
 pub fn save_local(repo: &Path, s: &Settings) -> anyhow::Result<PathBuf> {
     let p = repo.join(format!("{}/settings.local.toml", dir_for(repo)));
     std::fs::create_dir_all(p.parent().unwrap())?;
-    std::fs::write(&p, toml::to_string_pretty(s)?)?;
+    let s = Settings { schema_version: Some(crate::schema::REPO_SETTINGS), ..s.clone() };
+    std::fs::write(&p, toml::to_string_pretty(&s)?)?;
     Ok(p)
 }
 
@@ -231,12 +262,40 @@ mod tests {
         assert_eq!(parse_env("# x\nexport A=1\nB=\"dois\"\n1X=ruim\nC D=ruim\nE='tres'"), vec![("A".into(), "1".into()), ("B".into(), "dois".into()), ("E".into(), "tres".into())]);
         let s = AppSettings::default();
         assert_eq!((s.completion_sound.as_str(), s.merge_method.as_str(), s.scrollback_mb, s.rename_ws_on_branch), ("Glass", "squash", 10, true));
+        assert_eq!((s.auto_update, s.update_channel.as_str()), (true, "stable"));
+    }
+
+    #[test]
+    fn versao_dos_formatos() {
+        let tmp = std::env::temp_dir().join(format!("kabul-set-mig-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        // app-settings.json de antes do versionamento: mantém as escolhas, ganha a versão e backup.
+        let f = tmp.join("app-settings.json");
+        std::fs::write(&f, r#"{"merge_method":"rebase","sound":false}"#).unwrap();
+        let s = AppSettings::load(&f);
+        assert_eq!((s.schema_version, s.merge_method.as_str(), s.sound, s.auto_update), (crate::schema::APP_SETTINGS, "rebase", false, true));
+        assert!(tmp.join("app-settings.json.v0.bak").is_file());
+        AppSettings { schema_version: 0, ..s }.save(&f).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
+        assert_eq!(saved["schema_version"], crate::schema::APP_SETTINGS);
+        // settings.toml sem versão e de versão futura (campo desconhecido é ignorado).
+        let s = parse_toml("[scripts]\nsetup = \"npm i\"\n").unwrap();
+        assert_eq!((s.schema_version, s.scripts.setup.as_deref()), (Some(crate::schema::REPO_SETTINGS), Some("npm i")));
+        let s = parse_toml("schema_version = 42\ncoisa_nova = 1\n[scripts]\nsetup = \"x\"\n").unwrap();
+        assert_eq!((s.schema_version, s.scripts.setup.as_deref()), (Some(42), Some("x")));
+        let p = save_local(&tmp, &Settings::default()).unwrap();
+        assert!(std::fs::read_to_string(p).unwrap().contains(&format!("schema_version = {}", crate::schema::REPO_SETTINGS)));
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }
 
 /// Configurações do app (não do repo): JSON em `<estado>/app-settings.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppSettings {
+    /// Versão do formato (ver `crate::schema`); ausente = 0. `save` grava sempre a atual.
+    #[serde(default)]
+    pub schema_version: u32,
     /// `github` (usuário do `gh`), `user` ($USER) ou `custom`.
     #[serde(default = "d_prefix_type")]
     pub branch_prefix_type: String,
@@ -340,6 +399,46 @@ pub struct AppSettings {
     /// Limite do scrollback do terminal, em MB (padrão 10).
     #[serde(default = "d_scrollback")]
     pub scrollback_mb: u32,
+    /// Backend dos terminais: `tmux`, `pty` ou vazio (automático: PTY no Windows, tmux onde houver).
+    /// Vale ao reabrir o app (vira `KABUL_TERMINAL`).
+    #[serde(default)]
+    pub terminal_backend: Option<String>,
+    /// Shell do terminal (vazio = padrão do sistema; no Windows `pwsh`, `powershell`, `cmd` ou `git-bash`).
+    /// Vira `KABUL_SHELL`.
+    #[serde(default)]
+    pub shell: Option<String>,
+
+    // ---- Uso e limites ----
+    /// Ícone do Kabul na barra de menus (macOS) / bandeja (Windows).
+    #[serde(default = "d_true")]
+    pub tray: bool,
+    /// Avisa quando uma janela de limite passar disto (%).
+    #[serde(default = "d_alert_pct")]
+    pub usage_alert_pct: u32,
+    /// Orçamento diário/mensal em US$ (vazio = sem alerta).
+    #[serde(default)]
+    pub usage_daily_budget: Option<f64>,
+    #[serde(default)]
+    pub usage_monthly_budget: Option<f64>,
+    /// Lê o CodexBar CLI quando instalado (limites de mais provedores, status e créditos).
+    #[serde(default = "d_true")]
+    pub usage_codexbar: bool,
+
+    // ---- Atualização ----
+    /// Procura e baixa atualizações do Kabul sozinho (Configurações › Avançado).
+    #[serde(default = "d_true")]
+    pub auto_update: bool,
+    /// Canal de atualização: `stable` (padrão) ou `beta`.
+    #[serde(default = "d_stable")]
+    pub update_channel: String,
+}
+
+fn d_alert_pct() -> u32 {
+    80
+}
+
+fn d_stable() -> String {
+    "stable".into()
 }
 
 fn d_clone_dir() -> String {
@@ -391,13 +490,16 @@ impl Default for AppSettings {
 
 impl AppSettings {
     pub fn load(file: &Path) -> Self {
-        std::fs::read_to_string(file).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+        let mut s: Self = crate::schema::load_json(file, crate::schema::APP_SETTINGS, crate::schema::APP_SETTINGS_MIGRATIONS).and_then(|(doc, _)| serde_json::from_value(doc).ok()).unwrap_or_default();
+        s.schema_version = crate::schema::APP_SETTINGS;
+        s
     }
     pub fn save(&self, file: &Path) -> anyhow::Result<()> {
         if let Some(d) = file.parent() {
             std::fs::create_dir_all(d)?;
         }
-        std::fs::write(file, serde_json::to_vec_pretty(self)?)?;
+        let s = Self { schema_version: crate::schema::APP_SETTINGS, ..self.clone() };
+        std::fs::write(file, serde_json::to_vec_pretty(&s)?)?;
         Ok(())
     }
     pub fn env_for(&self, harness: &str) -> Vec<(String, String)> {
@@ -413,6 +515,12 @@ impl AppSettings {
                 None => std::env::remove_var(var),
             }
         }
+        // Só define: sem valor, vale o que veio do ambiente (testes, linha de comando).
+        for (var, v) in [("KABUL_TERMINAL", &self.terminal_backend), ("KABUL_SHELL", &self.shell)] {
+            if let Some(v) = v.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+                std::env::set_var(var, v);
+            }
+        }
     }
 
     /// Prefixo efetivo da branch.
@@ -420,12 +528,12 @@ impl AppSettings {
         match self.branch_prefix_type.as_str() {
             "custom" if !self.branch_prefix_custom.trim().is_empty() => self.branch_prefix_custom.trim().trim_end_matches('/').to_string(),
             "none" => String::new(),
-            "github" => Command::new("gh").args(["api", "user", "-q", ".login"]).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(user),
+            "github" => crate::shell::command("gh").args(["api", "user", "-q", ".login"]).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(user),
             _ => user(),
         }
     }
 }
 
 fn user() -> String {
-    std::env::var("KABUL_BRANCH_PREFIX").or_else(|_| std::env::var("USER")).unwrap_or_else(|_| "kabul".into())
+    std::env::var("KABUL_BRANCH_PREFIX").or_else(|_| std::env::var("USER")).or_else(|_| std::env::var("USERNAME")).unwrap_or_else(|_| "kabul".into())
 }

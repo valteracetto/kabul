@@ -5,7 +5,8 @@ type P = SVGProps<SVGSVGElement> & { size?: number };
 const base = ({ size = 16, ...p }: P) => ({ width: size, height: size, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, ...p });
 
 export const IGrid = (p: P) => <svg {...base(p)}><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1" /><rect x="9" y="2.5" width="4.5" height="4.5" rx="1" /><rect x="2.5" y="9" width="4.5" height="4.5" rx="1" /><rect x="9" y="9" width="4.5" height="4.5" rx="1" /></svg>;
-export const IHome = (p: P) => <svg {...base(p)}><path d="M2.5 7.2 8 2.8l5.5 4.4V13a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5Z" /><path d="M6.5 13.5V10h3v3.5" /></svg>;
+export const IGauge = (p: P) => <svg {...base(p)}><path d="M2.6 11.5a5.6 5.6 0 1 1 10.8 0" /><path d="m8 9.6 2.6-3" /><circle cx="8" cy="9.8" r=".6" fill="currentColor" /></svg>;
+export const IHome =(p: P) => <svg {...base(p)}><path d="M2.5 7.2 8 2.8l5.5 4.4V13a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5Z" /><path d="M6.5 13.5V10h3v3.5" /></svg>;
 export const IPlus = (p: P) => <svg {...base(p)}><path d="M8 3v10M3 8h10" /></svg>;
 export const ISearch = (p: P) => <svg {...base(p)}><circle cx="7" cy="7" r="4.2" /><path d="m10.2 10.2 3.3 3.3" /></svg>;
 export const IBranch = (p: P) => <svg {...base(p)}><circle cx="4.5" cy="3.8" r="1.4" /><circle cx="4.5" cy="12.2" r="1.4" /><circle cx="11.5" cy="5.5" r="1.4" /><path d="M4.5 5.2v5.6M11.5 6.9c0 2.6-7 1.6-7 3.9" /></svg>;
@@ -92,3 +93,17 @@ export const ISun = (p: P) => <svg {...base(p)}><circle cx="8" cy="8" r="2.8" />
 export const IMoon = (p: P) => <svg {...base(p)}><path d="M13 9.6A5.5 5.5 0 0 1 6.4 3a5.5 5.5 0 1 0 6.6 6.6Z" /></svg>;
 export const IMonitor = (p: P) => <svg {...base(p)}><rect x="2" y="3" width="12" height="8" rx="1.2" /><path d="M6 14h4M8 11v3" /></svg>;
 export const IChevronRight = (p: P) => <svg {...base(p)}><path d="m6 4 4 4-4 4" /></svg>;
+// Passos do agente (linhas compactas do chat).
+export const IBrain = (p: P) => <svg {...base(p)}><path d="M8 3.2v9.6M8 3.2a2.2 2.2 0 0 0-3.9 1.2A2.2 2.2 0 0 0 3 8.3a2.2 2.2 0 0 0 1.3 3.3A2.2 2.2 0 0 0 8 12.8M8 3.2a2.2 2.2 0 0 1 3.9 1.2A2.2 2.2 0 0 1 13 8.3a2.2 2.2 0 0 1-1.3 3.3A2.2 2.2 0 0 1 8 12.8M5.6 6.2 8 7.4l2.4-1.2M5.6 9.8 8 8.8l2.4 1" /></svg>;
+export const IPencil = (p: P) => <svg {...base(p)}><path d="M10.6 2.9a1.4 1.4 0 0 1 2 2L5.4 12.1 2.8 12.8l.7-2.6Z" /><path d="m9.6 3.9 2.5 2.5" /></svg>;
+export const IGlobe = (p: P) => <svg {...base(p)}><circle cx="8" cy="8" r="5.6" /><path d="M2.4 8h11.2M8 2.4c1.6 1.6 2.4 3.4 2.4 5.6S9.6 12 8 13.6C6.4 12 5.6 10.2 5.6 8S6.4 4 8 2.4Z" /></svg>;
+export const IList = (p: P) => <svg {...base(p)}><path d="M6 4h7.5M6 8h7.5M6 12h7.5" /><circle cx="3" cy="4" r=".5" fill="currentColor" /><circle cx="3" cy="8" r=".5" fill="currentColor" /><circle cx="3" cy="12" r=".5" fill="currentColor" /></svg>;
+export const ISend = (p: P) => <svg {...base(p)}><path d="M13.5 2.5 2.5 7l4.4 1.6L8.5 13Z" /><path d="m6.9 8.6 6.6-6.1" /></svg>;
+export const IPlug = (p: P) => <svg {...base(p)}><path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v2.2a3.5 3.5 0 0 1-7 0ZM8 11.2v2.3" /></svg>;
+export const IMinus = (p: P) => <svg {...base(p)}><path d="M3 8h10" /></svg>;
+export const IVolume = (p: P) => <svg {...base(p)}><path d="M3 6.2h2.2L8.5 3.5v9L5.2 9.8H3Z" /><path d="M10.6 5.6a3.4 3.4 0 0 1 0 4.8M12.3 4a5.7 5.7 0 0 1 0 8" /></svg>;
+export const ILink = (p: P) => <svg {...base(p)}><path d="M6.6 9.4 9.4 6.6M5.4 7.4 4 8.8a2.5 2.5 0 0 0 3.5 3.5l1.4-1.4M10.6 8.6 12 7.2A2.5 2.5 0 0 0 8.5 3.7L7.1 5.1" /></svg>;
+export const IEyeOff = (p: P) => <svg {...base(p)}><path d="M2.5 2.5l11 11M6.7 4.2A6 6 0 0 1 8 4c3.2 0 5.3 2.6 6 4-.3.6-.8 1.4-1.6 2.1M4.3 5.4C3.1 6.2 2.4 7.3 2 8c.7 1.4 2.8 4 6 4 .9 0 1.7-.2 2.4-.5" /><path d="M6.6 6.7a2 2 0 0 0 2.7 2.7" /></svg>;
+export const ITrash = (p: P) => <svg {...base(p)}><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M6.8 7v4M9.2 7v4" /></svg>;
+export const IForkTab = (p: P) => <svg {...base(p)}><path d="M3 3.5h10a.5.5 0 0 1 .5.5v6.5a.5.5 0 0 1-.5.5H7l-3 2.5V11H3a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5Z" /><path d="M8 5.5v3.5M6.25 7.25h3.5" /></svg>;
+export const IFork = (p: P) => <svg {...base(p)}><path d="M8 13.5V9.5L4 5.5M8 9.5l4-4M3 3h3v.01M3 3v3M13 3h-3M13 3v3" /></svg>;

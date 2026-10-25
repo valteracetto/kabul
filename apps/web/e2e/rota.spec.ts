@@ -10,7 +10,7 @@ test("ao abrir, volta à última rota; links do workspace e da conversa", async 
   await expect(page.getByTestId("ws-row")).toHaveCount(1);
   const host = page.locator(".ws-host:not([hidden])");
   await host.getByTestId("ws-menu").click();
-  await host.getByTestId("ws-copy-link").click();
+  await page.getByTestId("ws-copy-link").click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/^kabul:\/\/workspace\?id=/);
   await host.getByTestId("ctab").first().click({ button: "right" });
   await page.getByTestId("tab-copy-link").click();

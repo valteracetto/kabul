@@ -29,6 +29,7 @@ base64 = "0.22"
 web-push-native = "0.5"
 ureq = "2"
 http = "1"
+flate2 = "1"
 
 [dev-dependencies]
 tokio-tungstenite = "0.29"

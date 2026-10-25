@@ -1,4 +1,7 @@
-//! Gemini CLI (`gemini`). A CONFIRMAR: não instalado nesta máquina. Estruturado pelo ACP; o modo por turno antigo:
+//! Gemini CLI (`gemini`). Estruturado pelo ACP (`gemini --acp`; `--experimental-acp` está depreciado).
+//! Confirmado com Gemini CLI 0.65.0 até o login: `initialize` anuncia `loadSession` e os `authMethods`
+//! (`oauth-personal`, `gemini-api-key`, `vertex-ai`, `gateway`); sem conta o `session/new` responde
+//! `-32000 Gemini API key is missing or not configured.` O modo por turno antigo:
 //! `gemini -p <prompt> --output-format stream-json [-m modelo] [--resume id] [--approval-mode ...]`.
 //! Eventos documentados: `init` (session_id, model), `message` (role, content, delta),
 //! `tool_use` (tool_name, tool_id, parameters), `tool_result` (tool_id, status, output), `error`, `result` (stats).
@@ -11,17 +14,35 @@ impl Harness for GeminiCli {
     fn kind(&self) -> HarnessKind {
         HarnessKind::GeminiCli
     }
-    /// Modo estruturado pelo ACP (`gemini --experimental-acp`; a confirmar). O modo por turno
+    /// Modo estruturado pelo ACP (`gemini --acp`). O modo por turno
     /// (`-p --output-format stream-json`) continua em [`GeminiCli::print_command`].
     fn command(&self, opts: &SessionOptions) -> CmdSpec {
         let mut c = super::acp::command(HarnessKind::GeminiCli, opts);
-        if let Some(m) = &opts.model {
+        let model = opts.endpoint.as_ref().map(|e| e.model.clone()).or_else(|| opts.model.clone());
+        if let Some(m) = &model {
             c.args.extend(["-m".into(), m.clone()]);
+        }
+        c.env.extend(Self::endpoint_env(opts));
+        // Em pasta não confiável o Gemini CLI desliga todo MCP ("disabled because this folder is
+        // untrusted"), inclusive os do `session/new`. Com MCP vindo do Kabul, confia nesta sessão pela
+        // variável que o próprio `--skip-trust` usa (sem gravar no trustedFolders.json do usuário).
+        if !opts.mcp_inject.is_empty() {
+            c.env.push(("GEMINI_CLI_TRUST_WORKSPACE".into(), "true".into()));
+        }
+        // MCP nativo desligado na sessão: só os ligados (nativos + injetados pelo ACP) ficam permitidos.
+        if !opts.disabled_mcp.is_empty() {
+            let mut allowed: Vec<String> = opts.mcp_keep.iter().cloned().chain(opts.mcp_inject.iter().map(|s| s.name.clone())).collect();
+            if allowed.is_empty() {
+                allowed.push("kabul-nenhum".into());
+            }
+            c.args.push("--allowed-mcp-server-names".into());
+            c.args.extend(allowed);
         }
         c
     }
     fn protocol(&self, opts: &SessionOptions) -> Box<dyn Protocol> {
-        Box::new(super::acp::AcpProtocol::new(super::acp::options(opts, None)))
+        // Sem o `fs` do cliente: com ele o Gemini CLI não cria arquivo novo (ver `AcpOptions::no_client_fs`).
+        Box::new(super::acp::AcpProtocol::new(super::acp::AcpOptions { no_client_fs: true, ..super::acp::options(opts, None) }))
     }
     fn interactive_command(&self, opts: &SessionOptions) -> CmdSpec {
         let mut a = vec![];
@@ -39,6 +60,15 @@ impl Harness for GeminiCli {
 }
 
 impl GeminiCli {
+    /// Endpoint que fala a API do Gemini (gateway/proxy): `GOOGLE_GEMINI_BASE_URL` + `GEMINI_API_KEY`
+    /// (o CLI só aceita http em localhost). Confirmado contra um servidor Gemini-compatível de teste.
+    pub fn endpoint_env(opts: &SessionOptions) -> Vec<(String, String)> {
+        match &opts.endpoint {
+            Some(ep) if ep.apis.contains(&Api::Gemini) => vec![("GOOGLE_GEMINI_BASE_URL".into(), ep.base_url.trim_end_matches('/').to_string()), ("GEMINI_API_KEY".into(), ep.key())],
+            _ => vec![],
+        }
+    }
+
     pub fn print_command(&self, prompt: &str, opts: &SessionOptions) -> Option<CmdSpec> {
         let mut a: Vec<String> = vec!["--output-format".into(), "stream-json".into()];
         if let Some(m) = &opts.model {
@@ -74,7 +104,11 @@ impl Protocol for GeminiProtocol {
             Some("init") => Event::SessionStarted { session_id: s(&v, "session_id").unwrap_or_default(), model: s(&v, "model") },
             Some("message") if s(&v, "role").as_deref() == Some("assistant") => {
                 let text = s(&v, "content").unwrap_or_default();
-                if v.get("delta").and_then(Value::as_bool).unwrap_or(false) { Event::TextDelta { text } } else { Event::Text { text } }
+                if v.get("delta").and_then(Value::as_bool).unwrap_or(false) {
+                    Event::TextDelta { text }
+                } else {
+                    Event::Text { text }
+                }
             }
             Some("message") => return (vec![], vec![]),
             Some("tool_use") => Event::ToolUse { id: s(&v, "tool_id").unwrap_or_default(), name: s(&v, "tool_name").unwrap_or_default(), input: v.get("parameters").cloned().unwrap_or(Value::Null) },
@@ -113,7 +147,11 @@ mod tests {
         let c = GeminiCli.print_command("faz", &SessionOptions { resume: Some("g1".into()), ..Default::default() }).unwrap();
         assert_eq!(c.args.last().unwrap(), "faz");
         let acp = GeminiCli.command(&SessionOptions { model: Some("gemini-x".into()), ..Default::default() });
-        assert_eq!(acp.args, vec!["--experimental-acp", "-m", "gemini-x"]);
+        assert_eq!(acp.args, vec!["--acp", "-m", "gemini-x"]);
+        let ep = Endpoint { base_url: "http://127.0.0.1:9/".into(), apis: vec![Api::Gemini], api_key: None, model: "gemma-x".into(), context: None };
+        let acp = GeminiCli.command(&SessionOptions { endpoint: Some(ep), ..Default::default() });
+        assert_eq!(acp.args, vec!["--acp", "-m", "gemma-x"]);
+        assert!(acp.env.contains(&("GOOGLE_GEMINI_BASE_URL".into(), "http://127.0.0.1:9".into())));
         assert!(GeminiCli.turn_command("x", &SessionOptions::default()).is_none() && GeminiCli.app_approvals());
     }
 }

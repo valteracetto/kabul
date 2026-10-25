@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Repo, type RepoSettingsT, type Workspace } from "../api";
-import { TerminalTab } from "./TerminalTab";
+import { TerminalTab } from "./TerminalLazy";
 import { IPlay, IStop } from "../icons";
 
 /** Aba Setup ou Run: botões dos scripts do settings.toml e o terminal da sessão do script. */

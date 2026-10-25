@@ -1,106 +1,159 @@
-# Rodar no Windows: o que precisa mudar
+# Kabul no Windows
 
-Levantamento do que hoje depende do macOS (ou de Unix). A migração é um bloco próprio, depois da
-paridade; este arquivo diz onde mexer. A regra até lá: código novo não acrescenta dependência de
-macOS e, quando der, já nasce atrás de uma trait.
+O Kabul compila para `x86_64-pc-windows-msvc` (core, kabuld, CLI e app) e o que dependia do macOS foi
+para trás de uma trait ou de uma função por plataforma. No macOS o comportamento é o mesmo de antes
+(tmux, osascript, `security`, `caffeinate`). Este arquivo diz o que foi feito, o que falta e como
+testar numa máquina Windows.
 
-## Terminal e sessões (o maior bloco)
+A regra continua: código novo não acrescenta dependência de macOS e, quando der, já nasce atrás de
+uma trait (`term::TerminalBackend`) ou de um módulo por plataforma (`apps/desktop/src-tauri/src/os.rs`,
+`kabul_core::{shell, paths, secrets, power, job}`).
 
-| Hoje | Onde | No Windows |
+## Terminal e sessões
+
+`kabul_core::term` tem a trait `TerminalBackend` (listar, abrir, matar, capturar com scrollback, tela
+para o xterm.js, mandar bytes, redimensionar, tamanho/atividade e stream com vários espectadores) e
+duas implementações:
+
+| Backend | Onde | Como |
 |---|---|---|
-| tmux: sessões, `capture-pane`, `send-keys -H`, `tmux -C` (stream), `resize-window` | `crates/kabul-core/src/tmux.rs`; desktop: `term_*`, `script_run`, `run_in_tmux`, nuvem, espelhamento, teleport, downloads, instalação de CLIs | Trait `TerminalBackend` (abrir, escrever bytes, stream de saída, redimensionar, capturar a tela, matar, listar). Implementações: tmux (macOS/Linux) e ConPTY via `portable-pty`, com um multiplexador no kabuld que mantém as sessões vivas e guarda o scrollback para a reidratação |
-| Linha de comando montada para `zsh -lc` / `zsh -c ... exec zsh -l` | `run_in_tmux` e `term_open` em `apps/desktop/src-tauri/src/main.rs` | Shell por plataforma (PowerShell ou Git Bash), com `export` trocado por `$env:` ou `set`. Montar o ambiente pela API do processo, sem concatenar strings |
-| Detecção de agente por `ps -A -o pid,ppid,command` | `crates/kabul-core/src/agent.rs` | `sysinfo` (crate) para a árvore de processos |
-| Captura `claude --cloud` / `--remote-control` pelo tmux | `cloud_start`, `mirror_start` | ConPTY pela mesma trait (os dois exigem TTY) |
+| `tmux` | macOS/Linux com tmux | `term/tmux_backend.rs` sobre `tmux.rs`. Mesmas linhas de antes (zsh de login, `export` do ambiente, `[kabul] saiu com N`); as sessões sobrevivem ao app |
+| `pty` | Windows (ConPTY), ou Unix sem tmux | `term/pty.rs`: multiplexador próprio sobre `portable-pty`. Sessões nomeadas, um pane `%N` por sessão (o frontend não muda), emulador `vt100` com 10 000 linhas de scrollback para captura e snapshot, vários `attach` recebendo a mesma saída, resize, kill do grupo de processos (Job Object). A sessão termina quando o comando sai, como no tmux |
 
-## kabuld (celular, outras máquinas, colaboração)
+Escolha: `KABUL_TERMINAL=tmux|pty`; em `app-settings.json`, `"terminal_backend": "pty"` vira essa
+variável na abertura do app (vale ao reabrir). Sem nada: PTY no Windows, tmux onde existir, PTY no
+resto. `kabul_core::term::backend()` é o único ponto de entrada: o app (`term_*`, `script_run`, nuvem,
+espelhamento, teleport, download de modelos, instalação de CLIs, arquivar), o kabuld (espelho das
+sessões, terminal compartilhado, `term_open`) e a CLI (`kabul ls`, `kabul run`) passam por ele.
 
-O kabuld nasceu com as partes de rede, segredos e push portáteis. O que depende de Unix fica isolado:
+O que o comando roda vem de `term::Launch` (`Shell`, `Run { cmd, log }` com código de saída e shell
+depois, `Exec`), com o ambiente do workspace passado pela API do processo no PTY. Linhas de shell
+(`Cmd::Line`) são sh; comandos (`Cmd::Spec`, ex.: `claude --cloud`, `--teleport`, `--remote-control`)
+ganham as aspas do shell que vai rodá-los.
 
-| Hoje | Onde | No Windows |
+Shells (`kabul_core::shell`):
+
+| | Terminal interativo | Scripts do `settings.toml` (setup/run/archive), instalação de CLIs |
 |---|---|---|
-| Espelho de sessões: `tmux list-panes`, `capture-pane`, `display-message`, `ps -A` para a árvore de processos | `crates/kabuld/src/sessions.rs` | Mesma trait `TerminalBackend` do app (ConPTY + multiplexador do kabuld). Detecção de agente com `sysinfo` |
-| Terminal compartilhado (`tmux -C`, `send-keys -H`, `resize-window`) | `crates/kabuld/src/terminal.rs` | Backend ConPTY. A barra de teclas já manda bytes, não nomes do tmux |
-| `term_open` cria a sessão com `sh -c ... exec $SHELL -l` | `crates/kabuld/src/hub.rs` | PowerShell ou Git Bash pelo backend |
-| Permissão 0600 nos arquivos `kabuld-*.json` (`#[cfg(unix)]`) | `secrets.rs`, `push.rs` | ACL do usuário (`%APPDATA%` já é por usuário) |
-| CLI do Tailscale: `which tailscale`, com fallback para o app do Mac | `crates/kabuld/src/net.rs` | `tailscale.exe` em `%ProgramFiles%\Tailscale` |
-| Pasta padrão do estado (Application Support) | `Config::from_env` | Vem de `Store::default_paths` (ver "Caminhos e git") |
+| macOS/Linux | `$SHELL -l` | idem (`$SHELL -lc`) |
+| Windows | `pwsh`, senão Windows PowerShell, senão `cmd` | Git Bash (os scripts dos repositórios são sh), senão PowerShell |
+| Trocar | `KABUL_SHELL` (`pwsh`, `powershell`, `cmd`, `git-bash` ou caminho) ou `"shell"` em `app-settings.json` | `KABUL_SCRIPT_SHELL` |
 
-Já portáteis:
-- segredos pela crate `keyring` (Credential Manager);
-- rede pela trait `NetTransport` (Tailscale tem os mesmos comandos no Windows);
-- Web Push em Rust puro (`web-push-native` + `ureq`);
-- axum/tokio;
-- PWA no navegador.
+No Windows os processos de fundo (git, gh, agentes) são criados com `CREATE_NO_WINDOW`
+(`kabul_core::shell::command`), senão cada um piscaria uma janela de console; CLIs `.cmd` do npm vão
+pelo `cmd /C` (o `CreateProcess` não roda `.cmd` direto) e o `which` tenta as extensões do `PATHEXT`
+(`.exe` primeiro).
 
-## Segredos
-
-| Hoje | Onde | No Windows |
-|---|---|---|
-| `security add/find/delete-generic-password` (Keychain) | `crates/kabul-core/src/linear.rs`, `crates/kabul-core/src/github.rs` | Crate `keyring` (Credential Manager no Windows, Keychain no macOS, Secret Service no Linux), que o kabuld já usa (`crates/kabuld/src/secrets.rs`) |
+As sessões do PTY vivem no processo que as criou (o app com o kabuld embutido, ou o `kabuld`
+avulso). Por isso `kabul run` sem tmux roda o agente no próprio terminal em vez de criar uma sessão
+destacada.
 
 ## Integração com o sistema
 
+| | macOS | Windows | Onde |
+|---|---|---|---|
+| Notificação | `tauri-plugin-notification` em nome do app (o clique traz o Kabul e o frontend abre a conversa que avisou), com o som na própria notificação | o mesmo plugin (toast) + som por `PlaySoundW`; conferir se o clique no toast ativa a janela | `os::notify` |
+| Contador no ícone | `set_badge_count` (número no Dock) | o Tauri não mostra número: usar `set_overlay_icon` com um ícone de contador | `badge_set` |
+| Links `kabul://` | `tauri-plugin-deep-link` (esquema no `tauri.conf.json`; só no app empacotado) | o plugin registra o esquema no registro na instalação; com várias instâncias, `tauri-plugin-single-instance` para repassar o link à janela aberta | `setup` em `main.rs` |
+| Som de conclusão | `afplay /System/Library/Sounds/<nome>.aiff` | `PlaySoundW` com o som do sistema equivalente (`SystemNotification`, `SystemAsterisk`...) | `os::play_sound` |
+| Escolher pasta/arquivo | `osascript choose folder/file` | `tauri-plugin-dialog` | `os::pick` |
+| Abrir link | `open`, só `http`/`https`/`mailto` (`kabul_core::open::external_url_ok`) | `explorer.exe <url>` com a mesma regra (Linux: `xdg-open`) | `open_external`, `os::open_external` |
+| "Abrir em" | Finder, VS Code, Cursor, Zed, Windsurf, Sublime, Xcode, Terminal, iTerm, Warp, Ghostty (com ícone) | Explorador de Arquivos, VS Code, Cursor, Windsurf, Zed, Sublime, Windows Terminal (`wt -d`), PowerShell (console novo na pasta), Git Bash (`--cd=`), em `%LOCALAPPDATA%\Programs` e `%ProgramFiles%`; sem ícone (a UI mostra a inicial). Nos dois: só caminho absoluto real e terminal só recebe pasta (`kabul_core::open::open_in_path`) | `os::open_apps`, `os::open_in` |
+| Manter acordado | `caffeinate -i -w <pid>` | `SetThreadExecutionState(ES_CONTINUOUS \| ES_SYSTEM_REQUIRED)` na thread que acompanha o agente (Linux: `systemd-inhibit`) | `kabul_core::power::KeepAwake` |
+| Segredos (Linear, GitHub) | Keychain pelo `security` (o mesmo item de antes; não pede senha a cada build) | crate `keyring` (Credential Manager); Linux: Secret Service | `kabul_core::secrets` |
+| Ambiente do app | shell de login (`$SHELL -l -i -c 'env -0'`) | PATH do sistema e do usuário lidos do registro (`HKLM\...\Session Manager\Environment`, `HKCU\Environment`), juntado com `;`, sem repetir (sem diferenciar maiúsculas) | `shell_env` |
+| Pastas extras de CLIs | `/opt/homebrew/bin`, `~/.local/bin`... | `%APPDATA%\npm`, `%LOCALAPPDATA%\Microsoft\WindowsApps`, `~\.cargo\bin`, `~\scoop\shims`, `%ProgramFiles%\{nodejs, Git\cmd, GitHub CLI, Tailscale}` | `harness::extra_bin_dirs` |
+| Estado do app | `~/Library/Application Support/kabul` | `%APPDATA%\kabul` (Linux: `$XDG_DATA_HOME/kabul`) | `paths::state_dir`, `Store::default_paths` |
+| Pasta pessoal | `HOME` | `HOME`, senão `USERPROFILE` | `paths::home` |
+| Nomes de arquivo | — | anexos sem `<>:"/\|?*`, sem ponto/espaço no fim, sem `CON`/`NUL`/`COM1`... | `paths::safe_file_name` |
+| Detecção de agente | `ps -A -o pid,ppid,command` | `sysinfo` (nome do executável + argumentos; `\` e `.exe`/`.cmd` tratados) | `agent::process_table` |
+| Encerrar grupo | subárvore por ppid (`sysinfo`) | Job Object (`TerminateJobObject`) + subárvore | `kabul_core::job` |
+| Memória (cabe o modelo?) | `sysctl hw.memsize` | `sysinfo` | `local::total_memory` |
+| Perfis isolados por HOME (agy, Qwen, Gemini) | `HOME=<perfil>`, links para `.gitconfig`, `.ssh`, `.config/gh` | também `USERPROFILE=<perfil>` (o Node e o git leem esse); pastas por junção (`mklink /J`), arquivos copiados | `accounts::{env_for, link_home_basics}` |
+| Pasta do projeto do Claude | `/a/b.c` → `-a-b-c` | `C:\a b` → `C--a-b` (regra do Claude: tudo fora de `[A-Za-z0-9]` vira `-`) | `harness::claude::project_dir_name` |
+| Tailscale | PATH ou `/Applications/Tailscale.app` | PATH ou `%ProgramFiles%\Tailscale\tailscale.exe` | `kabuld::net` |
+| Ditado | `ffmpeg` + `whisper-cli` | os mesmos, opcionais: sem eles o erro diz o que instalar (`winget install Gyan.FFmpeg`, `whisper-cli.exe` no PATH ou em `KABUL_BIN_WHISPER_CLI`); modelo também em `%LOCALAPPDATA%\kabul\whisper` | `speech` |
+| Ícone do executável | `icon.icns` | `icons/icon.ico` (exigido pelo `tauri-build`) | `tauri.conf.json` |
+| Barra do Kabul | ícone "template" na barra de menus (o macOS pinta claro/escuro) e texto ao lado (`set_title`) | tray do Tauri na bandeja: ícone em cinza claro (`usage::icon::render` com cor) e a porcentagem na dica (tooltip); o popover abre acima do ícone quando a bandeja está embaixo. A testar: cor do ícone no tema claro da barra de tarefas | `tray.rs` |
+| Alertas de uso | notificação pelo plugin | o mesmo plugin | `send_notification` (usado por `notify` e pelo laço de `tray.rs`) |
+| CSV de uso | salvo em `$HOME/Downloads` | `%USERPROFILE%\Downloads`; o ideal é o diálogo de salvar (`tauri-plugin-dialog`) | `usage_csv_save` |
+| CodexBar CLI (fonte opcional de limites) | lido quando instalado | só existe no macOS: a fonte não aparece (limites vêm do stream dos agentes e do app-server do Codex) | `usage/limits.rs` |
+
+## O que falta
+
+- **Sessões do PTY sobrevivendo ao app.** Hoje morrem com o processo. Falta um servidor de sessões
+  fora do app (o `kabuld` como serviço, com named pipe) para o app reconectar depois de reabrir.
+- **Interromper agente sem protocolo (agy) no Windows.** `procs::interrupt` devolve `false` (não há
+  SIGINT para outro processo); exige spawn com `CREATE_NEW_PROCESS_GROUP` e `GenerateConsoleCtrlEvent`
+  num console compartilhado. Claude, Codex e ACP interrompem pelo protocolo e não dependem disso.
+- **Job Object nos agentes do chat.** Só as sessões do PTY entram num job; os agentes do chat
+  continuam encerrados pela subárvore do `sysinfo` (netos órfãos podem escapar).
+- **Ícones do "Abrir em"** (`SHGetFileInfo`/`ExtractIconEx`) e JetBrains pelo registro.
+- **Frontend:** barra de título (`Overlay` e o espaço dos semáforos são do macOS), atalhos com ⌘ que
+  devem virar Ctrl, textos "Trazer para o Mac", lista de sons com nomes do macOS e campos de
+  `terminal_backend`/`shell` em Configurações (hoje só no `app-settings.json`/variáveis).
+- **Ditado sem ffmpeg** (decodificar o webm/opus do WebView2 em Rust) e whisper.cpp empacotado como
+  sidecar.
+- **Instalação de CLIs:** os comandos `curl … | bash` (agy, OpenCode, Goose, Cursor) só rodam no Git
+  Bash; faltam os equivalentes em PowerShell/winget.
+- **Permissão dos arquivos `kabuld-*.json`:** no Windows ficam com a ACL padrão de `%APPDATA%`
+  (por usuário); sem o equivalente explícito do 0600.
+- **Conferir no Windows real:** `cwd` de processos de outros apps (painel de recursos/sessões de fora),
+  pastas dos CLIs (`~/.codex`, `%LOCALAPPDATA%\opencode`?), a regra da pasta de projeto do Claude com
+  caminhos longos, CRLF e `core.longpaths` nos worktrees, `BROWSER=true` no login dos CLIs.
+- **CI:** matriz `macos-latest` + `windows-latest` com `cargo test`, `npm run build`, `npm run e2e` e
+  `tauri build` (.msi). O bundle hoje só gera `.app` (`"targets": ["app"]`).
+
+## Verificar sem Windows (no Mac)
+
+O `cargo check --target x86_64-pc-windows-msvc` puro falha nos crates com C (`ring`, sqlite) por
+falta dos cabeçalhos do MSVC. Com o `cargo-xwin` (baixa o CRT e o SDK do Windows) e o LLVM:
+
+```sh
+brew install llvm lld
+cargo install cargo-xwin --locked
+rustup target add x86_64-pc-windows-msvc
+export PATH="$(brew --prefix llvm)/bin:$(brew --prefix lld)/bin:$PATH" XWIN_ACCEPT_LICENSE=1
+cargo xwin check --workspace --tests --target x86_64-pc-windows-msvc
+```
+
+No Mac, o backend PTY também roda (openpty): `KABUL_TERMINAL=pty cargo test -p kabuld` exercita o
+terminal compartilhado e o espelho de sessões pelo multiplexador próprio, como no Windows.
+
+## Escala e desempenho
+
 | Hoje | Onde | No Windows |
 |---|---|---|
-| `osascript` para escolher pasta/arquivo | `pick_folder`, `pick_file` | `tauri-plugin-dialog` |
-| `osascript display notification` | `notify` | `tauri-plugin-notification` (também resolve o clique que abre o chat certo) |
-| `open` / `open -a <App>` | `open_in`, `open_external` | `tauri-plugin-opener` / `ShellExecuteW`; "Abrir em" com Explorer, VS Code, Cursor, Windows Terminal, PowerShell e JetBrains, a partir do registro e de `%LOCALAPPDATA%` |
-| Lista de apps em `/Applications` e `/System/...`; ícones via JXA (`NSWorkspace`) | `OPEN_APPS`, `ensure_icons` | Lista própria por SO; ícone via `SHGetFileInfo` / `ExtractIconEx` |
-| Nome do computador por `scutil --get ComputerName` (seletor de máquina) | `crates/kabul-core/src/machine.rs` | Já cai para `COMPUTERNAME` (Windows) e `hostname` |
-| Som de conclusão com `afplay /System/Library/Sounds/<nome>.aiff` ("Test") | `sound_play` | Sons próprios empacotados e `PlaySound`/`rodio`; a lista de nomes muda por SO |
-| Ambiente do shell de login (`$SHELL -l -i -c 'env -0'`) para o app aberto pelo Dock | `crates/kabul-core/src/shell_env.rs` (`#[cfg(unix)]`) | No Windows o processo já herda o PATH do usuário; `read_login_env` devolve `None` e só o LANG/PATH extra são aplicados |
-| Menu do app com Serviços/Ocultar/Mostrar todos | `apps/desktop/src-tauri/src/menu.rs` (`#[cfg(target_os = "macos")]`) | O resto do menu é do Tauri e funciona no Windows (barra de menu na janela) |
-| `tmux -u` para forçar UTF-8 | `crates/kabul-core/src/tmux.rs` | Some com o backend ConPTY (trait `TerminalBackend`) |
-| `caffeinate -i -w <pid>` | `chat_start` | `SetThreadExecutionState(ES_CONTINUOUS \| ES_SYSTEM_REQUIRED)` enquanto houver agente rodando |
-| `sysctl -n hw.memsize` (cabe na memória?) | `crates/kabul-core/src/local.rs` | `sysinfo` (RAM, e VRAM separada quando houver GPU dedicada) |
-| `fix_path` com `/opt/homebrew/bin` etc. e `which()` com pastas do macOS | `main.rs`, `harness::which` | `which` (crate) e pastas por SO (`%APPDATA%\npm`, `%LOCALAPPDATA%\Programs`, `.exe`/`.cmd`) |
-| Barra de título `Overlay` com área para os semáforos | `tauri.conf.json`, CSS `.lights` / `.side-top` | No Windows a moldura é outra: botões à direita e padding condicional por plataforma |
-| Atalhos com ⌘ | frontend | ⌘ vira Ctrl no Windows; o registro de atalhos precisa de uma tecla "Mod" |
+| Prioridade baixa para agentes fora de foco: `setpriority(PRIO_DARWIN_PROCESS, PRIO_DARWIN_BG)` no macOS, `nice 10` no Linux | `kabul-core::governor::set_background` | `SetPriorityClass` com `BELOW_NORMAL_PRIORITY_CLASS` (ou `PROCESS_MODE_BACKGROUND_BEGIN`/`END`, que também baixa E/S) via `windows-sys`; hoje devolve 0 (nada muda) |
+| Varredura das sessões: uma `list-panes` com atividade/tamanho e uma captura em lote (`capture-pane ; display-message ; ...` num só processo do tmux) | `TerminalBackend::{list_ext, capture_many}` (tmux: `tmux::list_panes_ext`, `tmux::capture_many`), `kabuld::sessions::Scanner` | O backend PTY usa o padrão da trait: `list` + `info` e a tela de cada pane, tudo em memória no multiplexador (sem processo nenhum) |
+| Tabela de processos da varredura (`ProcIndex`) | `agent::ProcIndex::current` (via `agent::process_table`) | `sysinfo` em vez do `ps`, uma leitura por varredura |
+| `kabul loadtest --tmux N` cria sessões `kabul-test-perf-*` | `crates/kabul-cli/src/loadtest.rs` | Pula sem tmux; o resto do teste de carga (kabuld, agentes falsos, WebSocket, `sysinfo`) é portátil |
 
-## Painel de recursos
+Já portáteis: watchers de arquivos (`notify`: ReadDirectoryChangesW), caches com TTL, fila e limite
+de agentes (`governor`), coalescência por quadro (`batch`) e a fila limitada por cliente no kabuld.
 
-A coleta usa a crate `sysinfo` (`kabul-core::resources`), portátil para Windows; nada específico do
-macOS. No Windows conferir: nomes com `.exe` (já removidos na árvore), shells (`pwsh`, `cmd`) e se o
-`cwd` dos processos filhos vem preenchido (o Windows não expõe o cwd de outros processos sem
-privilégio; sem ele, a ligação com o workspace fica só pelo pid da conversa).
 
-## Sessões de fora do Kabul (Painel)
+## Testar numa VM Windows
 
-`kabul-core::external` acha agentes rodando em outros terminais pelo `sysinfo` e lê o histórico de
-cada CLI em `~/.claude/projects`, `~/.codex/sessions`, `~/.local/share/opencode/opencode.db` e
-`~/.gemini/antigravity-cli/conversation_summaries.db`. No Windows conferir: as pastas equivalentes
-em `%USERPROFILE%`/`%APPDATA%` (o OpenCode usa `%LOCALAPPDATA%`?), os nomes dos apps de terminal
-(`WindowsTerminal`, `Code`, `Cursor` já estão na lista) e o `cwd` de processos de outros apps (sem
-ele não dá para ligar ao workspace).
-
-## Caminhos e git
-
-| Hoje | Onde | No Windows |
-|---|---|---|
-| `HOME` para estado e caches | `Store::default_paths`, `settings`, `auth`, `mcp`, `speech` | `dirs` (crate): `%APPDATA%\kabul`, `%LOCALAPPDATA%` |
-| Pasta de projeto do Claude derivada trocando `/` e `.` por `-` | `harness::claude::project_dir_name` | Conferir a regra do Claude no Windows (`C:\` → `C--`) |
-| `git -C`, `git worktree` | `store.rs`, `worktree.rs`, `checkpoint.rs` | Funciona; atenção a CRLF e a caminhos longos (`core.longpaths`) |
-| `.context/` em `info/exclude` | `store::exclude_context` | Funciona |
-| Conta do agy (e Qwen/Gemini CLI) isolada por `HOME=<perfil>`, com links para `.gitconfig`, `.ssh` e `.config/gh` do usuário | `accounts::{env_for, link_home_basics}` | No Windows o equivalente é `USERPROFILE`; os links (`symlink`) só existem em `cfg(unix)` — usar junções ou copiar a identidade do git |
-| Projeto do agy por workspace em `~/.gemini/config/projects/kabul-<hash>.json` (regras aprovadas no cartão) | `harness::antigravity::{gemini_dir, project_file}` | Já cai para `USERPROFILE` sem `HOME`; conferir se o agy no Windows usa `%USERPROFILE%\.gemini` e se o hash do caminho (com `\`) bate entre app e CLI |
-
-## Ditado
-
-| Hoje | Onde | No Windows |
-|---|---|---|
-| `ffmpeg` + `whisper-cli` instalados pelo Homebrew; modelo achado em `~/.cache/*/whisper` | `crates/kabul-core/src/speech.rs` | Empacotar `whisper.cpp` como sidecar do Tauri (ou crate `whisper-rs`) e decodificar o áudio sem ffmpeg (o `MediaRecorder` do WebView2 grava webm/opus) |
-| Teste ponta a ponta com `say` | `speech::tests` | Pula fora do macOS; no Windows, gerar o áudio com SAPI |
-
-## Runtimes locais
-
-`lms`, `ollama`, `llama-server`, `vllm` e `mlx_lm.server` existem no Windows, exceto o MLX (só Apple
-Silicon). A detecção por HTTP já é portátil. Trocar `curl` por `ureq`/`reqwest` em `local.rs` e
-`linear.rs`.
-
-## CI
-
-GitHub Actions com matriz `macos-latest` + `windows-latest`: `cargo test`, `npm run build`,
-`npx playwright test` (o roteiro com mock e o backend real via `kabul serve`) e `tauri build`. No
-Windows, os testes que dependem de tmux só rodam quando o backend ConPTY existir; até lá, ficam
-marcados como `#[cfg(unix)]`.
+1. Windows 11 (ou 10 1809+, por causa do ConPTY), com:
+   `winget install Git.Git Rustlang.Rustup Microsoft.VisualStudio.2022.BuildTools OpenJS.NodeJS.LTS GitHub.cli`
+   (nas Build Tools, a carga "Desenvolvimento para desktop com C++"). O WebView2 já vem no Windows 11.
+2. `rustup default stable-msvc`, clonar o repositório e, na raiz:
+   `cargo test --workspace` — roda os testes do backend PTY com `cmd`/PowerShell (`term::pty::tests`),
+   do Job Object, do PATH do registro (`shell_env::tests::path_do_windows`), do kabuld com o terminal
+   compartilhado e o teste de ponta a ponta do servidor. Os testes do tmux pulam sozinhos.
+   Para testar o cofre: `set KABUL_TEST_COFRE=1` e `cargo test -p kabul-core secrets`.
+3. Frontend: `cd apps/web && npm ci && npm run build && npx playwright install chromium && npm run e2e`.
+4. App: `cd apps/desktop/src-tauri && cargo tauri dev` (ou `npm --prefix ../../web run dev` + `cargo run`).
+   Roteiro manual:
+   - abrir um repositório pelo seletor de pasta; criar workspace; o setup roda no Git Bash e grava
+     `.context/setup-logs.txt`;
+   - aba Terminal: abre no PowerShell na pasta do workspace, com `KABUL_*` no ambiente
+     (`$env:KABUL_PORT`); digitar, redimensionar, fechar e reabrir a aba (snapshot volta com a tela);
+   - "Abrir em": Explorador, VS Code, Windows Terminal, PowerShell;
+   - conversa com o Claude (`npm i -g @anthropic-ai/claude-code`): nenhuma janela de console pisca,
+     o PC não dorme durante o turno (`powercfg /requests` mostra o Kabul), notificação e som no fim;
+   - Configurações › Contas: conectar Linear/GitHub e conferir o item em "Gerenciador de Credenciais";
+   - Ajuda › Diagnóstico: mostra "terminal: pty" e os shells escolhidos;
+   - celular: `kabuld` pareado, sessões do PTY aparecem no espelho e o terminal compartilhado
+     recebe a saída nos dois lados.

@@ -37,7 +37,24 @@ impl Harness for OpenCode {
 
     fn command(&self, opts: &SessionOptions) -> CmdSpec {
         // Mesmo ambiente do modo por turno (endpoint local e MCPs desligados via OPENCODE_CONFIG_CONTENT).
-        let env = self.run_command("", opts).env;
+        let mut env = self.run_command("", opts).env;
+        // O padrão do OpenCode aprova edição e shell sozinho: sem `ask` o cartão de aprovação do Kabul
+        // nunca aparece. O modo do Kabul vira `permission` (por cima de um `permission` já passado).
+        let mut cfg: Value = env.iter().rev().find(|(k, _)| k == "OPENCODE_CONFIG_CONTENT").and_then(|(_, v)| serde_json::from_str(v).ok()).unwrap_or(json!({}));
+        let (edit, bash) = match opts.permission_mode.as_deref() {
+            Some("bypassPermissions") => ("allow", "allow"),
+            Some("acceptEdits") => ("allow", "ask"),
+            _ => ("ask", "ask"),
+        };
+        let mut perm = json!({ "edit": edit, "bash": bash, "webfetch": bash });
+        if let Some(o) = cfg.get("permission").and_then(Value::as_object) {
+            for (k, v) in o {
+                perm[k] = v.clone();
+            }
+        }
+        cfg["permission"] = perm;
+        env.retain(|(k, _)| k != "OPENCODE_CONFIG_CONTENT");
+        env.push(("OPENCODE_CONFIG_CONTENT".into(), cfg.to_string()));
         CmdSpec::new("opencode", ["acp"]).with_cwd(opts.cwd.clone()).with_env(&env)
     }
 
@@ -50,7 +67,8 @@ impl Harness for OpenCode {
             Some(ep) => Some(format!("{PROVIDER}/{}", ep.model)),
             None => opts.model.clone(),
         };
-        Box::new(super::acp::AcpProtocol::new(super::acp::options(opts, model)))
+        // MCPs injetados vão pela config (ver `run_command`), não pelo `session/new`.
+        Box::new(super::acp::AcpProtocol::new(super::acp::AcpOptions { mcp_servers: vec![], ..super::acp::options(opts, model) }))
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -59,6 +77,12 @@ impl Harness for OpenCode {
 
     fn endpoint_apis(&self) -> &'static [Api] {
         &[Api::Openai, Api::Anthropic]
+    }
+
+    /// O `opencode acp` 2.1.4 não anuncia modos (o agente `plan` do TUI não aparece no ACP): o Kabul
+    /// emula (confirmado no teste `plan_real`).
+    fn plan_support(&self) -> PlanSupport {
+        PlanSupport::Emulated
     }
 }
 
@@ -86,9 +110,21 @@ impl OpenCode {
                 a.push("--fork".into());
             }
         }
-        if !opts.disabled_mcp.is_empty() {
+        if !opts.disabled_mcp.is_empty() || !opts.mcp_inject.is_empty() {
             let mut cfg: Value = env.iter().find(|(k, _)| k == "OPENCODE_CONFIG_CONTENT").and_then(|(_, v)| serde_json::from_str(v).ok()).unwrap_or(json!({}));
-            cfg["mcp"] = Value::Object(mcp_overrides(&opts.disabled_mcp));
+            // MCPs de outras IAs pela config do próprio OpenCode: o `opencode acp` 2.1.4 ignora o
+            // `mcpServers` do `session/new` (confirmado com um servidor de teste).
+            let mut m = mcp_overrides(&opts.disabled_mcp);
+            for s in &opts.mcp_inject {
+                m.insert(
+                    s.name.clone(),
+                    match &s.url {
+                        Some(u) => json!({ "type": "remote", "url": u, "headers": s.headers }),
+                        None => json!({ "type": "local", "command": std::iter::once(s.command.clone().unwrap_or_default()).chain(s.args.iter().cloned()).collect::<Vec<_>>(), "environment": s.env }),
+                    },
+                );
+            }
+            cfg["mcp"] = Value::Object(m);
             env.retain(|(k, _)| k != "OPENCODE_CONFIG_CONTENT");
             env.push(("OPENCODE_CONFIG_CONTENT".into(), cfg.to_string()));
             if !a.contains(&"--standalone".to_string()) {
@@ -216,7 +252,13 @@ mod tests {
         // Modo estruturado pelo ACP, com o mesmo ambiente; o turno não é mais um processo.
         let acp = OpenCode.command(&o);
         assert_eq!(acp.args, vec!["acp"]);
-        assert!(acp.env.iter().any(|(k, _)| k == "OPENCODE_CONFIG_CONTENT"));
+        let cfg: Value = serde_json::from_str(&acp.env.iter().find(|(k, _)| k == "OPENCODE_CONFIG_CONTENT").unwrap().1).unwrap();
+        assert_eq!((cfg["permission"]["edit"].as_str(), cfg["permission"]["bash"].as_str()), (Some("ask"), Some("ask")));
+        assert!(cfg["provider"]["kabul"].is_object(), "endpoint continua na mesma config");
+        let auto = OpenCode.command(&SessionOptions { permission_mode: Some("bypassPermissions".into()), env: vec![("OPENCODE_CONFIG_CONTENT".into(), r#"{"permission":{"bash":"deny"}}"#.into())], ..Default::default() });
+        let cfg: Value = serde_json::from_str(&auto.env.iter().find(|(k, _)| k == "OPENCODE_CONFIG_CONTENT").unwrap().1).unwrap();
+        assert_eq!((cfg["permission"]["edit"].as_str(), cfg["permission"]["bash"].as_str()), (Some("allow"), Some("deny")));
+        assert_eq!(auto.env.iter().filter(|(k, _)| k == "OPENCODE_CONFIG_CONTENT").count(), 1);
         assert!(OpenCode.turn_command("oi", &o).is_none());
         assert!(OpenCode.app_approvals());
     }

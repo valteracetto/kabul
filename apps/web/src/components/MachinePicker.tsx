@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Floating } from "./Floating";
 import { api, type MachineInfo } from "../api";
 import { useDismiss } from "./useDismiss";
 import { activeMachine, machines, switchMachine } from "./machines";
@@ -42,7 +43,7 @@ export function MachinePicker({ onRoute }: { onRoute: (r: Route) => void }) {
         <IChevronDown size={12} />
       </button>
       {open && (
-        <div className="popover machine-pop" data-testid="machine-pop">
+        <Floating className="machine-pop" placement="bottom-start" testid="machine-pop">
           <div className="pop-title machine-who" data-testid="machine-who">{who}</div>
           <div className="pop-sep" />
           <div className={"pop-row" + (act === "local" ? " on" : "")} onClick={() => (setOpen(false), switchMachine("local"))} data-testid="machine-local">
@@ -62,7 +63,7 @@ export function MachinePicker({ onRoute }: { onRoute: (r: Route) => void }) {
           <div className="pop-row disabled" title="em breve"><ICloud /> <span className="label">Nuvem Kabul</span><span className="grow" /><span className="dim small">em breve</span></div>
           <div className="pop-sep" />
           <div className="pop-row" onClick={() => (setOpen(false), onRoute({ kind: "settings", tab: "geral" }))}><IGear size={14} /> <span className="label">Configurações</span><span className="grow" /><span className="kbd-hint">⌘,</span></div>
-        </div>
+        </Floating>
       )}
     </div>
   );
