@@ -275,6 +275,12 @@ Issues e pull requests são bem-vindos. Comece pelo [CONTRIBUTING.pt-BR.md](CONT
 versões, CI e releases) e pelo [guia de contribuição](docs/pt-BR/guia/contribuir.md) (estrutura, comandos e
 regras). Falhas de segurança: reporte em particular, veja o [SECURITY.md](SECURITY.md).
 
+## Créditos
+
+Partes dos recursos de uso e da barra de menus foram baseadas em ideias do
+[CodexBar](https://github.com/steipete/CodexBar), de Peter Steinberger (MIT). O código do Kabul é próprio.
+Veja os créditos completos em [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md#português).
+
 ## Licença
 
 [MIT](LICENSE)

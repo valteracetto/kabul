@@ -274,6 +274,12 @@ Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.
 CI and releases) and the [contributing guide](docs/guide/contributing.md) (layout, commands and rules).
 Security issues: please report privately, see [SECURITY.md](SECURITY.md).
 
+## Credits
+
+Parts of the usage and menu bar features were based on ideas from
+[CodexBar](https://github.com/steipete/CodexBar) by Peter Steinberger (MIT). Kabul's code is its own.
+See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) for full credits.
+
 ## License
 
 [MIT](LICENSE)
