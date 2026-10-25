@@ -11,7 +11,8 @@ import { chatStore, statusOf, useChatSelect } from "../components/chatStore";
 import { useDismiss, usePopover } from "../components/useDismiss";
 import { noSuggest } from "../noSuggest";
 import { t } from "../i18n";
-import { IBranch, IEye, IEyeOff, IHistory, ILink, IList, IPR, ITrash } from "../icons";
+import { IBranch, IEye, IEyeOff, IHistory, ILink, IList, IPR, ITrash, IUpdate } from "../icons";
+import { checkForUpdates, useUpdateAvailable } from "../components/Updates";
 import { IArchive, IBack, IChevronDown, IChevronRight, ICube, IFwd, IGauge, IGear, IGrid, IHelp, IHome, IMore, IPin, IPlus, ISearch, ISidebar, RepoMark } from "../icons";
 
 type RowH = { down: (w: Workspace, e: React.PointerEvent) => void; click: (w: Workspace) => void; ctx: (w: Workspace, e: React.MouseEvent) => void; enter: (w: Workspace) => void; leave: () => void; mdown: () => void; stay: () => void };
@@ -322,6 +323,7 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
       </div>
       <div className="side-foot">
         <span className="grow" />
+        <UpdateButton />
         <button className="icon-btn" title={t("app.side.help")} onClick={onHelp} data-testid="help"><IHelp /></button>
         <button className={"icon-btn" + (route.kind === "settings" ? " on" : "")} title={t("app.side.settingsTitle")} onClick={() => onRoute({ kind: "settings", tab: "geral" })} data-testid="settings"><IGear /></button>
       </div>
@@ -442,4 +444,16 @@ function RenameDialog({ w, onClose, onSave }: { w: Workspace; onClose: () => voi
         <div className="row end"><button className="btn" onClick={onClose}>{t("common.cancel")}</button><button className="btn primary" onClick={save} data-testid="rename-save">{t("app.side.renameGo")}</button></div>
       </div>
     </div>, document.body);
+}
+
+/** Rodapé: procurar atualizações; o ponto aparece quando já há versão nova esperando. */
+function UpdateButton() {
+  const u = useUpdateAvailable();
+  const title = u ? t("settings.updates.available", { version: u.version }) : t("settings.updates.check");
+  return (
+    <button className={"icon-btn upd-btn" + (u ? " has-update" : "")} title={title} aria-label={title} onClick={() => checkForUpdates()} data-testid="check-updates">
+      <IUpdate />
+      {u && <span className="upd-dot" data-testid="update-dot" />}
+    </button>
+  );
 }

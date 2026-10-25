@@ -1,5 +1,9 @@
 import { defineConfig } from "@playwright/test";
 
+// tmux só num servidor próprio (`tmux -L`): o `kabul serve`/kabuld que os testes sobem herdam isto e nunca usam
+// o servidor padrão de quem roda o teste (lá o Kabul de verdade listaria as sessões de teste).
+process.env.KABUL_TMUX_SOCKET ||= `kabul-test-e2e-${process.pid}`;
+
 // Porta do Vite (KABUL_E2E_PORT): worktrees diferentes rodando E2E ao mesmo tempo não podem dividir o servidor.
 const PORT = Number(process.env.KABUL_E2E_PORT ?? 5174);
 

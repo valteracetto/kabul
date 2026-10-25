@@ -1,9 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
-import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join, resolve } from "node:path";
-import { freePort, startKabuld, wsAction, type Kabuld } from "./helpers";
+import { freePort, startKabuld, tmux, wsAction, type Kabuld } from "./helpers";
 
 // iPhone (WebKit) contra o kabuld real: preview de arquivos do workspace, abrir arquivo a partir do
 // chat, "perguntar no chat" e o app do workspace pelo proxy do Run.
@@ -35,12 +34,12 @@ test.beforeAll(async () => {
   writeFileSync(join(w, "a.txt"), "oi\nnovo conteúdo\n");
   // "App" do workspace rodando na porta dele.
   app = createServer((req, res) => res.end(`app do workspace em ${req.url}`)).listen(wsPort, "127.0.0.1");
-  execFileSync("tmux", ["new-session", "-d", "-s", own, "-c", w, "sh"]);
+  tmux("new-session", "-d", "-s", own, "-c", w, "sh");
   await new Promise((r) => setTimeout(r, 2500));
 });
 test.afterAll(() => {
   try {
-    execFileSync("tmux", ["kill-session", "-t", `=${own}`]);
+    tmux("kill-session", "-t", `=${own}`);
   } catch {}
   app?.close();
   kd?.stop();

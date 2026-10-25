@@ -13,8 +13,9 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import subsetFont from "subset-font";
 import { config } from "../src/config.ts";
-import type { Img } from "../src/content.ts";
-import { renderPage, type Ctx, type Picture } from "../src/page.ts";
+import type { Clip, Img } from "../src/content.ts";
+import { llmsFull, llmsTxt, pageMarkdown } from "../src/llms.ts";
+import { renderPage, type ClipMedia, type Ctx, type Loop, type Picture } from "../src/page.ts";
 
 const SITE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ROOT = resolve(SITE, "..");
@@ -22,6 +23,8 @@ const DIST = join(SITE, "dist");
 const CACHE = join(SITE, ".cache", "img");
 const ASSETS = join(ROOT, "docs", "assets");
 const ICONS = join(ROOT, "apps", "desktop", "src-tauri", "icons");
+/** Encoded video (npm run media for the hero loop, apps/web `npm run demo:site-clips` for the clips). */
+const MEDIA = join(SITE, "media");
 
 const IMAGES: Record<Img, number[]> = {
   hero: [640, 960, 1440, 1920, 2560],
@@ -60,8 +63,7 @@ async function readVersion(): Promise<string> {
   return config.fallbackVersion;
 }
 
-async function buildImage(key: Img, widths: number[]): Promise<Picture> {
-  const src = join(ASSETS, `${key}.png`);
+async function buildImage(key: string, widths: number[], src = join(ASSETS, `${key}.png`)): Promise<Picture> {
   const input = await readFile(src);
   const meta = await sharp(input).metadata();
   const w0 = meta.width!;
@@ -94,6 +96,35 @@ async function buildImage(key: Img, widths: number[]): Promise<Picture> {
   pic.width = big;
   pic.height = Math.round((h0 * big) / w0);
   return pic;
+}
+
+async function exists(path: string): Promise<boolean> {
+  return stat(path).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** Copies a video into /media with a content hash (cached forever by _headers). */
+async function media(name: string, ext: "webm" | "mp4"): Promise<string> {
+  const data = await readFile(join(MEDIA, `${name}.${ext}`));
+  return emit(`media/${name}.${hash(data)}.${ext}`, data);
+}
+
+async function loop(name: string, width: number, height: number): Promise<Loop> {
+  return { webm: await media(name, "webm"), mp4: await media(name, "mp4"), width, height };
+}
+
+/** A feature clip with its poster (AVIF and WebP, from <name>-poster.webp). Null when it wasn't recorded. */
+async function clipMedia(name: Clip, widths: number[]): Promise<ClipMedia | null> {
+  const posterSrc = join(MEDIA, `${name}-poster.webp`);
+  if (!(await exists(join(MEDIA, `${name}.webm`))) || !(await exists(join(MEDIA, `${name}.mp4`))) || !(await exists(posterSrc))) {
+    console.warn(`site: clip "${name}" not found in site/media, using the screenshot instead`);
+    return null;
+  }
+  const meta = await sharp(await readFile(posterSrc)).metadata();
+  const poster = await buildImage(`clip-${name}`, widths, posterSrc);
+  return { ...(await loop(name, meta.width!, meta.height!)), poster };
 }
 
 async function copyDir(from: string, to: string) {
@@ -192,9 +223,13 @@ async function main() {
   };
   await emit("site.webmanifest", JSON.stringify(manifest, null, 2));
 
-  // Demo video (same file as the README)
-  const video = await readFile(join(ASSETS, "demo.mp4"));
-  const videoUrl = await emit(`media/demo.${hash(video)}.mp4`, video);
+  // Hero loop (the README demo, re-encoded by `npm run media`) and the feature clips.
+  const hero = { large: await loop("hero-1280", 1280, 800), small: await loop("hero-720", 720, 450) };
+  const clips: Record<Clip, ClipMedia | null> = {
+    switch: await clipMedia("switch", [480, 800, 1280]),
+    agents: await clipMedia("agents", [480, 800, 1280]),
+    phone: await clipMedia("phone", [300, 430, 600, 860]),
+  };
 
   const base: Omit<Ctx, "og"> = {
     siteUrl,
@@ -204,12 +239,19 @@ async function main() {
     font: fontUrl,
     pictures,
     icons: { svg: "/favicon.svg", ico: "/favicon.ico", apple: "/apple-touch-icon.png", manifest: "/site.webmanifest" },
-    video: { src: videoUrl, poster: "/media/demo-poster.webp", width: 1280, height: 800 },
+    hero,
+    clips,
   };
 
   await emit("index.html", renderPage("en", { ...base, og: { url: "/og.png", width: 1200, height: 630 } }));
   await emit("pt-BR/index.html", renderPage("pt-BR", { ...base, og: { url: "/og-pt-BR.png", width: 1200, height: 630 } }));
   await emit("404.html", notFound(css));
+
+  // For LLMs and AI search (https://llmstxt.org): an index, the full text, and each page as Markdown.
+  await emit("llms.txt", llmsTxt(siteUrl, version));
+  await emit("llms-full.txt", llmsFull(siteUrl, version));
+  await emit("index.md", pageMarkdown("en", siteUrl, version));
+  await emit("pt-BR/index.md", pageMarkdown("pt-BR", siteUrl, version));
 
   // SEO files
   const today = new Date().toISOString().slice(0, 10);
@@ -223,7 +265,7 @@ async function main() {
 </urlset>
 `,
   );
-  await emit("robots.txt", `User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${siteUrl}/sitemap.xml\n`);
+  await emit("robots.txt", robots(siteUrl));
 
   const csp = [
     "default-src 'none'",
@@ -265,7 +307,43 @@ async function main() {
 
 /*.html
   Cache-Control: public, max-age=0, must-revalidate
+
+/llms.txt
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=3600
+
+/llms-full.txt
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=3600
+
+/robots.txt
+  Content-Type: text/plain; charset=utf-8
+
+/index.md
+  Content-Type: text/markdown; charset=utf-8
+  Cache-Control: public, max-age=3600
+  Link: <${siteUrl}/>; rel="canonical"
+
+/pt-BR/index.md
+  Content-Type: text/markdown; charset=utf-8
+  Cache-Control: public, max-age=3600
+  Link: <${siteUrl}/pt-BR/>; rel="canonical"
 `,
+  );
+  // Which paths run Functions (the host redirect in functions/_middleware.ts and /api/waitlist). Hashed
+  // assets, media and icons are served straight from the edge: free, unlimited, and only ever requested by
+  // a page that the middleware already let through.
+  await emit(
+    "_routes.json",
+    JSON.stringify(
+      {
+        version: 1,
+        include: ["/*"],
+        exclude: ["/assets/*", "/media/*", "/favicon.ico", "/favicon.svg", "/apple-touch-icon.png", "/icon-*", "/og.png", "/og-pt-BR.png", "/site.webmanifest"],
+      },
+      null,
+      2,
+    ),
   );
   await emit(
     "_redirects",
@@ -284,6 +362,49 @@ async function main() {
 
   const files = await countFiles(DIST);
   console.log(`site: built ${files} files into dist/ for ${siteUrl} (v${version}) in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+}
+
+/**
+ * Everyone may crawl everything except the waitlist API. The AI crawlers are listed by name so the
+ * intent is explicit (and survives a stricter default someday); each group repeats the rules because a
+ * crawler follows only the most specific group that names it.
+ */
+function robots(siteUrl: string): string {
+  const ai = [
+    // OpenAI
+    "GPTBot", "OAI-SearchBot", "ChatGPT-User",
+    // Anthropic
+    "ClaudeBot", "Claude-SearchBot", "Claude-User", "anthropic-ai",
+    // Perplexity
+    "PerplexityBot", "Perplexity-User",
+    // Google (Gemini training and grounding) and Apple (Apple Intelligence)
+    "Google-Extended", "Applebot-Extended",
+    // Common Crawl, Meta, Amazon, ByteDance, Mistral, DuckDuckGo, You.com, Cohere
+    "CCBot", "meta-externalagent", "FacebookBot", "Amazonbot", "Bytespider", "MistralAI-User", "DuckAssistBot", "YouBot", "cohere-ai",
+  ];
+  const search = ["Googlebot", "Bingbot", "Applebot", "DuckDuckBot", "YandexBot", "Baiduspider"];
+  const rules = "Allow: /\nDisallow: /api/\n";
+  return `# robots.txt for ${siteUrl}
+# Kabul is open source (MIT) and this site is public: search engines and AI crawlers are welcome.
+# Only the waitlist endpoint (/api/) is off limits.
+#
+# LLM-friendly versions of this site (https://llmstxt.org):
+#   ${siteUrl}/llms.txt         index
+#   ${siteUrl}/llms-full.txt    everything in one file
+#   ${siteUrl}/index.md         the page as Markdown (Portuguese: ${siteUrl}/pt-BR/index.md)
+#
+# Content signals (contentsignals.org): search=yes, ai-input=yes, ai-train=yes
+
+User-agent: *
+${rules}
+# Search engines
+${search.map((b) => `User-agent: ${b}`).join("\n")}
+${rules}
+# AI crawlers and assistants
+${ai.map((b) => `User-agent: ${b}`).join("\n")}
+${rules}
+Sitemap: ${siteUrl}/sitemap.xml
+`;
 }
 
 function notFound(css: string): string {

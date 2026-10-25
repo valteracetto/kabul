@@ -9,6 +9,8 @@
   --m-sat: env(safe-area-inset-top, 0px);
   --m-sab: env(safe-area-inset-bottom, 0px);
 }
+/* Web view curta do iOS 26 (não chega à borda de baixo): o indicador de gestos fica fora dela. */
+:root.m-short-webview { --m-sab: 0px; }
 
 /* ---------- tokens (só quando a PWA está montada) ---------- */
 :root[data-mobile] {
@@ -96,9 +98,10 @@
   /* Altura da barra de abas sem a área do indicador de gestos, e do botão Criar (a lista reserva as duas). */
   --m-tab-h: 56px; --m-fab-h: 52px;
 }
-/* Atrás da barra de status: fundo sólido do app, por cima de tudo menos das folhas. Nada que passe por ali
-   (avatar, título rolando, desfoque da barra recolhida) vaza para a barra de status. */
-.m-app::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: var(--m-sat); background: var(--m-bg); z-index: 45; pointer-events: none; }
+/* Atrás da barra de status: fundo sólido do app, por cima de tudo menos das folhas. Fixo e opaco de propósito:
+   o iOS 26 desfoca o topo da web view (efeito de borda de rolagem) quando não acha ali um elemento fixo de
+   cor sólida; o .m-app, de tela cheia, não conta. */
+.m-app::after { content: ""; position: fixed; left: 0; right: 0; top: 0; height: var(--m-sat); background: var(--m-bg); z-index: 45; pointer-events: none; }
 .m-app button { cursor: pointer; -webkit-user-select: none; user-select: none; }
 .m-app input, .m-app textarea { font-size: 17px; }
 .m-app .grow { flex: 1; }
@@ -122,9 +125,11 @@
 
 /* ---------- barra de navegação ---------- */
 .m-nav {
-  position: relative; z-index: 5; flex: none; display: flex; align-items: center; gap: 8px;
+  /* sticky + fundo opaco: o "cabeçalho fixo" que o iOS 26 procura no topo para pintar a borda com cor sólida
+     em vez de desfocar avatar e botões (o halo em volta deles no print). */
+  position: sticky; top: 0; z-index: 5; flex: none; display: flex; align-items: center; gap: 8px;
   padding: calc(var(--m-sat) + 2px) 16px 8px; min-height: calc(var(--m-sat) + 54px);
-  background: transparent; transition: background .2s, box-shadow .2s;
+  background: var(--m-bg); transition: background .2s, box-shadow .2s;
 }
 .m-nav.collapsed { background: var(--m-bar); -webkit-backdrop-filter: blur(22px) saturate(180%); backdrop-filter: blur(22px) saturate(180%); box-shadow: 0 .5px 0 var(--m-sep); }
 .m-nav-side { display: flex; align-items: center; gap: 10px; min-width: 44px; z-index: 1; }
@@ -284,6 +289,11 @@
 .m-kb .m-tabbar, .m-kb .m-fab { display: none; }
 .m-fab { position: absolute; right: 18px; bottom: calc(var(--m-sab) + var(--m-tab-h) + 16px); z-index: 7; height: var(--m-fab-h); display: inline-flex; align-items: center; gap: 8px; padding: 0 22px 0 18px; border: 0; border-radius: 26px; background: var(--m-fab-bg); color: var(--m-fab-fg); font-size: 17px; font-weight: 600; box-shadow: var(--m-shadow); transition: transform .14s; }
 .m-fab:active { transform: scale(.95); }
+/* Nova versão servida pelo kabuld: recarregar troca o JS antigo da PWA aberta. */
+.m-newver { position: fixed; top: calc(var(--m-sat) + 8px); left: 50%; transform: translateX(-50%); z-index: 46; display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 22px; background: var(--m-fab-bg); color: var(--m-fab-fg); font-size: 15px; font-weight: 500; white-space: nowrap; box-shadow: var(--m-shadow); }
+.m-newver button { border: 0; border-radius: 16px; padding: 7px 14px; background: var(--m-tint); color: #fff; font: inherit; font-weight: 600; }
+.m-connecting .m-spinner { animation: m-spin .8s linear infinite; margin-bottom: 6px; }
+.m-connecting .m-chip-btn { margin-top: 10px; }
 
 /* ---------- folhas ---------- */
 .m-app .m-sheet-bg { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, .45); display: block; animation: m-fade-in .25s ease-out; }

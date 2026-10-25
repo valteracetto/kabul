@@ -103,6 +103,7 @@ export const BACKEND_ERRORS: [RegExp, Key][] = [
   [/Sem conexão com o servidor de atualizações; tente mais tarde\./, "errors.updateNoConn"],
   [/Não deu para procurar atualizações:/, "errors.updateFailed"],
   [/Nenhuma atualização pendente; procure de novo\./, "errors.updateNone"],
+  [/Não foi possível verificar agora\./, "errors.updateNotNow"],
   [/endpoint de push precisa ser https/, "errors.pushHttps"],
   [/serviço de push desconhecido/, "errors.pushUnknown"],
   [/método não aceito/, "errors.methodNotAllowed"],

@@ -16,4 +16,6 @@ id = "0083b9dd4f2d471d8658f666f9e9cd5d"
 # Sign-ups allowed per IP in each window, and the window in seconds (KV's minimum TTL is 60).
 WAITLIST_RATE_LIMIT = "5"
 WAITLIST_RATE_WINDOW = "3600"
+# Canonical host: functions/_middleware.ts sends every other host (www, the production *.pages.dev) here with a 301.
+CANONICAL_HOST = "kabul.dev"
 # WAITLIST_SALT is a secret, not a var: npx wrangler pages secret put WAITLIST_SALT --project-name kabul

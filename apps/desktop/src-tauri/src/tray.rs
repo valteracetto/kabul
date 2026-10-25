@@ -130,7 +130,8 @@ pub fn agents_running(app: State<App>) -> Vec<RunningAgent> {
     v
 }
 
-/// Ações do popover: abrir o Kabul (opcionalmente num workspace), novo workspace, pausar todos.
+/// Ações do popover: abrir o Kabul (opcionalmente num workspace), novo workspace, pausar todos,
+/// procurar atualizações.
 #[tauri::command]
 pub fn tray_action(handle: AppHandle, action: String, workspace_id: Option<String>) -> R<()> {
     if let Some(p) = handle.get_webview_window("tray") {
@@ -138,7 +139,7 @@ pub fn tray_action(handle: AppHandle, action: String, workspace_id: Option<Strin
     }
     let main = handle.get_webview_window("main").ok_or(tr("janela principal não encontrada", "main window not found"))?;
     match action.as_str() {
-        "open" | "open-workspace" | "new-workspace" | "usage" => {
+        "open" | "open-workspace" | "new-workspace" | "usage" | "check-updates" => {
             let _ = main.unminimize();
             let _ = main.show();
             let _ = main.set_focus();
@@ -304,6 +305,8 @@ fn tray_menu(handle: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &MenuItem::with_id(handle, "tray-pause", tr("Pausar todos os agentes", "Pause all agents"), true, None::<&str>)?,
             &PredefinedMenuItem::separator(handle)?,
             &MenuItem::with_id(handle, "tray-refresh", tr("Atualizar limites", "Refresh limits"), true, None::<&str>)?,
+            &PredefinedMenuItem::separator(handle)?,
+            &MenuItem::with_id(handle, "tray-updates", tr("Procurar atualizações…", "Check for Updates…"), true, None::<&str>)?,
         ],
     )
 }
@@ -390,6 +393,7 @@ fn build(handle: &AppHandle) -> tauri::Result<()> {
                 "tray-new" => "new-workspace",
                 "tray-usage" => "usage",
                 "tray-pause" => "pause-all",
+                "tray-updates" => "check-updates",
                 "tray-refresh" => {
                     let h = app.clone();
                     tauri::async_runtime::spawn(async move {

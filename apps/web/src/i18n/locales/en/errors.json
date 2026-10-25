@@ -92,6 +92,7 @@
   "errors.updateNoConn": "Can't reach the update server; try again later.",
   "errors.updateFailed": "Couldn't check for updates:",
   "errors.updateNone": "No pending update; check again.",
+  "errors.updateNotNow": "Couldn't check right now.",
   "errors.pushHttps": "push endpoint must be https",
   "errors.pushUnknown": "unknown push service",
   "errors.methodNotAllowed": "method not allowed",

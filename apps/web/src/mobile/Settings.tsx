@@ -201,7 +201,7 @@ function LanguagePage() {
 }
 
 function About() {
-  const [h, setH] = useState<{ name: string; version: string } | null>(null);
+  const [h, setH] = useState<Awaited<ReturnType<typeof health>>>(null);
   useEffect(() => void health().then(setH), []);
   return (
     <>
@@ -210,8 +210,10 @@ function About() {
         <b>Kabul</b>
         <span>{t("mobile.settings.tagline")}</span>
       </div>
-      <Group>
-        <Row title="kabuld" value={h?.version ?? "—"} />
+      {/* Só informativo: a atualização se faz no Mac (Kabul › Procurar atualizações…). */}
+      <Group footer={h?.update ? t("mobile.settings.updateHint") : undefined}>
+        <Row title={t("mobile.settings.macVersion")} value={<span data-testid="m-mac-version">{h?.version ?? "—"}</span>} />
+        {h?.update && <Row title={t("mobile.settings.updateAvailable")} value={<span data-testid="m-mac-update">{h.update.version}</span>} />}
         <Row title={t("mobile.settings.computer")} value={h?.name ?? "—"} />
       </Group>
     </>

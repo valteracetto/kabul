@@ -7,7 +7,9 @@
     <meta name="theme-color" content="#f2f1ee" media="(prefers-color-scheme: light)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- Barra de status opaca: com black-translucent o iOS 26 deixa a web view da PWA instalada 62 pt curta
+         (faixa do sistema embaixo) e desfoca o topo da página; opaca, a página começa abaixo dela e vai até a base. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="Kabul" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

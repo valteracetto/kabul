@@ -15,7 +15,8 @@ export const EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"];
 export const EFFORT_PT: Record<string, string> = lazyRecord(() => ({ low: t("mobile.effort.low"), medium: t("mobile.effort.medium"), high: t("mobile.effort.high"), xhigh: t("mobile.effort.xhigh"), max: t("mobile.effort.max"), ultra: t("mobile.effort.ultra") }));
 
 /** Versão e nome do kabuld (rota HTTP pública `/api/health`). */
-export const health = (): Promise<{ kabuld: boolean; name: string; version: string } | null> => fetch("/api/health").then((r) => r.json(), () => null).catch(() => null);
+/** `update`: versão nova que o app do Mac achou e ainda não instalou. */
+export const health = (): Promise<{ kabuld: boolean; name: string; version: string; update?: { version: string; channel: string } | null } | null> => fetch("/api/health").then((r) => r.json(), () => null).catch(() => null);
 
 export type Status = "working" | "waiting" | "idle";
 export interface Group { key: string; repo: string; workspace: string | null; workspace_id: string | null }

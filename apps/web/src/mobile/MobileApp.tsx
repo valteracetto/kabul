@@ -25,21 +25,37 @@ const TAB_KEY = "kabul.m.tab";
 const standalone = () => (navigator as Navigator & { standalone?: boolean }).standalone === true || matchMedia("(display-mode: standalone)").matches;
 
 /**
- * Altura da tela do app sem teclado. Na PWA do iPhone (iOS 26, barra de status `black-translucent`),
- * `innerHeight` e `visualViewport.height` vêm curtos pela área segura de cima (956 − 62 no 16 Pro Max): usar
- * esse número deixava a barra de abas flutuando com uma faixa preta embaixo. Ocupando a largura toda da tela,
- * a PWA ocupa a altura toda também, então vale a altura da tela (na orientação atual).
+ * A web view da PWA instalada não chega à borda de baixo da tela? No iOS 26 (barra de status
+ * `black-translucent`) ela fica curta pela área segura de cima (956 − 62 = 894 pt no 16 Pro Max): os 62 pt de
+ * baixo são do sistema e o web não pinta ali. O indicador de gestos fica fora da web view, mas o
+ * `env(safe-area-inset-bottom)` continua 34: sem zerar, a barra de abas ganha um vão morto embaixo.
+ *
+ * Com a barra de status opaca (`black`/`default`, o padrão agora) a web view começa abaixo dela:
+ * também tem tela − 62 de altura, mas encosta na base e não tem área segura em cima. Por isso só conta como
+ * curta quando a página ainda desenha atrás da barra de status (área segura de cima > 0).
  */
-function fullHeight() {
-  const h = Math.max(window.innerHeight, document.documentElement.clientHeight, window.visualViewport?.height ?? 0);
-  if (PLATFORM !== "ios" || !standalone() || !screen.width || !screen.height) return h;
+function shortWebView(h: number) {
+  if (PLATFORM !== "ios" || !standalone() || !screen.width || !screen.height) return false;
   const land = window.innerWidth > Math.min(screen.width, screen.height) + 1;
   const sw = land ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
   const sh = land ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
-  return Math.abs(window.innerWidth - sw) <= 1 ? Math.max(h, sh) : h;
+  return Math.abs(window.innerWidth - sw) <= 1 && sh - h > 20 && safeTop() > 0;
 }
 
-/** Altura visível de verdade (o teclado do iPhone encolhe o visualViewport, não o layout). */
+/** Área segura de cima em uso (a mesma `--m-sat` do CSS). */
+function safeTop() {
+  const p = document.createElement("div");
+  p.style.cssText = "position:fixed;top:0;left:0;width:0;visibility:hidden;height:var(--m-sat)";
+  document.body.appendChild(p);
+  const h = p.getBoundingClientRect().height;
+  p.remove();
+  return h;
+}
+
+/**
+ * Altura visível de verdade (o teclado do iPhone encolhe o visualViewport, não o layout). Nunca maior que a
+ * web view: a altura da tela (0.9.0) passava da web view curta do iOS 26 e cortava os rótulos das abas.
+ */
 function useVisualViewport() {
   useEffect(() => {
     const vv = window.visualViewport;
@@ -48,11 +64,10 @@ function useVisualViewport() {
     root.dataset.platform = PLATFORM;
     if (!vv) return;
     const upd = () => {
-      const full = fullHeight();
-      // Teclado aberto: só a parte visível acima dele; fechado: a tela inteira.
-      const kb = full - vv.height > 120;
-      root.style.setProperty("--m-vvh", `${Math.round(kb ? vv.height : full)}px`);
+      const kb = window.innerHeight - vv.height > 120;
+      root.style.setProperty("--m-vvh", `${Math.round(vv.height)}px`);
       root.classList.toggle("m-kb", kb);
+      root.classList.toggle("m-short-webview", !kb && shortWebView(Math.max(vv.height, window.innerHeight)));
       // O Safari rola a página para mostrar o campo; a tela é fixa, então volta para o topo.
       if (window.scrollY) window.scrollTo(0, 0);
     };
@@ -91,6 +106,8 @@ function useThemeColor() {
     const upd = () => {
       const c = getComputedStyle(document.documentElement).getPropertyValue("--m-bg").trim() || "#0c0a09";
       document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", c));
+      // Barra de status opaca da cor do tema (o iOS lê ao abrir o app instalado): preta no escuro, clara no claro.
+      document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.setAttribute("content", document.documentElement.dataset.theme === "light" ? "default" : "black");
     };
     upd();
     window.addEventListener("kabul:theme", upd);
@@ -139,7 +156,42 @@ function Incompatible({ reason }: { reason: string | null }) {
   );
 }
 
+/** Script do app no HTML (o Vite põe o hash do build no nome): muda quando o kabuld passa a servir outro build. */
+const entryOf = (html: string) => html.match(/<script[^>]*type="module"[^>]*src="([^"]+)"/)?.[1] ?? null;
+
+/**
+ * Nova versão do app no kabuld (atualizou o Kabul no computador): a PWA aberta continua com o JS antigo até
+ * recarregar. Confere o HTML ao reconectar e ao voltar ao app; se o build mudou, oferece recarregar.
+ */
+function useNewVersion(conn: ConnState) {
+  const [fresh, setFresh] = useState(false);
+  const check = useRef<() => void>(() => {});
+  useEffect(() => {
+    const mine = document.querySelector<HTMLScriptElement>('script[type="module"][src]')?.getAttribute("src") ?? null;
+    if (!mine) return;
+    check.current = () =>
+      void fetch("/m/", { cache: "no-store" })
+        .then((r) => (r.ok ? r.text() : ""))
+        .then((html) => {
+          const now = entryOf(html);
+          if (now && now !== mine) setFresh(true);
+        })
+        .catch(() => {});
+    const vis = () => document.visibilityState === "visible" && check.current();
+    document.addEventListener("visibilitychange", vis);
+    return () => document.removeEventListener("visibilitychange", vis);
+  }, []);
+  const dropped = useRef(false);
+  useEffect(() => {
+    // Reconectou depois de cair (o kabuld reiniciou, talvez atualizado): confere.
+    if (conn === "closed") dropped.current = true;
+    if (conn === "open" && dropped.current) ((dropped.current = false), check.current());
+  }, [conn]);
+  return fresh;
+}
+
 function Shell({ conn, route }: { conn: ConnState; route: Route }) {
+  const fresh = useNewVersion(conn);
   const [tab, setTabState] = useState<Tab>(() => (localStorage.getItem(TAB_KEY) as Tab) || "home");
   const setTab = (t: Tab) => {
     setNavDir("tab");
@@ -174,6 +226,12 @@ function Shell({ conn, route }: { conn: ConnState; route: Route }) {
   return (
     <div className="m-app">
       <UpdateBanner />
+      {fresh && (
+        <div className="m-newver" role="status" data-testid="m-new-version">
+          <span>{t("mobile.app.newVersion")}</span>
+          <button onClick={() => location.reload()} data-testid="m-new-version-reload">{t("mobile.app.reload")}</button>
+        </div>
+      )}
       <div className={"m-stack" + (top ? " covered" : "")} aria-hidden={!!top}>
         <Screen key={tab} anim={navDir() === "tab" ? "fade" : "none"}>
           {tab === "home" && <Home conn={conn} onSettings={() => setTab("settings")} />}

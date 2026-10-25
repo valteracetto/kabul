@@ -92,6 +92,7 @@
   "errors.updateNoConn": "Sem conexão com o servidor de atualizações; tente mais tarde.",
   "errors.updateFailed": "Não deu para procurar atualizações:",
   "errors.updateNone": "Nenhuma atualização pendente; procure de novo.",
+  "errors.updateNotNow": "Não foi possível verificar agora.",
   "errors.pushHttps": "endpoint de push precisa ser https",
   "errors.pushUnknown": "serviço de push desconhecido",
   "errors.methodNotAllowed": "método não aceito",

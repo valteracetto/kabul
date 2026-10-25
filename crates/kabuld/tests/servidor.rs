@@ -13,6 +13,8 @@ fn free_port() -> u16 {
 }
 
 fn server() -> (kabuld::Server, std::path::PathBuf) {
+    // Servidor tmux próprio do teste: nunca o padrão do usuário (o kabuld dele listaria estas sessões).
+    kabul_core::tmux::use_test_server();
     let home = std::env::temp_dir().join(format!("kabuld-it-{}-{}", std::process::id(), kabuld::auth::random_token(4)));
     let cfg = kabuld::Config { port: free_port(), home: home.clone(), web_dir: None, tailscale: false, secrets: Arc::new(kabuld::secrets::MemStore::default()), monitor_ms: 300, assets: None };
     (kabuld::start(cfg).unwrap(), home)
@@ -155,6 +157,15 @@ async fn saude_e_cors() {
     assert_eq!(r.header("access-control-allow-origin"), Some("*"));
     let v: Value = serde_json::from_str(&r.into_string().unwrap()).unwrap();
     assert_eq!(v["kabuld"], true);
+    assert_eq!(v["update"], Value::Null, "sem versão nova no Mac");
+    // O app do Mac achou versão nova: o celular vê em Configurações › Sobre.
+    std::fs::write(home.join("update-available.json"), r#"{"version":"99.0.0","channel":"stable"}"#).unwrap();
+    let v: Value = serde_json::from_str(&ureq::get(&format!("http://127.0.0.1:{port}/api/health")).call().unwrap().into_string().unwrap()).unwrap();
+    assert_eq!(v["update"]["version"], "99.0.0");
+    // A mesma versão que já roda não é "atualização".
+    std::fs::write(home.join("update-available.json"), format!(r#"{{"version":"{}"}}"#, kabul_core::schema::APP_VERSION)).unwrap();
+    let v: Value = serde_json::from_str(&ureq::get(&format!("http://127.0.0.1:{port}/api/health")).call().unwrap().into_string().unwrap()).unwrap();
+    assert_eq!(v["update"], Value::Null);
     srv.stop();
     let _ = std::fs::remove_dir_all(home);
 }

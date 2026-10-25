@@ -3,50 +3,77 @@ import { test, expect, devices, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 
 // PWA do celular instalada na Tela de Início (standalone), em tela cheia: o topo encosta na barra de status
-// (área segura de cima), a barra de abas encosta na base com só a área do indicador de gestos dentro dela,
+// (área segura de cima) sem desfoque, a barra de abas encosta na base da web view com os rótulos à vista,
 // nada fica atrás do botão Criar e o contador "Todas" conta o que a lista mostra. Dados 100% fictícios
 // (`/m/?mock&demo`). Capturas em .context/comparar/mobile-fix/ (CAPTURA=depois, ou outro prefixo).
 
 const OUT = "../../.context/comparar/mobile-fix";
 const URL = "/m/?mock&demo&quieto&fora";
 
-type Aparelho = { nome: string; uso: (typeof devices)[string]; sat: number; sab: number; ios: boolean };
+/** `curta`: a web view do iOS 26 instalado não chega à base da tela (fica 62 pt curta, os de cima). */
+type Aparelho = { nome: string; uso: (typeof devices)[string]; sat: number; sab: number; ios: boolean; curta?: boolean };
 const APARELHOS: Aparelho[] = [
   // iPhone 16 Pro (Dynamic Island): 402×874 pt @3x, área segura 62 pt em cima e 34 pt embaixo.
   { nome: "iphone", uso: { ...devices["iPhone 16 Pro"], viewport: { width: 402, height: 874 }, screen: { width: 402, height: 874 } }, sat: 62, sab: 34, ios: true },
+  // O mesmo iPhone com a web view curta do iOS 26 (o print do Val: a página acaba em 874 − 62 = 812 pt e a
+  // faixa de baixo é do sistema). A 0.9.0 esticava o app até a tela e cortava os rótulos das abas.
+  { nome: "iphone-ios26", uso: { ...devices["iPhone 16 Pro"], viewport: { width: 402, height: 812 }, screen: { width: 402, height: 874 } }, sat: 62, sab: 34, ios: true, curta: true },
+  // Barra de status opaca (`black`, o padrão agora): a página começa abaixo dela (sem área segura em cima),
+  // também com 812 pt, mas vai até a base — o indicador de gestos fica dentro da barra de abas.
+  { nome: "iphone-barra-opaca", uso: { ...devices["iPhone 16 Pro"], viewport: { width: 402, height: 812 }, screen: { width: 402, height: 874 } }, sat: 0, sab: 34, ios: true },
   // Pixel 8 instalado (Chrome): barra de status e barra de gestos dentro da área segura.
   { nome: "android", uso: { ...devices["Pixel 8"], viewport: { width: 412, height: 915 }, screen: { width: 412, height: 915 } }, sat: 36, sab: 20, ios: false },
 ];
 
 /**
  * Standalone de verdade não existe no Playwright: `navigator.standalone` e `(display-mode: standalone)`
- * passam a responder sim, as áreas seguras entram pelas variáveis `--m-sat/--m-sab` (o CSS usa env() por
- * elas) e, no iPhone, a altura que o iOS 26 informa na PWA vem curta pela área segura de cima (o defeito do
- * aparelho do Val: `innerHeight`/`visualViewport.height` = tela − 62 pt).
+ * passam a responder sim e as áreas seguras entram pelas variáveis `--m-sat/--m-sab` (o CSS usa env() por
+ * elas; `:root:root` empata com as regras do app, que vêm depois e ganham, como a da web view curta).
  */
 async function standalone(page: Page, a: Aparelho) {
   await page.addInitScript(({ sat, sab, ios }) => {
     const mm = window.matchMedia.bind(window);
     window.matchMedia = (q: string) => (/display-mode:\s*standalone/.test(q) ? ({ matches: true, media: q, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false } as MediaQueryList) : mm(q));
-    if (ios) {
-      Object.defineProperty(Navigator.prototype, "standalone", { get: () => true, configurable: true });
-      const short = (proto: object, prop: string) => {
-        const d = Object.getOwnPropertyDescriptor(proto, prop);
-        if (d?.get) Object.defineProperty(proto, prop, { configurable: true, get(this: unknown) { return Math.max(0, (d.get!.call(this) as number) - sat); } });
-      };
-      short(Window.prototype, "innerHeight");
-      short(window, "innerHeight");
-      if (window.VisualViewport) short(VisualViewport.prototype, "height");
-    }
+    if (ios) Object.defineProperty(Navigator.prototype, "standalone", { get: () => true, configurable: true });
     const st = document.createElement("style");
-    st.textContent = `:root { --m-sat: ${sat}px !important; --m-sab: ${sab}px !important; } *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; caret-color: transparent !important; }`;
-    const put = () => document.documentElement.appendChild(st);
+    st.textContent = `:root:root { --m-sat: ${sat}px; --m-sab: ${sab}px; } *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; caret-color: transparent !important; }`;
+    const put = () => document.documentElement.prepend(st);
     if (document.documentElement) put();
     else document.addEventListener("DOMContentLoaded", put);
   }, { sat: a.sat, sab: a.sab, ios: a.ios });
 }
 
 const box = async (page: Page, testid: string) => (await page.getByTestId(testid).first().boundingBox())!;
+
+/** Elementos com desfoque (backdrop-filter/filter) e a fração da tela que cada um cobre. */
+const desfoques = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>("body *")]
+      .map((el) => {
+        const s = getComputedStyle(el);
+        const bf = s.backdropFilter || s.getPropertyValue("-webkit-backdrop-filter");
+        const blur = (bf && bf !== "none") || /blur/.test(s.filter);
+        const r = el.getBoundingClientRect();
+        const w = Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0));
+        const h = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0));
+        return blur ? { cls: String(el.className).slice(0, 40), area: (w * h) / (innerWidth * innerHeight) } : null;
+      })
+      .filter(Boolean) as { cls: string; area: number }[],
+  );
+
+/** Os três rótulos das abas inteiros dentro da web view, com texto e cor visíveis. */
+async function rotulosVisiveis(page: Page) {
+  const H = await page.evaluate(() => innerHeight);
+  const labels = page.locator(".m-tabbar .m-tab-label");
+  await expect(labels).toHaveCount(3);
+  for (const l of await labels.all()) {
+    await expect(l).toBeVisible();
+    await expect(l).not.toHaveText("");
+    const b = (await l.boundingBox())!;
+    expect(b.height).toBeGreaterThan(8);
+    expect(b.y + b.height).toBeLessThanOrEqual(H);
+  }
+}
 
 for (const a of APARELHOS) {
   test.describe(a.nome, () => {
@@ -65,11 +92,15 @@ for (const a of APARELHOS) {
       const pre = process.env.CAPTURA ?? "depois";
       await page.screenshot({ path: `${OUT}/${pre}-${a.nome}-topo.png` });
 
+      // Nada desfocado cobrindo a tela no estado normal (só a barra de abas, que é pequena).
+      for (const d of await desfoques(page)) expect(d.area, `desfoque em .${d.cls}`).toBeLessThanOrEqual(0.2);
+
       // Topo: o cabeçalho começa logo abaixo da área segura (nada de área somada duas vezes)...
       const menu = await box(page, "m-menu");
       expect(menu.y).toBeGreaterThanOrEqual(a.sat - 1);
       expect(menu.y - a.sat).toBeLessThanOrEqual(8);
-      // ...e atrás da barra de status o fundo é sólido, da cor do app (sem brilho nem desfoque vazando).
+      // ...atrás da barra de status há um elemento fixo, opaco, da cor do app, e o cabeçalho é "grudado" e
+      // opaco: é o que o iOS 26 procura no topo para pintar a borda com cor sólida em vez de desfocar.
       const topo = await page.evaluate(() => {
         const app = document.querySelector<HTMLElement>(".m-app")!;
         const s = getComputedStyle(app, "::after");
@@ -79,22 +110,31 @@ for (const a of APARELHOS) {
         const cor = getComputedStyle(probe).color;
         probe.remove();
         const nav = document.querySelector<HTMLElement>(".m-nav")!;
-        return { pos: s.position, top: s.top, h: s.height, bg: s.backgroundColor, cor, z: Number(s.zIndex), navZ: Number(getComputedStyle(nav).zIndex), appTop: app.getBoundingClientRect().top };
+        const ns = getComputedStyle(nav);
+        return { pos: s.position, top: s.top, h: s.height, bg: s.backgroundColor, cor, z: Number(s.zIndex), navZ: Number(ns.zIndex), navPos: ns.position, navBg: ns.backgroundColor, appTop: app.getBoundingClientRect().top };
       });
       expect(topo.appTop).toBe(0);
-      expect(topo.pos).toBe("absolute");
+      expect(topo.pos).toBe("fixed");
       expect(topo.top).toBe("0px");
       expect(topo.h).toBe(`${a.sat}px`);
       expect(topo.bg).toBe(topo.cor);
       expect(topo.z).toBeGreaterThan(topo.navZ);
+      expect(topo.navPos).toBe("sticky");
+      expect(topo.navBg).toBe(topo.cor);
 
-      // Base: a barra de abas encosta na borda de baixo e só a área do indicador fica dentro dela.
+      // Base: o app acaba onde acaba a web view (nunca passa dela) e a barra de abas encosta ali, com os
+      // rótulos à vista. Web view inteira: só a área do indicador de gestos fica dentro da barra; web view
+      // curta (iOS 26): o indicador está fora dela, então sem vão embaixo dos rótulos.
       const app = await page.locator(".m-app").first().boundingBox();
       expect(Math.round(app!.y + app!.height)).toBe(H);
       const tab = await page.locator(".m-tabbar").boundingBox();
       expect(Math.round(tab!.y + tab!.height)).toBe(H);
       const pad = await page.locator(".m-tabbar").evaluate((el) => parseFloat(getComputedStyle(el).paddingBottom));
-      expect(pad).toBe(a.sab);
+      expect(pad).toBe(a.curta ? 6 : a.sab);
+      await expect(page.locator("html")).toHaveClass(a.curta ? /m-short-webview/ : /^(?!.*m-short-webview)/);
+      await rotulosVisiveis(page);
+      // Barra de status opaca da cor do tema (escuro: preta), sem a translúcida que encurta a web view no iOS 26.
+      if (a.ios) await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute("content", "black");
 
       // Contador "Todas": conta as linhas da lista (workspaces, sessões e as de fora do Kabul), mesmo sem sessões ao vivo.
       const linhas = await page.locator('[data-testid="m-ws"], [data-testid="m-session"], [data-testid^="m-external-"][data-testid$="running"], [data-testid="m-external-recent"]').count();

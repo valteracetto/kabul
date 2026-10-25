@@ -8,6 +8,13 @@ export type Lang = "en" | "pt-BR";
 /** y = confirmed, p = partial, u = not confirmed yet, n = not available */
 export type Mark = "y" | "p" | "u" | "n";
 export type Cell = [Mark, string?];
+/** Short clips from the app's demo environment (site/media, recorded by apps/web `npm run demo:site-clips`). */
+export type Clip = "switch" | "agents" | "phone";
+export type RelayAgent = "claude" | "codex" | "gemini";
+export type RelayLine =
+  | { kind: "user"; text: string }
+  | { kind: "agent"; agent: RelayAgent; who: string; text: string }
+  | { kind: "switch"; agent: RelayAgent; text: string };
 export type Img =
   | "hero"
   | "model-picker"
@@ -64,6 +71,9 @@ const en = {
     fine: "Free and open source, MIT license. macOS 14 or later, Apple Silicon and Intel.",
     lanesLabel: "Drives the real agent CLIs",
     alt: "Kabul: parallel workspaces in the sidebar, a diff with a review comment and the agent chat asking to apply an edit",
+    videoLabel: "Kabul demo: create a workspace from a prompt, let Claude work, switch to Codex in the same chat, approve a command and open the pull request",
+    play: "Play the demo",
+    pause: "Pause the demo",
   },
   diff: {
     title: "Three things Kabul does differently",
@@ -97,6 +107,38 @@ const en = {
       },
     ],
   },
+  relay: {
+    label: "One conversation that goes from Claude to Codex to Gemini, on the same branch",
+    branch: "fix/flaky-cart-totals",
+    you: "You",
+    composer: "Ask for changes…",
+    models: { claude: "Claude · Claude Code", codex: "GPT · Codex", gemini: "Gemini · Gemini CLI" } as Record<RelayAgent, string>,
+    lines: [
+      { kind: "user", text: "The cart totals test fails about one run in ten. Find out why." },
+      { kind: "agent", agent: "claude", who: "Claude · Claude Code", text: "The discount is rounded before the tax, so some totals drift by a cent. Fixed in <code>cart/totals.ts</code>." },
+      { kind: "switch", agent: "codex", text: "Switched to GPT · Codex. Same branch, same conversation." },
+      { kind: "user", text: "Write regression tests for the rounding." },
+      { kind: "agent", agent: "codex", who: "GPT · Codex", text: "Added 3 tests at the rounding edges. 14 passing." },
+      { kind: "switch", agent: "gemini", text: "Switched to Gemini · Gemini CLI." },
+      { kind: "agent", agent: "gemini", who: "Gemini · Gemini CLI", text: "Reviewed the diff: zero-quantity items skipped the discount. Covered that too." },
+    ] as RelayLine[],
+  },
+  clips: {
+    play: "Play video",
+    pause: "Pause video",
+    switch: {
+      title: "Switch models",
+      caption: "From Claude to Codex in the same chat, on the same branch.",
+      alt: "Video: in a chat with Claude, the model picker switches to Codex, which picks up the conversation on the same branch",
+    },
+    agents: {
+      caption: "The Agents panel: every chat in every workspace, live, with subagents, tokens and cost.",
+      alt: "Video: the Agents panel with several agents working at once across workspaces, tokens and cost going up",
+    },
+    phone: {
+      alt: "Video: on iPhone, open the session that waits for you and approve the command; the agent keeps going",
+    },
+  } as { play: string; pause: string } & Record<Clip, { title?: string; caption?: string; alt: string }>,
   why: {
     title: "The workbench around your agents",
     body: [
@@ -277,6 +319,9 @@ const en = {
     license: "License",
     credits: "Credits",
     version: "Version",
+    createdBy: "Created by Valter Acetto",
+    builtWith: "Built with Claude",
+    sponsor: "Sponsor on GitHub",
   },
 };
 
@@ -315,6 +360,9 @@ const pt: Content = {
     fine: "Gratuito e de código aberto, licença MIT. macOS 14 ou mais novo, Apple Silicon e Intel.",
     lanesLabel: "Conduz os CLIs de verdade",
     alt: "Kabul: workspaces em paralelo na barra lateral, um diff com comentário de revisão e o chat do agente pedindo para aplicar uma edição",
+    videoLabel: "Demonstração do Kabul: criar um workspace a partir de um pedido, o Claude trabalha, trocar para o Codex na mesma conversa, aprovar um comando e abrir o pull request",
+    play: "Tocar a demonstração",
+    pause: "Pausar a demonstração",
   },
   diff: {
     title: "Três coisas que o Kabul faz diferente",
@@ -347,6 +395,38 @@ const pt: Content = {
         alt: "Duas pessoas na mesma conversa no iPhone e no Android, com avatares de presença e uma aprovação feita pela outra pessoa",
       },
     ],
+  },
+  relay: {
+    label: "Uma conversa que passa do Claude para o Codex e para o Gemini, na mesma branch",
+    branch: "fix/flaky-cart-totals",
+    you: "Você",
+    composer: "Peça mudanças…",
+    models: { claude: "Claude · Claude Code", codex: "GPT · Codex", gemini: "Gemini · Gemini CLI" },
+    lines: [
+      { kind: "user", text: "O teste dos totais do carrinho falha uma vez a cada dez. Descubra por quê." },
+      { kind: "agent", agent: "claude", who: "Claude · Claude Code", text: "O desconto é arredondado antes do imposto, então alguns totais escorregam um centavo. Corrigido em <code>cart/totals.ts</code>." },
+      { kind: "switch", agent: "codex", text: "Trocou para GPT · Codex. Mesma branch, mesma conversa." },
+      { kind: "user", text: "Escreva testes de regressão para o arredondamento." },
+      { kind: "agent", agent: "codex", who: "GPT · Codex", text: "Adicionei 3 testes nas bordas do arredondamento. 14 passando." },
+      { kind: "switch", agent: "gemini", text: "Trocou para Gemini · Gemini CLI." },
+      { kind: "agent", agent: "gemini", who: "Gemini · Gemini CLI", text: "Revisei o diff: itens com quantidade zero pulavam o desconto. Cobri isso também." },
+    ],
+  },
+  clips: {
+    play: "Tocar o vídeo",
+    pause: "Pausar o vídeo",
+    switch: {
+      title: "Trocar de modelo",
+      caption: "Do Claude para o Codex na mesma conversa, na mesma branch.",
+      alt: "Vídeo: numa conversa com o Claude, o seletor de modelo troca para o Codex, que continua a conversa na mesma branch",
+    },
+    agents: {
+      caption: "O painel Agentes: todas as conversas de todos os workspaces, ao vivo, com subagentes, tokens e custo.",
+      alt: "Vídeo: o painel Agentes com vários agentes trabalhando ao mesmo tempo em workspaces diferentes, tokens e custo subindo",
+    },
+    phone: {
+      alt: "Vídeo: no iPhone, abrir a sessão que espera por você e aprovar o comando; o agente continua",
+    },
   },
   why: {
     title: "A bancada em volta dos seus agentes",
@@ -531,6 +611,9 @@ const pt: Content = {
     license: "Licença",
     credits: "Créditos",
     version: "Versão",
+    createdBy: "Criado por Valter Acetto",
+    builtWith: "Feito com o Claude",
+    sponsor: "Patrocinar no GitHub",
   },
 };
 

@@ -11,6 +11,7 @@
     "e2e:kabuld": "playwright test -c playwright.kabuld.config.ts",
     "perf": "playwright test -c playwright.perf.config.ts",
     "demo:capture": "playwright test -c playwright.demo.config.ts && node demo/finish.mjs",
+    "demo:site-clips": "playwright test -c playwright.site-clips.config.ts && node demo/site-clips.mjs",
     "docs:shortcuts": "node scripts/gen-shortcuts-doc.mjs",
     "i18n:check": "node scripts/i18n-check.mjs"
   },

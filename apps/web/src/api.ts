@@ -62,8 +62,10 @@ export interface AppSettings {
   auto_update?: boolean; update_channel?: string; schema_version?: number;
 }
 /** Versão do app instalado e se o updater roda (só no app empacotado). */
-export interface AppVersion { version: string; protocol: number; channel: string; updater: boolean }
-export interface UpdateInfo { current: string; version: string; notes: string | null; date: string | null; channel: string }
+export interface AppVersion { version: string; protocol: number; channel: string; updater: boolean; releases_url?: string }
+/** `size` em bytes; `release_url` é a página da release (notas completas). */
+export interface UpdateInfo { current: string; version: string; notes: string | null; date: string | null; channel: string; size?: number | null; release_url?: string; published_at?: number | null }
+export interface UpdateProgress { downloaded: number; total: number | null }
 export interface SessionSummary { id: string; title: string; model_key: string | null; updated_at: number }
 export interface SessionRecord { id: string; workspace_id: string; title: string; model_key: string | null; agent_session: string | null; updated_at: number; items: unknown }
 /** Processo que o agente deixou rodando (Parar, fechar aba, arquivar, sair). */
@@ -323,6 +325,7 @@ export const api = {
   updateCheck: (channel?: string) => c<UpdateInfo | null>("update_check", { channel }),
   updateInstall: () => c<void>("update_install"),
   onUpdateAvailable: (h: (u: UpdateInfo) => void) => transport.subscribe("update-available", h),
+  onUpdateProgress: (h: (p: UpdateProgress) => void) => transport.subscribe("update-progress", h),
   openExternal: (target: string) => c<void>("open_external", { target }),
   transcribe: (audio: number[], ext: string) => c<string>("transcribe", { audio, ext }),
 
@@ -333,7 +336,7 @@ export const api = {
   usageCsvSave: (days = 30) => c<string>("usage_csv_save", { days }),
   onUsageChanged: (h: () => void) => transport.subscribe("usage-changed", h),
   agentsRunning: () => c<RunningAgent[]>("agents_running"),
-  trayAction: (action: "open" | "open-workspace" | "new-workspace" | "usage" | "pause-all", workspaceId: string | null = null) => c<void>("tray_action", { action, workspaceId }),
+  trayAction: (action: "open" | "open-workspace" | "new-workspace" | "usage" | "pause-all" | "check-updates", workspaceId: string | null = null) => c<void>("tray_action", { action, workspaceId }),
   trayHide: () => c<void>("tray_hide"),
   onTrayAction: (h: (p: { action: string; workspace_id: string | null }) => void) => transport.subscribe("tray-action", h),
 };

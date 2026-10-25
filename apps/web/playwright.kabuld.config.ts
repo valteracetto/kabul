@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// tmux só num servidor próprio (`tmux -L`): o `kabul serve`/kabuld que os testes sobem herdam isto e nunca usam
+// o servidor padrão de quem roda o teste (lá o Kabul de verdade listaria as sessões de teste).
+process.env.KABUL_TMUX_SOCKET ||= `kabul-test-e2e-${process.pid}`;
+
 // E2E contra o kabuld REAL (binário em target/debug, PWA em dist, tmux de verdade com sessões
 // `kabul-test-*`). Celular: iPhone (WebKit) e Android (Pixel 8, Chromium). Desktop: painel Celular e remoto (Chromium).
 // Antes: `cargo build -p kabuld` e `npx vite build` (o globalSetup faz se faltar).

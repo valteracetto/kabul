@@ -139,6 +139,7 @@ mod tests {
     fn stream_compartilhado() {
         use kabul_core::harness::CmdSpec;
         use kabul_core::term::{Cmd, Launch, What};
+        kabul_core::tmux::use_test_server();
         let name = format!("kabul-test-hub-{}", std::process::id());
         let shell = if cfg!(windows) { CmdSpec::new("cmd.exe", ["/Q"]) } else { CmdSpec::new("sh", Vec::<String>::new()) };
         term::backend().open(&Launch::new(&name, None, What::Exec(Cmd::Spec(shell)))).unwrap();
@@ -174,6 +175,7 @@ mod tests {
     fn pane_de_outra_sessao_recusado() {
         use kabul_core::harness::CmdSpec;
         use kabul_core::term::{Cmd, Launch, What};
+        kabul_core::tmux::use_test_server();
         let (a, b) = (format!("kabul-test-pa-{}", std::process::id()), format!("kabul-test-pb-{}", std::process::id()));
         let shell = if cfg!(windows) { CmdSpec::new("cmd.exe", ["/Q"]) } else { CmdSpec::new("sh", Vec::<String>::new()) };
         let be = term::backend();

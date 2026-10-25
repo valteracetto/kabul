@@ -4,6 +4,7 @@ import { noSuggest } from "../noSuggest";
 import { ISearch } from "../icons";
 import { setThemePref } from "../theme";
 import { cloudList } from "./RunsOn";
+import { checkForUpdates } from "./Updates";
 import type { Route } from "../App";
 import { t } from "../i18n";
 
@@ -83,6 +84,7 @@ export function Palette({ repos, workspaces, current, archived, onClose, onRoute
     g(t("app.pal.g.zoomReset"), () => fire("kabul:zoom", 0), "⌘0");
     g(t("app.feedback.title"), () => fire("kabul:feedback"), "⌘⌥F");
     g(t("app.pal.g.diagnostics"), go({ kind: "diagnostics" }), "", "diagnostics doctor");
+    g(t("settings.updates.check"), () => checkForUpdates(), "", "update upgrade version release");
     live.slice(0, 12).forEach((w) => g(t("app.pal.g.cloudSession", { ws: wsTitle(w) }), () => (onRoute({ kind: "workspace", id: w.id }), setTimeout(() => fire("kabul:cloud", w.id), 300)), "", "cloud claude --cloud"));
     // Navegação
     const n = (label: string, run: () => void, kbd?: string) => v.push({ group: t("app.pal.group.nav"), kind: "nav", tab: "all", label, kbd, run });

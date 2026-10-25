@@ -52,6 +52,7 @@ h2 { font-size: clamp(1.85rem, 3.4vw, 2.75rem); }
 h3 { font-size: 1.25rem; letter-spacing: -.015em; line-height: 1.25; }
 p { margin: 0; text-wrap: pretty; }
 .wrap { width: min(100% - 2 * var(--gutter), var(--wrap)); margin-inline: auto; }
+[hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .skip { position: absolute; left: 12px; top: -60px; z-index: 50; background: var(--bone); color: var(--ink); padding: 8px 14px; border-radius: 8px; font-weight: 600; text-decoration: none; }
 .skip:focus { top: 12px; }
@@ -145,7 +146,7 @@ p { margin: 0; text-wrap: pretty; }
 .why-text h2 { margin-bottom: 22px; }
 figure { margin: 0; }
 figcaption { margin-top: 14px; font-size: .9375rem; color: var(--dim); }
-.window video { width: 100%; background: #0f0d0c; }
+.window video { width: 100%; }
 
 /* Features */
 .shots { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 20px; }
@@ -204,7 +205,7 @@ thead th { font-weight: 500; color: var(--ash); font-size: .8125rem; line-height
 .perf table { font-variant-numeric: tabular-nums; }
 .perf caption { padding: 14px 16px; font-size: .875rem; color: var(--dim); border-bottom: 1px solid var(--line); }
 .perf td { text-align: right; white-space: nowrap; }
-.perf thead th:not(:first-child) { text-align: right; }
+.perf thead th:not(:first-child) { text-align: right; width: 7.5em; }
 .perf td.before { color: var(--dim); }
 .perf td.now { color: var(--bone); font-weight: 600; }
 .perf tbody th { font-weight: 400; color: var(--text-2); }
@@ -293,6 +294,146 @@ thead th { font-weight: 500; color: var(--ash); font-size: .8125rem; line-height
 .foot nav a:hover { color: var(--bone); }
 .foot .meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 22px; color: var(--dim); font-size: .875rem; }
 
+/* Footer credits */
+.credits { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 24px; padding-top: 24px; border-top: 1px solid var(--line); }
+.credits > a:first-child { color: var(--text-2); text-decoration: none; padding: 6px 0; }
+.credits > a:first-child:hover { color: var(--bone); text-decoration: underline; }
+.sponsor { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 16px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--bone); text-decoration: none; font-weight: 500; transition: border-color .2s ease, background-color .2s ease; }
+.sponsor svg { color: #db61a2; transition: transform .25s ease; }
+.sponsor:hover { border-color: rgba(219, 97, 162, .55); background: rgba(219, 97, 162, .07); }
+.sponsor:hover svg { transform: scale(1.18); fill: currentColor; }
+
+/* ---------- Video: hero loop, clips, play/pause ---------- */
+.hero-media .hero-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .9s ease; }
+.hero-media.is-playing .hero-video { opacity: 1; }
+.vid-box { position: relative; }
+.vid-box .vid-poster { position: absolute; inset: 0; }
+.vid-box .vid-poster img { width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+.window .vid-box video { position: relative; display: block; width: 100%; height: auto; background: transparent; }
+.vid-box.is-js video { opacity: 0; transition: opacity .5s ease; }
+.vid-box.is-playing video { opacity: 1; }
+.shot .frame .vid-box, .shot .frame .vid-box video { height: 100%; }
+.shot .frame .vid-box video { object-fit: cover; object-position: top left; }
+.vid-toggle {
+  position: absolute; right: 12px; bottom: 12px; z-index: 3; display: grid; place-items: center; width: 36px; height: 36px; padding: 0;
+  border: 1px solid rgba(234, 232, 230, .22); border-radius: 999px; background: rgba(20, 17, 16, .72); color: var(--bone); cursor: pointer;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); opacity: .8; transition: opacity .2s ease, border-color .2s ease;
+}
+.vid-toggle:hover, .vid-toggle:focus-visible { opacity: 1; border-color: rgba(234, 232, 230, .5); }
+.vid-toggle::before { content: ""; width: 10px; height: 12px; background: linear-gradient(90deg, currentColor 0 33%, transparent 33% 67%, currentColor 67%); }
+.vid-toggle.is-paused::before { width: 11px; margin-left: 3px; background: currentColor; clip-path: polygon(0 0, 100% 50%, 0 100%); }
+
+/* The phone clip in a drawn iPhone (the clip is only the screen). */
+.phone-art.has-clip { grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); align-items: center; }
+.device { position: relative; justify-self: center; width: min(100%, 300px); padding: 9px; border-radius: 50px; background: #0b0a09; border: 1px solid #3d3936; box-shadow: inset 0 0 0 2px #1f1c1a, 0 50px 90px -30px rgba(0, 0, 0, .8), 0 0 90px -40px rgba(214, 167, 122, .25); }
+.device .vid-box { border-radius: 41px; background: #000; }
+.device .vid-poster, .device .vid-poster img { border-radius: 41px; overflow: hidden; }
+.device .vid-box video { width: 100%; height: auto; display: block; background: transparent; border-radius: 41px; }
+.device::after { content: ""; position: absolute; z-index: 4; top: 19px; left: 50%; width: 30%; height: 24px; transform: translateX(-50%); border-radius: 999px; background: #000; pointer-events: none; }
+.device .vid-toggle { right: -50px; bottom: 6px; }
+
+/* ---------- The handoff, drawn: Claude → Codex → Gemini in one conversation ---------- */
+.relay { margin: 0; border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--panel); overflow: hidden; box-shadow: 0 40px 120px -30px rgba(0, 0, 0, .8), 0 0 0 1px rgba(0, 0, 0, .4); font-size: .9375rem; line-height: 1.5; }
+.relay-top { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line); font: 500 .8125rem/1 var(--mono); color: var(--ash); }
+.relay-top svg { color: var(--dim); }
+.relay-log { list-style: none; margin: 0; padding: 20px 18px 6px; display: grid; gap: 14px; }
+.rl p { margin: 0; }
+.rl code { white-space: normal; }
+.ag-claude { --c: var(--ag-claude); }
+.ag-codex { --c: var(--ag-codex); }
+.ag-gemini { --c: var(--ag-gemini); }
+.rl-user { justify-self: end; max-width: 84%; padding: 9px 14px; border: 1px solid var(--line-2); border-radius: 14px 14px 4px 14px; background: var(--raise); color: var(--bone); }
+.rl-user .rl-who { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.rl-agent { padding: 1px 0 1px 14px; border-left: 2px solid var(--c); color: var(--text-2); }
+.rl-who { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; font-size: .8125rem; font-weight: 500; color: var(--c); }
+.rl-who i, .relay-model i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--c); }
+.rl-switch { display: flex; align-items: center; gap: 12px; font-size: .8125rem; color: var(--ash); text-align: center; }
+.rl-switch::before, .rl-switch::after { content: ""; flex: 1 1 24px; height: 1px; background: linear-gradient(90deg, transparent, var(--c)); }
+.rl-switch::after { background: linear-gradient(270deg, transparent, var(--c)); }
+.relay-composer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 18px 18px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--ink); font-size: .875rem; color: var(--dim); }
+.relay-ph { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.relay-model { display: grid; justify-items: end; }
+.relay-model > span { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 7px; color: var(--c); font-weight: 500; white-space: nowrap; }
+/* Without motion: the whole conversation, and the model it ended on. */
+.relay-model > span:not(.ag-gemini) { opacity: 0; }
+
+/* ---------- Motion (none of it with prefers-reduced-motion) ---------- */
+.lanes li::after { content: ""; position: absolute; top: 0; left: 0; width: 38%; height: 2px; border-radius: 2px; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .9), transparent); opacity: 0; pointer-events: none; }
+.lanes .l-claude { --lt: 3.4s; --ld: .9s; }
+.lanes .l-codex { --lt: 4.1s; --ld: 1.6s; }
+.lanes .l-agy { --lt: 3.7s; --ld: 1.2s; }
+.lanes .l-gemini { --lt: 4.5s; --ld: 2.3s; }
+.lanes .l-qwen { --lt: 3.9s; --ld: 1.4s; }
+.lanes .l-opencode { --lt: 4.3s; --ld: 2s; }
+.lanes .l-goose { --lt: 3.6s; --ld: 1.1s; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Entrances: one short rise as each block scrolls in (site.js adds .reveal, then .is-in). */
+  .reveal [data-reveal] { transition: opacity .7s cubic-bezier(.2, .7, .2, 1), transform .7s cubic-bezier(.2, .7, .2, 1); }
+  .reveal [data-reveal]:not(.is-in) { opacity: 0; transform: translateY(18px); }
+  .reveal .diff:nth-child(odd) .diff-art:not(.is-in) { transform: translateX(28px); }
+  .reveal .diff:nth-child(even) .diff-art:not(.is-in) { transform: translateX(-28px); }
+  .reveal .diff-art { transition-delay: .08s; }
+  .reveal .feature-list > div:nth-child(3n + 2), .reveal .steps li:nth-child(2), .reveal .sec li:nth-child(2) { transition-delay: .08s; }
+  .reveal .feature-list > div:nth-child(3n), .reveal .steps li:nth-child(3), .reveal .sec li:nth-child(3) { transition-delay: .16s; }
+  .reveal .steps li:nth-child(4), .reveal .sec li:nth-child(4) { transition-delay: .24s; }
+  .reveal .sec li:nth-child(5) { transition-delay: .32s; }
+
+  /* The lanes draw in one after the other on load, then a signal keeps running down each one. */
+  .lanes li::before { transform-origin: left; animation: lane-draw .7s cubic-bezier(.2, .7, .2, 1) both; }
+  .lanes li:nth-child(2)::before { animation-delay: .06s; }
+  .lanes li:nth-child(3)::before { animation-delay: .12s; }
+  .lanes li:nth-child(4)::before { animation-delay: .18s; }
+  .lanes li:nth-child(5)::before { animation-delay: .24s; }
+  .lanes li:nth-child(6)::before { animation-delay: .3s; }
+  .lanes li:nth-child(7)::before { animation-delay: .36s; }
+  .lanes li::after { animation: lane-run var(--lt, 4s) cubic-bezier(.45, 0, .25, 1) var(--ld, 1s) infinite; }
+  .lanes.is-off li::after { animation-play-state: paused; }
+
+  /* The handoff: 16 s, one line after another, the model chip follows the agent that answers. */
+  .relay .rl { animation: 16s cubic-bezier(.2, .7, .2, 1) infinite both; }
+  .relay .r0 { animation-name: rl0; }
+  .relay .r1 { animation-name: rl1; }
+  .relay .r2 { animation-name: rl2; }
+  .relay .r3 { animation-name: rl3; }
+  .relay .r4 { animation-name: rl4; }
+  .relay .r5 { animation-name: rl5; }
+  .relay .r6 { animation-name: rl6; }
+  .relay-model > span { animation: 16s ease infinite both; }
+  .relay-model .ag-claude { animation-name: chip-claude; }
+  .relay-model .ag-codex { animation-name: chip-codex; }
+  .relay-model .ag-gemini { animation-name: chip-gemini; }
+  .relay.is-off .rl, .relay.is-off .relay-model > span { animation-play-state: paused; }
+
+  /* Hover: the line above a feature fills in copper; screenshots lift a little. */
+  @media (hover: hover) {
+    .feature-list > div { position: relative; }
+    .feature-list > div::before { content: ""; position: absolute; top: -1px; left: 0; width: 100%; height: 1px; background: var(--copper); transform: scaleX(0); transform-origin: left; transition: transform .5s cubic-bezier(.2, .7, .2, 1); }
+    .feature-list > div:hover::before { transform: scaleX(1); }
+    .feature-list dt { transition: color .25s ease; }
+    .feature-list > div:hover dt { color: #fff; }
+    .shot .window { transition: transform .4s cubic-bezier(.2, .7, .2, 1), border-color .4s ease; }
+    .shot:hover .window { transform: translateY(-4px); border-color: #4b4643; }
+    .shot .frame picture img { transition: transform .9s cubic-bezier(.2, .7, .2, 1); transform-origin: top left; }
+    .shot:hover .frame picture img { transform: scale(1.03); }
+    .ways a { transition: transform .25s ease, color .25s ease; }
+    .ways li:hover a { transform: translateX(4px); color: var(--copper); }
+  }
+}
+@keyframes lane-draw { from { transform: scaleX(0); opacity: .2; } to { transform: none; opacity: 1; } }
+@keyframes lane-run { 0% { transform: translateX(-100%); opacity: 0; } 12%, 70% { opacity: .9; } 100% { transform: translateX(270%); opacity: 0; } }
+@keyframes rl0 { 0%, 2% { opacity: 0; transform: translateY(8px); } 5%, 90% { opacity: 1; transform: none; } 95%, 100% { opacity: 0; transform: none; } }
+@keyframes rl1 { 0%, 9% { opacity: 0; transform: translateY(8px); } 12%, 90% { opacity: 1; transform: none; } 95%, 100% { opacity: 0; transform: none; } }
+@keyframes rl2 { 0%, 24% { opacity: 0; transform: scaleX(.6); } 27%, 90% { opacity: 1; transform: none; } 95%, 100% { opacity: 0; transform: none; } }
+@keyframes rl3 { 0%, 31% { opacity: 0; transform: translateY(8px); } 34%, 90% { opacity: 1; transform: none; } 95%, 100% { opacity: 0; transform: none; } }
+@keyframes rl4 { 0%, 39% { opacity: 0; transform: translateY(8px); } 42%, 90% { opacity: 1; transform: none; } 95%, 100% { opacity: 0; transform: none; } }
+@keyframes rl5 { 0%, 54% { opacity: 0; transform: scaleX(.6); } 57%, 90% { opacity: 1; transform: none; } 95%, 100% { opacity: 0; transform: none; } }
+@keyframes rl6 { 0%, 62% { opacity: 0; transform: translateY(8px); } 65%, 90% { opacity: 1; transform: none; } 95%, 100% { opacity: 0; transform: none; } }
+@keyframes chip-claude { 0%, 24% { opacity: 1; } 26%, 95% { opacity: 0; } 97%, 100% { opacity: 1; } }
+@keyframes chip-codex { 0%, 24% { opacity: 0; } 26%, 54% { opacity: 1; } 56%, 100% { opacity: 0; } }
+@keyframes chip-gemini { 0%, 54% { opacity: 0; } 56%, 95% { opacity: 1; } 97%, 100% { opacity: 0; } }
+@media print { [data-reveal] { opacity: 1 !important; transform: none !important; } }
+
 /* Responsive */
 @media (max-width: 980px) {
   .nav { display: none; }
@@ -321,6 +462,13 @@ thead th { font-weight: 500; color: var(--ash); font-size: .8125rem; line-height
   .feature-list, .steps { grid-template-columns: minmax(0, 1fr); gap: 28px; }
   .choice { grid-template-columns: minmax(0, 1fr); }
   .phone-art { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .phone-art.has-clip { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+  .device { width: min(78%, 280px); }
+  .relay { font-size: .875rem; }
+  .relay-log { padding-inline: 14px; }
+  .relay-composer { margin-inline: 14px; }
+  .credits { justify-content: flex-start; }
+  .vid-toggle { width: 32px; height: 32px; right: 8px; bottom: 8px; }
   .ways li { grid-template-columns: minmax(0, 1fr); }
   .ways a { grid-column: 1; grid-row: auto; margin-top: 6px; }
   .pix { grid-template-columns: minmax(0, 1fr); }

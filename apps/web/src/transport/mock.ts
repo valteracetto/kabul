@@ -580,14 +580,27 @@ const handlers: Record<string, (a: any) => unknown> = {
   app_settings_save: ({ settings }) => void (db.settings = settings),
   notify: ({ title, body }) => void ((window as any).__notified ??= []).push(`${title}: ${body}`),
   badge_set: ({ count }) => void ((window as any).__badge = count),
-  // Atualizações: `__mock.update` simula uma versão nova; `__mock.offline` simula sem rede.
-  app_version: () => ({ version: __KABUL_VERSION__, protocol: 1, channel: db.settings.update_channel ?? "stable", updater: true }),
+  // Atualizações: `__mock.update` simula uma versão nova; `__mock.offline` simula sem rede;
+  // `__mock.updateError` simula release sem latest.json/assinatura (404); `__mock.noUpdater` simula
+  // fora do app empacotado (dev/web). `__updateChecks` guarda o canal de cada checagem.
+  app_version: () => ({ version: __KABUL_VERSION__, protocol: 1, channel: db.settings.update_channel ?? "stable", updater: !(window as any).__mock?.noUpdater, releases_url: "https://github.com/valteracetto/kabul/releases" }),
   update_check: ({ channel }) => {
+    const ch = channel || (db.settings.update_channel === "beta" ? "beta" : "stable");
+    ((window as any).__updateChecks ??= []).push(ch);
     if ((window as any).__mock?.offline) throw "Sem conexão com o servidor de atualizações; tente mais tarde.";
+    if ((window as any).__mock?.updateError) throw "Não foi possível verificar agora.";
     const u = (window as any).__mock?.update;
-    return u ? { current: __KABUL_VERSION__, notes: null, date: null, channel: channel ?? db.settings.update_channel ?? "stable", ...u } : null;
+    return u ? { current: __KABUL_VERSION__, notes: null, date: null, channel: ch, size: null, release_url: `https://github.com/valteracetto/kabul/releases/tag/v${u.version}`, ...u } : null;
   },
-  update_install: () => void ((window as any).__updateInstalled = true),
+  // Baixa em três passos (evento `update-progress`) e "reinicia".
+  update_install: async () => {
+    const total = (window as any).__mock?.update?.size ?? 18_400_000;
+    for (const f of [0.25, 0.6, 1]) {
+      await new Promise((r) => setTimeout(r, 120));
+      emit("update-progress", { downloaded: Math.round(total * f), total });
+    }
+    (window as any).__updateInstalled = true;
+  },
   accounts_list: ({ provider }) => [{ id: `${provider}:sistema`, provider, nickname: "Padrão do sistema", email: null, plan: null, dir: null, default: !db.accounts.some((a: any) => a.provider === provider && a.default), logged_in: true, env_var: "CLAUDE_CONFIG_DIR", env_confirmed: true }, ...db.accounts.filter((a: any) => a.provider === provider)],
   account_add: ({ provider, nickname }) => { const a = { id: `${provider}:${id()}`, provider, nickname, email: null, plan: null, dir: `/mock/accounts/${provider}`, default: false, logged_in: false, env_var: "CLAUDE_CONFIG_DIR", env_confirmed: true }; db.accounts.push(a); return a; },
   account_update: ({ id: aid, nickname, makeDefault, remove }) => {

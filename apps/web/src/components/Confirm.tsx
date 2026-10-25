@@ -6,7 +6,7 @@ import { t } from "../i18n";
  * Diálogo de confirmação próprio. O WKWebView do Tauri (wry) não implementa `window.confirm`:
  * ele devolve `false` sem mostrar nada — foi por isso que "Arquivar" não fazia nada no app real.
  */
-type Req = { message: string; ok: string; danger: boolean; checkbox?: { label: string; key: string }; procs?: Leftover[]; resolve: (v: boolean, kill?: Leftover[]) => void };
+type Req = { message: string; ok: string; cancel?: string; danger: boolean; checkbox?: { label: string; key: string }; procs?: Leftover[]; resolve: (v: boolean, kill?: Leftover[]) => void };
 let push: ((r: Req) => void) | null = null;
 
 export function confirmDialog(message: string, opts: { ok?: string; danger?: boolean; checkbox?: { label: string; key: string } } = {}): Promise<boolean> {
@@ -23,13 +23,13 @@ export const liveChats = new Map<string, { chat: string; ws: string }>();
  * Confirmação de fechar aba, arquivar ou sair: lista os processos que os agentes abriram e que continuariam
  * rodando. Manter é o padrão; os marcados são encerrados. Devolve `false` se cancelou.
  */
-export async function confirmClosing(chatIds: string[], message: string, opts: { ok?: string; danger?: boolean; checkbox?: { label: string; key: string }; ask?: boolean; workspaceId?: string | null } = {}): Promise<boolean> {
+export async function confirmClosing(chatIds: string[], message: string, opts: { ok?: string; cancel?: string; danger?: boolean; checkbox?: { label: string; key: string }; ask?: boolean; workspaceId?: string | null } = {}): Promise<boolean> {
   const procs = chatIds.length ? await api.chatProcesses(chatIds).catch(() => [] as Leftover[]) : [];
   if (!procs.length && !opts.ask) return true;
   const full = procs.length ? `${message}${message ? "\n\n" : ""}${t("app.confirm.leftProcs", { count: procs.length })}` : message;
   const r = await new Promise<{ ok: boolean; kill: Leftover[] }>((resolve) => {
     if (!push) return resolve({ ok: false, kill: [] });
-    push({ message: full, ok: opts.ok ?? t("common.confirm"), danger: opts.danger ?? false, checkbox: opts.checkbox, procs, resolve: (ok, kill = []) => resolve({ ok, kill }) });
+    push({ message: full, ok: opts.ok ?? t("common.confirm"), cancel: opts.cancel, danger: opts.danger ?? false, checkbox: opts.checkbox, procs, resolve: (ok, kill = []) => resolve({ ok, kill }) });
   });
   if (!r.ok) return false;
   const keep = procs.filter((p) => !r.kill.includes(p));
@@ -67,7 +67,7 @@ export function ConfirmHost() {
         )}
         {req.checkbox && <label className="check-row"><input type="checkbox" defaultChecked={localStorage.getItem(req.checkbox.key) === "1"} onChange={(e) => localStorage.setItem(req.checkbox!.key, e.target.checked ? "1" : "0")} data-testid="confirm-check" /> {req.checkbox.label}</label>}
         <div className="row end">
-          <button className="btn" onClick={() => done(false)}>{t("common.cancel")}</button>
+          <button className="btn" onClick={() => done(false)} data-testid="confirm-cancel">{req.cancel ?? t("common.cancel")}</button>
           <button ref={okRef} className={"btn " + (req.danger ? "danger" : "primary")} onClick={() => done(true)} data-testid="confirm-ok">{req.ok}</button>
         </div>
       </div>

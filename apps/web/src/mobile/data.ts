@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { transport } from "../transport";
 import type { Repo, Section, Workspace } from "../api";
-import { isOwner, k, type LiveSession } from "./kabuld";
+import { isOwner, k, ws, type LiveSession } from "./kabuld";
 
 /** Estado compartilhado pelas telas (lista, uso, novo workspace): sessões ao vivo, workspaces, repos, seções. */
 export interface Snap { list: LiveSession[]; machine: string; os: string; err: string | null; workspaces: Workspace[]; repos: Repo[]; sections: Section[]; loaded: boolean }
@@ -32,7 +32,9 @@ function start() {
   };
   const offs = ["sessions-changed", "session-status", "chat-state"].map((c) => transport.subscribe(c, soon));
   const offWs = transport.subscribe("workspaces-changed", () => void loadState());
-  stop = () => (clearInterval(t), clearInterval(t2), offs.forEach((o) => o()), offWs());
+  // Reconectou (kabuld reiniciado, volta do fundo): recarrega tudo na hora, sem esperar os intervalos.
+  const offState = ws()?.onState((s) => s === "open" && void refresh());
+  stop = () => (clearInterval(t), clearInterval(t2), offs.forEach((o) => o()), offWs(), offState?.());
 }
 
 export function useKabul(): Snap {

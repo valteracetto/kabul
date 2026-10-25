@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// tmux só num servidor próprio (`tmux -L`): o `kabul serve`/kabuld que os testes sobem herdam isto e nunca usam
+// o servidor padrão de quem roda o teste (lá o Kabul de verdade listaria as sessões de teste).
+process.env.KABUL_TMUX_SOCKET ||= `kabul-test-e2e-${process.pid}`;
+
 // Capturas do README e do site a partir do ambiente de demonstração (`?mock&demo`, dados 100% fictícios):
 // `npm run demo:capture`. Saída crua em ../../.context/demo/raw/; o demo/finish.mjs moldura, otimiza e grava em
 // ../../docs/assets/. Porta do Vite em KABUL_E2E_PORT (padrão 5300) para não dividir o servidor com outro E2E.

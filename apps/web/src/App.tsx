@@ -18,7 +18,7 @@ import { FeedbackDialog } from "./components/Feedback";
 import { touchWorkspace, workspaceLink } from "./views/Sidebar";
 import { Palette } from "./components/Palette";
 import { chatStore, statusOf, useWorkspaceAgents, type WsAgent } from "./components/chatStore";
-import { UpdateBanner } from "./components/Updates";
+import { checkForUpdates, UpdateBanner, UpdateDialogHost } from "./components/Updates";
 
 // Telas fora do caminho principal: carregadas sob demanda (o JS inicial fica só com barra lateral e workspace).
 const SessionsView = lazy(() => import("./views/SessionsView").then((m) => ({ default: m.SessionsView })));
@@ -174,6 +174,7 @@ export function App() {
         diagnostics: () => go({ kind: "diagnostics" }),
         feedback: () => setFeedback(true),
         devtools: () => void api.openDevtools().catch(() => {}),
+        "check-updates": () => checkForUpdates(),
       };
       map[id]?.();
     });
@@ -185,6 +186,7 @@ export function App() {
       else if (action === "new-workspace") setCreating({});
       else if (action === "usage") go({ kind: "usage" });
       else if (action === "pause-all") window.dispatchEvent(new CustomEvent("kabul:stop-all", { detail: "*" }));
+      else if (action === "check-updates") checkForUpdates();
     });
     const misc: [string, (e: Event) => void][] = [
       ["kabul:cycle-theme", () => void cycleTheme()],
@@ -406,6 +408,7 @@ export function App() {
         {(route.kind === "home" || (route.kind === "workspace" && !current)) && <Home repos={repos} workspaces={workspaces} onRoute={go} onOpen={openProject} onClone={() => setAddDialog("clone")} onQuick={() => setAddDialog("quick")} />}
         {!sidebar && <button className="icon-btn sidebar-reopen" title={t("app.side.showSidebar")} onClick={() => setSidebar(true)}>☰</button>}
       </main>
+      <UpdateDialogHost />
       <ConfirmHost />
       {help && <HelpMenu onClose={() => setHelp(false)} onRoute={go} onFeedback={() => setFeedback(true)} />}
       {feedback && <FeedbackDialog onClose={() => setFeedback(false)} />}

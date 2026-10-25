@@ -20,6 +20,8 @@ export interface WsTransport extends Transport {
   /** Último erro do hello (credencial inválida, revogada, pareamento necessário). */
   lastError(): string | null;
   onState(h: (s: ConnState, error?: string) => void): () => void;
+  /** Tenta conectar agora, sem esperar o intervalo entre tentativas. */
+  reconnect(): void;
   close(): void;
 }
 
@@ -31,6 +33,13 @@ export interface Principal { id: string; user: string; device: string; role: "ow
  * `{id, command, args}` → `{id, ok, value|error}`; eventos `{channel, payload}` só dos canais
  * assinados com `{sub}`. Reconecta sozinho (rede do celular cai) e reassina os canais.
  */
+/** Sem `hello` em 8 s, desiste do socket e tenta outro. */
+const HELLO_TIMEOUT = 8000;
+/** Ao voltar ao app, o socket "aberto" tem 4 s para responder um whoami. */
+const PING_TIMEOUT = 4000;
+/** Maior espera entre tentativas (antes chegava a 25,6 s: o app parecia desconectado depois de reiniciar o kabuld). */
+const MAX_BACKOFF = 8000;
+
 export function websocketTransport(url: string, cred?: Credential | (() => Credential | null) | null): WsTransport {
   const pending = new Map<number, { ok: (v: unknown) => void; err: (e: unknown) => void }>();
   const subs = new Map<string, Set<(p: unknown) => void>>();
@@ -58,17 +67,23 @@ export function websocketTransport(url: string, cred?: Credential | (() => Crede
     stateHandlers.forEach((h) => h(s, e));
   };
 
+  let timer: ReturnType<typeof setTimeout> | null = null;
   const connect = () => {
+    if (timer) (clearTimeout(timer), (timer = null));
     setState("connecting");
     const sock = new WebSocket(url);
     ws = sock;
     let helloOk = false;
+    // Sem resposta do hello em 8 s (rede do celular trocando, kabuld reiniciando, socket que o iOS deixou
+    // pendurado ao voltar do fundo): fecha e tenta de novo, em vez de ficar "conectando" por minutos.
+    const stall = setTimeout(() => !helloOk && sock.readyState !== WebSocket.CLOSED && sock.close(), HELLO_TIMEOUT);
     sock.addEventListener("open", () => {
       const c = typeof cred === "function" ? cred() : cred;
       const client = helloInfo("web");
       sock.send(JSON.stringify({ hello: c ? { device: c.device, key: c.key, client } : { client } }));
     });
     sock.addEventListener("message", (m) => {
+      if (ws !== sock) return;
       const msg = JSON.parse(m.data as string);
       if (msg.hello) {
         server = msg.hello.server ?? null;
@@ -104,6 +119,8 @@ export function websocketTransport(url: string, cred?: Credential | (() => Crede
       }
     });
     sock.addEventListener("close", () => {
+      clearTimeout(stall);
+      if (ws !== sock) return; // já trocado por uma reconexão forçada
       pending.forEach((p) => p.err(t("app.ws.dropped")));
       pending.clear();
       if (closed) {
@@ -112,11 +129,44 @@ export function websocketTransport(url: string, cred?: Credential | (() => Crede
       }
       if (helloOk) resetReady();
       setState("closed");
-      retry = Math.min(retry + 1, 6);
-      setTimeout(connect, 400 * 2 ** retry);
+      retry = Math.min(retry + 1, 5);
+      timer = setTimeout(connect, Math.min(400 * 2 ** retry, MAX_BACKOFF));
     });
   };
   connect();
+
+  /** Reconecta já (sem esperar o recuo), trocando um socket que pode estar morto sem ter fechado. */
+  const reconnectNow = () => {
+    if (closed) return;
+    retry = 0;
+    const old = ws;
+    ws = null;
+    if (old && old.readyState !== WebSocket.CLOSED) {
+      pending.forEach((p) => p.err(t("app.ws.dropped")));
+      pending.clear();
+      if (st === "open") resetReady();
+      try {
+        old.close();
+      } catch {}
+    }
+    connect();
+  };
+  // De volta ao app (iOS congela a PWA no fundo) ou à rede: sem conexão aberta, reconecta na hora; com ela
+  // "aberta", confere com um whoami (o socket pode ter morrido calado) e reconecta se não responder.
+  if (typeof window !== "undefined") {
+    const wake = () => {
+      if (closed || document.visibilityState === "hidden") return;
+      if (st !== "open") return reconnectNow();
+      const sock = ws;
+      const id = ++seq;
+      const t0 = setTimeout(() => (pending.delete(id), ws === sock && reconnectNow()), PING_TIMEOUT);
+      pending.set(id, { ok: () => clearTimeout(t0), err: () => clearTimeout(t0) });
+      if (!send({ id, command: "whoami", args: {} })) (clearTimeout(t0), pending.delete(id), reconnectNow());
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("online", wake);
+    window.addEventListener("pageshow", (e) => (e as PageTransitionEvent).persisted && wake());
+  }
 
   const send = (o: unknown): boolean => {
     if (ws?.readyState !== WebSocket.OPEN) return false;
@@ -162,8 +212,10 @@ export function websocketTransport(url: string, cred?: Credential | (() => Crede
       stateHandlers.add(h);
       return () => stateHandlers.delete(h);
     },
+    reconnect: () => void (st !== "open" && reconnectNow()),
     close() {
       closed = true;
+      if (timer) clearTimeout(timer);
       ws?.close();
     },
   };

@@ -279,6 +279,12 @@ td.path { font: 11px var(--mono); color: var(--dim); word-break: break-all; }
 /* Atualização pronta / kabuld de outra versão (components/Updates.tsx): flutua no topo, sem empurrar o layout. */
 .update-banner { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 45; display: flex; align-items: center; gap: 10px; max-width: min(640px, 92vw); background: var(--toast-bg); color: var(--toast-fg); border: 1px solid var(--row-line); padding: 8px 10px 8px 14px; border-radius: 10px; font-size: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
 .update-banner.warn { border-color: var(--del-line); }
+/* Procurar atualizações: botão do rodapé da barra lateral (ponto = versão nova) e o diálogo. */
+.upd-btn { position: relative; }
+.upd-btn .upd-dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--panel); }
+.upd-dialog { width: min(480px, calc(100vw - 40px)); }
+.upd-notes { white-space: pre-wrap; line-height: 1.5; max-height: 220px; overflow: auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--text); }
+.upd-wait { font-size: 12px; color: var(--warn); }
 .update-banner .btn { flex: none; }
 .toasts { position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%); z-index: 40; display: flex; flex-direction: column; gap: 6px; align-items: center; width: min(560px, 90%); }
 .toast { max-width: 560px; background: var(--toast-bg); border: 1px solid var(--del-line); color: var(--toast-fg); padding: 10px 14px; border-radius: 10px; font-size: 12px; white-space: pre-wrap; box-shadow: 0 10px 30px rgba(0,0,0,.4); }

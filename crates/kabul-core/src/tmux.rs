@@ -53,11 +53,49 @@ fn parse_line(line: &str) -> Option<Pane> {
     })
 }
 
+/// Prefixo das sessões criadas por testes (E2E, `cargo test`, loadtest).
+pub const TEST_PREFIX: &str = "kabul-test-";
+/// Servidor tmux próprio (`tmux -L <nome>`): os testes rodam num servidor isolado e nunca no padrão do
+/// usuário (lá o kabuld de verdade listaria as sessões de teste no celular de quem usa o Kabul).
+pub const SOCKET_ENV: &str = "KABUL_TMUX_SOCKET";
+
+/// Nome do servidor tmux em uso: `KABUL_TMUX_SOCKET`, ou um por processo nos testes deste crate.
+pub fn socket() -> Option<String> {
+    if let Some(s) = std::env::var(SOCKET_ENV).ok().filter(|s| !s.trim().is_empty()) {
+        return Some(s);
+    }
+    cfg!(test).then(|| format!("{TEST_PREFIX}unit-{}", std::process::id()))
+}
+
+/// Testes de outros crates (kabuld, kabul-cli): servidor tmux próprio deste processo. Idempotente; chame
+/// antes de abrir qualquer sessão.
+pub fn use_test_server() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if std::env::var_os(SOCKET_ENV).is_none() {
+            std::env::set_var(SOCKET_ENV, format!("{TEST_PREFIX}{}", std::process::id()));
+        }
+    });
+}
+
+/// Sessão de teste vista no servidor padrão (vazou de algum teste antigo ou de outra máquina): o kabuld
+/// não mostra. Num servidor isolado (`KABUL_TMUX_SOCKET`), os testes precisam vê-las.
+pub fn hidden(session: &str) -> bool {
+    hidden_on(socket().is_some(), session)
+}
+
+fn hidden_on(isolated: bool, session: &str) -> bool {
+    !isolated && session.starts_with(TEST_PREFIX)
+}
+
 /// `tmux -u`: força UTF-8. Sem locale (app aberto pelo Dock), o tmux troca o TAB do `-F` por "_"
-/// e o parse das listas quebra ("pane não encontrado").
+/// e o parse das listas quebra ("pane não encontrado"). Com [`socket`], `-L <nome>`.
 pub fn cmd() -> Command {
     let mut c = crate::shell::command(crate::harness::which("tmux").unwrap_or_else(|| "tmux".into()));
     c.arg("-u");
+    if let Some(s) = socket() {
+        c.args(["-L", &s]);
+    }
     c
 }
 
@@ -79,7 +117,7 @@ pub fn list_panes() -> Result<Vec<Pane>> {
         }
         bail!("tmux list-panes: {}", err.trim());
     }
-    Ok(parse_list_panes(&String::from_utf8_lossy(&out.stdout)))
+    Ok(parse_list_panes(&String::from_utf8_lossy(&out.stdout)).into_iter().filter(|p| !hidden(&p.session)).collect())
 }
 
 /// Captura o conteúdo visível (e `history` linhas de scrollback) com sequências de cor (`-e`).
@@ -125,7 +163,7 @@ pub fn list_panes_ext() -> Result<Vec<PaneExt>> {
         }
         bail!("tmux list-panes: {}", err.trim());
     }
-    Ok(parse_list_panes_ext(&String::from_utf8_lossy(&out.stdout)))
+    Ok(parse_list_panes_ext(&String::from_utf8_lossy(&out.stdout)).into_iter().filter(|p| !hidden(&p.pane.session)).collect())
 }
 
 const CAPTURE_MARK: &str = "@@kabul-captura@@";
@@ -284,6 +322,42 @@ mod tests {
         let panes = parse_list_panes(&String::from_utf8_lossy(&out.stdout));
         let _ = kill_session(&name);
         assert!(panes.iter().any(|p| p.session == name), "pane não encontrado sem locale");
+    }
+
+    /// Testes nunca falam com o servidor tmux padrão do usuário: todo comando leva `-L kabul-test-…`.
+    #[test]
+    fn testes_usam_servidor_isolado() {
+        let s = socket().expect("servidor próprio nos testes");
+        assert!(s.starts_with(TEST_PREFIX), "{s}");
+        let args: Vec<String> = cmd().get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args, vec!["-u".to_string(), "-L".into(), s]);
+    }
+
+    /// No servidor padrão (kabuld de verdade), sessões `kabul-test-*` não aparecem; num servidor isolado, sim.
+    #[test]
+    fn sessoes_de_teste_escondidas_fora_do_servidor_isolado() {
+        assert!(hidden_on(false, "kabul-test-kd-q6bwou-hdsij-codex"));
+        assert!(hidden_on(false, "kabul-test-pv-llfeq"));
+        assert!(!hidden_on(false, "kabul-kabul"));
+        assert!(!hidden_on(false, "meu-projeto"));
+        assert!(!hidden_on(true, "kabul-test-kd-q6bwou-hdsij-codex"));
+        // Nos testes o servidor é isolado: as próprias sessões de teste aparecem.
+        assert!(!hidden("kabul-test-qualquer"));
+    }
+
+    /// A sessão criada aqui existe no servidor isolado e não no padrão.
+    #[test]
+    fn sessao_de_teste_fora_do_servidor_padrao() {
+        if crate::harness::which("tmux").is_none() {
+            return;
+        }
+        let name = format!("kabul-test-isolado-{}", std::process::id());
+        new_session(&name, Some("/tmp"), Some("sleep 30")).unwrap();
+        let aqui = list_panes().unwrap().iter().any(|p| p.session == name);
+        let padrao = Command::new(crate::harness::which("tmux").unwrap()).env_remove("TMUX").args(["has-session", "-t", &exact(&name)]).output().map(|o| o.status.success()).unwrap_or(false);
+        let _ = kill_session(&name);
+        assert!(aqui, "sessão não está no servidor isolado");
+        assert!(!padrao, "sessão de teste vazou para o servidor tmux padrão");
     }
 
     #[test]

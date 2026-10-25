@@ -35,9 +35,13 @@ diante cada versão lista os commits por tipo.
 - **windows (beta):** builds and runs on Windows 10 1809+ and 11: a `TerminalBackend` with Kabul's own multiplexer over ConPTY, Credential Manager for secrets, Git Bash for scripts, portable paths, accounts, dictation and diagnostics, background processes without console windows, `.msi` and NSIS installers. Terminal sessions don't survive closing the app yet.
 - **docs:** bilingual public documentation (English and pt-BR) on a VitePress site, with a threat model, Windows, performance and collaboration pages.
 - **docs:** credits in `ACKNOWLEDGMENTS.md`; screenshots and a short demo video from a fictional demo environment.
+- **desktop:** "Check for Updates…" in the Kabul menu, the menu bar icon, the sidebar footer (with a dot when a new version exists) and ⌘K: stable channel by default, release notes, size, progress and a warning when agents are running.
+- **site:** landing page at [kabul.dev](https://kabul.dev) (English and Portuguese) with the Kabul Cloud waitlist, `llms.txt` and sponsor links.
 
 ### Fixes · Correções
 
+- **mobile:** opaque status bar on iOS 26 (no blur at the top, no empty band at the bottom), labels of the tab bar, faster reconnection (8 s timeout, reconnect when the app returns) and a "new version, reload" notice.
+- **tests:** every test uses its own tmux server; test sessions never show up in your session list.
 - **mobile:** layout of the installed app on iPhone: solid background behind the status bar, tab bar flush with the bottom edge, the list no longer hides behind "+ Create", correct "All" count, workspace actions in a "…" menu on narrow screens, folder name instead of "?" for sessions outside Kabul.
 - **usage:** a suggested model switch applies to the very first message after returning to the chat.
 

@@ -11,6 +11,7 @@
     "check": "tsc -p tsconfig.json",
     "test:links": "node scripts/check-links.ts",
     "og": "node scripts/og.ts",
+    "media": "node scripts/media.ts",
     "dev": "npm run build && wrangler pages dev dist --port 8788",
     "deploy": "npm run build && wrangler pages deploy dist --project-name kabul --branch main"
   },

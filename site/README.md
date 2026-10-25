@@ -4,9 +4,40 @@ Página de divulgação do Kabul, publicada no **Cloudflare Pages** (projeto `ka
 (`docs/`, VitePress no GitHub Pages em https://valteracetto.github.io/kabul/).
 
 - HTML e CSS estáticos gerados por `scripts/build.ts` (sem framework). Inglês em `/`, português em `/pt-BR/`.
-- O único JavaScript (`src/site.js`, ~2 KB) melhora o formulário e o botão de copiar o Pix; a página funciona sem ele.
+- O único JavaScript (`src/site.js`, ~5 KB sem minificar) melhora o formulário, o botão do Pix e o movimento
+  (abaixo); a página funciona sem ele.
 - A lista de espera do Kabul Cloud é uma Pages Function (`functions/api/waitlist.ts`) que grava no KV `WAITLIST`.
 - Imagens: as mesmas capturas do README (`docs/assets`), convertidas para AVIF e WebP em várias larguras.
+- Vídeos: o loop do topo e três clipes curtos (troca de modelo, painel Agentes, celular) em `media/`, já
+  codificados em WebM (VP9) e MP4 (H.264). O build só copia com hash; não precisa de ffmpeg.
+- Para LLMs: `/llms.txt`, `/llms-full.txt`, `/index.md` e `/pt-BR/index.md`, gerados de `src/llms.ts` a partir dos
+  mesmos textos da página.
+
+## Movimento e vídeo
+
+Tudo respeita `prefers-reduced-motion` (nada se mexe sozinho) e, nos vídeos, também o Save-Data.
+
+| O quê | Como |
+|---|---|
+| Entrada ao rolar | `data-reveal` nos blocos; o `site.js` usa um IntersectionObserver e o CSS faz a subida curta. O que já está na tela ao carregar não anima. |
+| Faixa dos 7 CLIs | só CSS: as linhas se desenham uma após a outra ao carregar e um sinal corre em cada uma (`transform`, no compositor). |
+| Conversa Claude → Codex → Gemini | `relay()` em `src/page.ts`, só HTML e CSS (`@keyframes rl0…rl6`, ciclo de 16 s). Sem movimento, mostra a conversa inteira. Textos em `content.ts` (`relay`). |
+| Loop do topo | `media/hero-1280.*` e `media/hero-720.*`, tirados de `docs/assets/demo.mp4` por `npm run media`. Começa depois do `load` (não disputa o LCP com a captura, que continua por baixo), com botão de pausar. |
+| Clipes | `media/{switch,agents,phone}.{webm,mp4}` e `-poster.webp`, gravados do ambiente de demo do app: `cd apps/web && npm run demo:site-clips`. Tocam só na tela (`preload="none"`, pausam fora dela); sem JS, viram vídeos com controles. Se faltar um clipe, a página usa a captura. |
+| Números de desempenho | a coluna "Agora" conta a partir do "Antes" quando a tabela entra na tela; sem JS, mostra o número final. |
+| Hover | recursos (linha cobre), capturas (sobem 4 px), links de contribuir. |
+
+## Para LLMs e buscadores
+
+- `llms.txt` segue o padrão de https://llmstxt.org (H1, resumo em blockquote, seções de links `.md`; a documentação
+  aponta para os `.md` no GitHub). `llms-full.txt` tem a página inteira em inglês, a tabela de agentes e o índice
+  da documentação nos dois idiomas. Os `.md` levam `Link: rel="canonical"` para a página HTML.
+- `robots.txt` (gerado em `scripts/build.ts`): libera tudo para buscadores e crawlers de IA (GPTBot, ClaudeBot,
+  Claude-SearchBot, PerplexityBot, Google-Extended, Applebot-Extended, CCBot e outros), bloqueia só `/api/`,
+  aponta o sitemap e cita o `llms.txt` num comentário.
+- O `<head>` liga `/llms.txt`, `/llms-full.txt` e a versão `.md` da página (`rel="alternate"`).
+- `npm run test:links` também valida o formato do `llms.txt`, os links dos `.txt`/`.md` (os do repositório e da
+  documentação precisam existir neste checkout) e as diretivas do `robots.txt`.
 
 ## Onde mudar o quê
 
@@ -19,6 +50,10 @@ Página de divulgação do Kabul, publicada no **Cloudflare Pages** (projeto `ka
 | Visual | `src/styles.css` (cores e fonte Geist do `apps/web`) |
 | Headers (CSP, cache), redirects, sitemap, robots, manifest, ícones | gerados em `scripts/build.ts` |
 | Imagens de compartilhamento (`og.png`, `og-pt-BR.png`, 1200×630) | `npm run og` (precisa do Chrome) grava em `public/` |
+| Loop do topo (`media/hero-*`) | `npm run media` (precisa de ffmpeg com VP9 e H.264), a partir de `docs/assets/demo.mp4` |
+| Clipes (`media/switch`, `agents`, `phone`) | `cd apps/web && npm run demo:site-clips` (Playwright + ffmpeg) |
+| `llms.txt`, `llms-full.txt`, `index.md` | `src/llms.ts` (lista das páginas da documentação em `DOCS`) |
+| Créditos do rodapé ("Created by Valter Acetto · Built with Claude", GitHub Sponsors) | `content.ts` (`footer`) e `config.ts` (`donations`) |
 
 ### Doações
 
@@ -117,9 +152,23 @@ Se o painel já tiver criado o registro do apex, o segundo comando responde que 
 
 ### 5. www.kabul.dev → kabul.dev (301)
 
-O `www` não precisa entrar no projeto Pages: basta um registro com proxy e uma regra de redirecionamento na zona.
+**Como está hoje:** `www.kabul.dev` é um domínio do próprio projeto Pages (como `kabul.dev`), e quem redireciona
+é o site: `functions/_middleware.ts` responde 301 para `https://kabul.dev` (mesmo caminho e query) a qualquer
+host que não seja `kabul.dev`: o `www`, o `kabul.pages.dev` de produção e qualquer outro domínio ligado ao
+projeto. Ficam de fora os previews (`<branch>.kabul.pages.dev`, `<hash>.kabul.pages.dev`), o `localhost` e
+`/api/*` (um POST não pode virar GET num redirect). O host canônico é a var `CANONICAL_HOST` do `wrangler.toml`.
+Os arquivos de `/assets/`, `/media/` e os ícones nem passam pela função (`dist/_routes.json`, gerado no build).
 
-Pelo painel: **DNS › Records › Add record**: `CNAME`, nome `www`, destino `kabul.dev`, proxy ligado. Depois
+Testar localmente (com o `npm run dev` rodando):
+
+```sh
+curl -sI -H 'Host: www.kabul.dev' 'http://127.0.0.1:8788/pt-BR/?a=1' | grep -i '^location'  # https://kabul.dev/pt-BR/?a=1
+curl -sI -H 'Host: kabul.pages.dev' http://127.0.0.1:8788/llms.txt | grep -i '^location'      # https://kabul.dev/llms.txt
+curl -sI -H 'Host: abc123.kabul.pages.dev' http://127.0.0.1:8788/ | head -1                   # 200 (preview)
+```
+
+Alternativa sem função (precisa de permissão na zona): registro `www` com proxy e uma Redirect Rule. Pelo painel:
+**DNS › Records › Add record**: `CNAME`, nome `www`, destino `kabul.dev`, proxy ligado. Depois
 **Rules › Redirect Rules › Create rule** a partir do modelo **"Redirect from WWW to root"** (301, mantendo
 caminho e query string).
 

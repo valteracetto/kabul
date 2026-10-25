@@ -11,6 +11,8 @@ kabul-core = { path = "../../../crates/kabul-core" }
 kabuld = { path = "../../../crates/kabuld" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-updater = "2"
+# Só o HEAD que mede o tamanho do pacote da atualização (o mesmo reqwest que o updater já traz).
+reqwest = { version = "0.13", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

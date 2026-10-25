@@ -169,6 +169,8 @@ fn turn_event(step: usize, turn: u64) -> Event {
 const TURN_LEN: usize = 40;
 
 pub fn worker(o: WorkerOpts) -> Result<()> {
+    // Sessões do loadtest num servidor tmux próprio (herdado do processo pai), nunca no padrão do usuário.
+    kabul_core::tmux::use_test_server();
     std::fs::create_dir_all(&o.home)?;
     let wss = synth_state(&o.home, o.workspaces)?;
     let cfg = kabuld::Config { port: o.port, home: o.home.clone(), web_dir: None, tailscale: false, secrets: Arc::new(kabuld::secrets::MemStore::default()), monitor_ms: o.monitor_ms, assets: None };
@@ -410,6 +412,8 @@ fn sampler(pid: u32, stop: Arc<AtomicBool>, warm_until: Instant, out: Arc<Mutex<
 }
 
 pub fn run(o: Opts) -> Result<i32> {
+    // Antes de subir o worker: ele herda o servidor tmux isolado deste processo.
+    kabul_core::tmux::use_test_server();
     let home = std::env::temp_dir().join(format!("kabul-loadtest-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     let port = free_port()?;

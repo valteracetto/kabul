@@ -4,7 +4,7 @@ import { RepoMark } from "../icons";
 import type { ExternalSessions, Model, Workspace } from "../api";
 import { STATUS_LABEL as WS_STATUS } from "../api";
 import { ago, modelFor, workspaceFor } from "../components/external";
-import { AGENT_LABEL, canWrite, isOwner, k, me, type LiveSession, type Ticket } from "./kabuld";
+import { AGENT_LABEL, canWrite, isOwner, k, me, ws, type LiveSession, type Ticket } from "./kabuld";
 import { refresh, setListPrefs, useKabul, useListPrefs, type ListPrefs } from "./data";
 import { openSession, push } from "./nav";
 import { ModelSheet } from "./ModelSheet";
@@ -121,12 +121,21 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
             value={filter}
             onChange={setFilter}
             options={[
-              { v: "all", label: <>{t("mobile.home.all")} <span className="dim" data-testid="m-count-all">{total}</span></> },
+              { v: "all", label: <>{t("mobile.home.all")} {snap.loaded && <span className="dim" data-testid="m-count-all">{total}</span>}</> },
               { v: "waiting", label: <>{t("mobile.home.waitingYou")} {waiting > 0 && <span className="m-count">{waiting}</span>}</>, testid: "m-filter-waiting" },
             ]}
           />
         </div>
         {snap.err && <div className="m-error">{trError(snap.err)}</div>}
+        {/* Ainda sem conexão e sem dados: diz o que está acontecendo (antes ficava "Todas 0" e a lista vazia). */}
+        {!snap.loaded && conn !== "open" && (
+          <div className="m-empty m-connecting" data-testid="m-connecting">
+            <span className="m-spinner" aria-hidden="true" />
+            <b>{t("mobile.home.connecting")}</b>
+            <span>{t("mobile.home.connectingSub")}</span>
+            <button className="m-chip-btn" onClick={(e) => (haptic(e.currentTarget), ws()?.reconnect())} data-testid="m-reconnect">{t("mobile.home.tryNow")}</button>
+          </div>
+        )}
         {snap.loaded && groups.length === 0 && (
           filter === "waiting" ? <Empty testid="m-empty" title={t("mobile.home.emptyWaiting")} sub={t("mobile.home.emptyWaitingSub")} /> : <Empty testid="m-empty" title={t("mobile.home.empty")} sub={t("mobile.home.emptySub")} />
         )}

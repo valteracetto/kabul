@@ -31,16 +31,22 @@ export async function freePort(): Promise<number> {
   });
 }
 
-const tmux = (...args: string[]) => execFileSync("tmux", args, { stdio: "pipe" }).toString();
-
 /** Id desta execução do E2E: definido no globalSetup e herdado pelos workers (variável de ambiente). As
  *  sessões levam esse id, então a limpeza não derruba as de outro checkout rodando o mesmo E2E. */
 export const RUN = (process.env.KABUL_E2E_RUN ??= Math.random().toString(36).slice(2, 8));
 
-/** Só as sessões desta execução (`kabul-test-kd-<RUN>-*`): outros testes e checkouts usam `kabul-test-*`. */
-export function killTestSessions(prefix = `kabul-test-kd-${RUN}-`) {
+/**
+ * Servidor tmux só desta execução (`tmux -L kabul-test-kd-<RUN>`), passado ao kabuld por `KABUL_TMUX_SOCKET`.
+ * Nunca o servidor padrão: lá o kabuld de verdade de quem roda o teste listaria as sessões de teste (vazou
+ * para o celular do Val como "kabul-test-kd-…" com repos "app-exemplo"/"lisboa").
+ */
+export const TMUX_SOCKET = `kabul-test-kd-${RUN}`;
+export const tmux = (...args: string[]) => execFileSync("tmux", ["-L", TMUX_SOCKET, ...args], { stdio: "pipe", env: { ...process.env, TMUX: "" } }).toString();
+
+/** Encerra o servidor tmux desta execução (e todas as sessões dele). */
+export function killTestSessions() {
   try {
-    for (const s of tmux("list-sessions", "-F", "#{session_name}").split("\n")) if (s.startsWith(prefix)) tmux("kill-session", "-t", `=${s}`);
+    tmux("kill-server");
   } catch {}
 }
 
@@ -83,7 +89,7 @@ export async function startKabuld(opts: { trustLocalBrowser?: boolean; repoName?
     ].join("\n") + "\n");
   }
   const port = await freePort();
-  const env = { ...process.env, ...(opts.fakeHome ? { HOME: fakeHome } : {}), PATH: `${bin}:${process.env.PATH}`, KABULD_TRUST_LOCAL_BROWSER: opts.trustLocalBrowser === false ? "0" : "1", KABULD_VAPID_SUBJECT: "mailto:e2e@example.com", ...(opts.tailscale ? { KABUL_BIN_TAILSCALE: opts.tailscale } : {}), ...opts.env };
+  const env = { ...process.env, ...(opts.fakeHome ? { HOME: fakeHome } : {}), PATH: `${bin}:${process.env.PATH}`, KABULD_TRUST_LOCAL_BROWSER: opts.trustLocalBrowser === false ? "0" : "1", KABULD_VAPID_SUBJECT: "mailto:e2e@example.com", KABUL_TMUX_SOCKET: TMUX_SOCKET, TMUX: "", ...(opts.tailscale ? { KABUL_BIN_TAILSCALE: opts.tailscale } : {}), ...opts.env };
   const proc: ChildProcess = spawn(KABULD, ["--port", String(port), "--home", home, "--web", DIST, ...(opts.tailscale ? [] : ["--no-tailscale"]), "--secrets", "file", "--pair"], { env, stdio: ["ignore", "ignore", "pipe"] });
   let err = "";
   const pairLink = await new Promise<string>((ok, fail) => {

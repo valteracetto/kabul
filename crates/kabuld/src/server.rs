@@ -96,6 +96,7 @@ async fn guard(State(srv): State<Arc<Srv>>, ConnectInfo(peer): ConnectInfo<Socke
     }
     let api = req.uri().path().starts_with("/api/");
     let cors = matches!(req.uri().path(), "/api/health" | "/api/pair");
+    let res_path = req.uri().path().to_string();
     let mut res = next.run(req).await;
     let h = res.headers_mut();
     h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
@@ -110,6 +111,12 @@ async fn guard(State(srv): State<Arc<Srv>>, ConnectInfo(peer): ConnectInfo<Socke
         }
     } else {
         h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP));
+        // Arquivos do build têm o hash no nome: guardam para sempre. O resto (HTML da PWA, sw.js, manifesto)
+        // sempre revalida: sem isso o iPhone podia abrir o HTML velho depois de atualizar o Kabul.
+        if !h.contains_key(header::CACHE_CONTROL) && res_path != "/ws" {
+            let v = if res_path.starts_with("/assets/") { "public, max-age=31536000, immutable" } else { "no-cache" };
+            h.insert(header::CACHE_CONTROL, HeaderValue::from_static(v));
+        }
     }
     res
 }
@@ -195,7 +202,17 @@ async fn preflight() -> Response {
 }
 
 async fn health(State(srv): State<Arc<Srv>>) -> Json<Value> {
-    Json(json!({"kabuld": true, "name": srv.hub.machine, "version": kabul_core::schema::APP_VERSION, "protocol": kabul_core::schema::PROTOCOL, "min_protocol": kabul_core::schema::MIN_PEER_PROTOCOL}))
+    Json(json!({"kabuld": true, "name": srv.hub.machine, "version": kabul_core::schema::APP_VERSION, "protocol": kabul_core::schema::PROTOCOL, "min_protocol": kabul_core::schema::MIN_PEER_PROTOCOL, "update": pending_update(&srv.hub.home)}))
+}
+
+/// Versão nova que o app do Mac achou e ainda não instalou (`update-available.json`, gravado pelo
+/// updater do desktop). O celular mostra em Configurações › Sobre; `null` sem versão nova.
+fn pending_update(home: &std::path::Path) -> Value {
+    let v: Value = std::fs::read_to_string(home.join("update-available.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
+    match v["version"].as_str() {
+        Some(ver) if !ver.is_empty() && ver != kabul_core::schema::APP_VERSION => json!({"version": ver, "channel": v["channel"].as_str().unwrap_or("stable")}),
+        _ => Value::Null,
+    }
 }
 
 async fn pair(State(srv): State<Arc<Srv>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, Json(body): Json<Value>) -> Response {

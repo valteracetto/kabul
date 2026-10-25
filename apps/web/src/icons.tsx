@@ -12,6 +12,8 @@ export const ISearch = (p: P) => <svg {...base(p)}><circle cx="7" cy="7" r="4.2"
 export const IBranch = (p: P) => <svg {...base(p)}><circle cx="4.5" cy="3.8" r="1.4" /><circle cx="4.5" cy="12.2" r="1.4" /><circle cx="11.5" cy="5.5" r="1.4" /><path d="M4.5 5.2v5.6M11.5 6.9c0 2.6-7 1.6-7 3.9" /></svg>;
 export const IGear = (p: P) => <svg {...base(p)} strokeWidth={1.3}><path d="M6.9 1.9h2.2l.35 1.6a4.7 4.7 0 0 1 1.15.66l1.56-.5 1.1 1.9-1.2 1.1a4.8 4.8 0 0 1 0 1.33l1.2 1.1-1.1 1.9-1.56-.5a4.7 4.7 0 0 1-1.15.66l-.35 1.6H6.9l-.35-1.6a4.7 4.7 0 0 1-1.15-.66l-1.56.5-1.1-1.9 1.2-1.1a4.8 4.8 0 0 1 0-1.33l-1.2-1.1 1.1-1.9 1.56.5a4.7 4.7 0 0 1 1.15-.66Z" transform="translate(0 .5)" /><circle cx="8" cy="8" r="2" /></svg>;
 export const IHelp = (p: P) => <svg {...base(p)}><circle cx="8" cy="8" r="5.8" /><path d="M6.4 6.3a1.7 1.7 0 0 1 3.2.6c0 1.2-1.6 1.4-1.6 2.4" /><circle cx="8" cy="11.3" r=".3" fill="currentColor" /></svg>;
+/** Atualização do app: seta para baixo entrando na bandeja, dentro de um círculo aberto. */
+export const IUpdate = (p: P) => <svg {...base(p)}><path d="M13.4 6.6A5.7 5.7 0 1 0 13.7 9" /><path d="M8 4.6v5.2M5.9 7.8 8 9.9l2.1-2.1" /></svg>;
 export const IChevron = (p: P) => <svg {...base(p)}><path d="m6 4 4 4-4 4" /></svg>;
 export const IChevronDown = (p: P) => <svg {...base(p)}><path d="m4 6 4 4 4-4" /></svg>;
 export const IMic = (p: P) => <svg {...base(p)}><rect x="6" y="2" width="4" height="7.5" rx="2" /><path d="M3.8 7.8a4.2 4.2 0 0 0 8.4 0M8 12v2" /></svg>;

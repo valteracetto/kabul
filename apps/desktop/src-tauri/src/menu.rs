@@ -1,4 +1,5 @@
-//! Menu nativo: Kabul (Sobre, Configurações ⌘,, Ocultar, Sair ⌘Q com confirmação), Arquivo, Editar,
+//! Menu nativo: Kabul (Sobre, Procurar atualizações…, Configurações ⌘,, Ocultar, Sair ⌘Q com
+//! confirmação; no Windows/Linux "Procurar atualizações…" fica em Ajuda), Arquivo, Editar,
 //! Ver (barra lateral, painel direito, zen, zoom, tela cheia), Janela e Ajuda. Os itens próprios viram
 //! o evento `menu` para o frontend (que já tem os mesmos atalhos); "Sair" vira `quit-requested`.
 //! Textos no idioma da interface (`i18n`); trocar o idioma refaz o menu (`i18n::set_ui_lang`).
@@ -14,11 +15,12 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             None => b.build(app),
         }
     };
-    let kabul = SubmenuBuilder::new(app, "Kabul")
-        .item(&PredefinedMenuItem::about(app, Some(tr("Sobre o Kabul", "About Kabul")), Some(AboutMetadata { name: Some("Kabul".into()), ..Default::default() }))?)
-        .separator()
-        .item(&item("settings", tr("Configurações…", "Settings…"), Some("CmdOrCtrl+,"))?)
-        .separator();
+    let updates = || item("check-updates", tr("Procurar atualizações…", "Check for Updates…"), None);
+    let kabul = SubmenuBuilder::new(app, "Kabul").item(&PredefinedMenuItem::about(app, Some(tr("Sobre o Kabul", "About Kabul")), Some(AboutMetadata { name: Some("Kabul".into()), ..Default::default() }))?);
+    // macOS: logo abaixo de "Sobre", como nos apps do sistema. Windows/Linux: no menu Ajuda.
+    #[cfg(target_os = "macos")]
+    let kabul = kabul.item(&updates()?);
+    let kabul = kabul.separator().item(&item("settings", tr("Configurações…", "Settings…"), Some("CmdOrCtrl+,"))?).separator();
     #[cfg(target_os = "macos")]
     let kabul =
         kabul.services_with_text(tr("Serviços", "Services")).separator().hide_with_text(tr("Ocultar o Kabul", "Hide Kabul")).hide_others_with_text(tr("Ocultar os outros", "Hide Others")).show_all_with_text(tr("Mostrar tudo", "Show All")).separator();
@@ -54,8 +56,10 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&item("shortcuts", tr("Atalhos de teclado", "Keyboard Shortcuts"), None)?)
         .item(&item("diagnostics", tr("Diagnóstico…", "Diagnostics…"), None)?)
         .item(&item("feedback", tr("Enviar feedback…", "Send Feedback…"), None)?)
-        .item(&item("devtools", tr("Abrir ferramentas de depuração", "Open Developer Tools"), None)?)
-        .build()?;
+        .item(&item("devtools", tr("Abrir ferramentas de depuração", "Open Developer Tools"), None)?);
+    #[cfg(not(target_os = "macos"))]
+    let help = help.separator().item(&updates()?);
+    let help = help.build()?;
     Menu::with_items(app, &[&kabul, &file, &edit, &view, &window, &help])
 }
 

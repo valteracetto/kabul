@@ -62,6 +62,54 @@ for (const file of await htmlFiles(DIST)) {
   }
 }
 
+// llms.txt (https://llmstxt.org), llms-full.txt, the Markdown pages and robots.txt.
+// Links to this site must exist in dist/; links to the repository (raw.githubusercontent.com) and to the
+// docs (GitHub Pages) must exist as files in this checkout, so a renamed doc breaks the check.
+const ROOT = resolve(DIST, "..", "..");
+const RAW = "https://raw.githubusercontent.com/valteracetto/kabul/main/";
+const DOCS = "https://valteracetto.github.io/kabul/";
+async function textLink(file: string, url: string) {
+  checked++;
+  if (url.startsWith("https://kabul.dev/")) {
+    const path = url.slice("https://kabul.dev".length).split("#")[0];
+    if (!(await exists(join(DIST, path)))) problems.push(`${file}: missing ${url}`);
+  } else if (url.startsWith(RAW)) {
+    if (!(await exists(join(ROOT, url.slice(RAW.length))))) problems.push(`${file}: no such file in the repo: ${url}`);
+  } else if (url.startsWith(DOCS)) {
+    const page = url.slice(DOCS.length).replace(/\/$/, "/index") || "index";
+    if (!(await exists(join(ROOT, "docs", `${page}.md`)))) problems.push(`${file}: no such docs page: ${url}`);
+  } else external.add(url);
+}
+const llms = await readFile(join(DIST, "llms.txt"), "utf8");
+{
+  const lines = llms.split("\n");
+  if (!/^# \S/.test(lines[0])) problems.push("llms.txt: must start with an H1");
+  if (!lines.some((l) => l.startsWith("> "))) problems.push("llms.txt: needs a summary blockquote");
+  if (lines.slice(1).some((l) => /^# /.test(l))) problems.push("llms.txt: only one H1");
+  let section = "";
+  for (const l of lines) {
+    if (l.startsWith("## ")) section = l;
+    else if (section && l.trim() && !/^- \[[^\]]+\]\(https:\/\/[^)\s]+\)(: .+)?$/.test(l)) problems.push(`llms.txt: under "${section}" every line must be "- [name](url): notes", got: ${l}`);
+  }
+  if (!section) problems.push("llms.txt: needs at least one ## section of links");
+}
+for (const name of ["llms.txt", "llms-full.txt", "index.md", "pt-BR/index.md"]) {
+  const text = await readFile(join(DIST, name), "utf8");
+  for (const m of text.matchAll(/https?:\/\/[^\s)<>|`]+/g)) await textLink(name, m[0].replace(/[.,;:]+$/, ""));
+}
+{
+  const robots = await readFile(join(DIST, "robots.txt"), "utf8");
+  const known = /^(user-agent|allow|disallow|sitemap|crawl-delay)\s*:/i;
+  robots.split("\n").forEach((l, i) => {
+    const t = l.trim();
+    if (t && !t.startsWith("#") && !known.test(t)) problems.push(`robots.txt:${i + 1}: unknown directive: ${t}`);
+  });
+  if (!/^Sitemap: https:\/\/kabul\.dev\/sitemap\.xml$/m.test(robots)) problems.push("robots.txt: Sitemap line missing");
+  if (!/llms\.txt/.test(robots)) problems.push("robots.txt: should mention llms.txt");
+  for (const html of ["index.html", "pt-BR/index.html"])
+    if (!(await readFile(join(DIST, html), "utf8")).includes('href="/llms.txt"')) problems.push(`${html}: no <link> to /llms.txt`);
+}
+
 console.log(`links: ${checked} internal links checked, ${external.size} distinct external URLs`);
 
 if (checkExternal) {

@@ -151,7 +151,10 @@ por tamanho de iPhone). Ele também imprime os `<link rel="apple-touch-startup-i
 5. As notificações funcionam no próprio Chrome do Android (Web Push), mesmo sem instalar. Só precisam de
    HTTPS.
 
-As áreas seguras e a navegação por gestos vêm de `env(safe-area-inset-*)` com `viewport-fit=cover`.
+As áreas seguras e a navegação por gestos vêm de `env(safe-area-inset-*)` com `viewport-fit=cover` (pelas
+variáveis `--m-sat`/`--m-sab`). A barra de status da PWA no iPhone é opaca (`black`; `default` no tema claro):
+com `black-translucent`, o iOS 26 deixa a web view 62 pt curta (faixa do sistema embaixo, que o web não pinta)
+e desfoca o topo da página. Mudar esse meta só vale depois de remover e adicionar de novo à Tela de Início.
 
 ## Caminho para as lojas (futuro)
 
@@ -283,7 +286,10 @@ cd apps/web && npx playwright test -c playwright.kabuld.config.ts
 cada tela, no escuro e no claro, em `.context/comparar/mobile/<CAPTURA>/iphone/`. Com
 `--project=capturas-android`, grava em `.../android/`.
 
-O E2E sobe o kabuld real com estado sintético e sessões tmux `kabul-test-kd-<execução>-*`; ao final, só as desta execução são apagadas (outro checkout pode estar rodando o mesmo E2E).
+Testes nunca usam o servidor tmux padrão: o E2E sobe o kabuld real com estado sintético num servidor tmux só
+dele (`tmux -L kabul-test-kd-<execução>`, passado por `KABUL_TMUX_SOCKET`), encerrado no fim; `cargo test`, o
+loadtest e o `kabul serve` dos E2E fazem o mesmo (`kabul_core::tmux::use_test_server`, configs do Playwright).
+No servidor padrão, o kabuld esconde sessões `kabul-test-*` (vazaram para o celular antes desse isolamento).
 O Claude é trocado por um agente falso que fala o mesmo stream-json (`e2e-kabuld/fake-claude.mjs`). Ele cobre:
 
 - iPhone: arquivos (árvore, busca, cada tipo de preview, pinça, páginas), do chat para o arquivo, perguntar no

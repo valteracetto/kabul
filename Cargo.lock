@@ -2937,6 +2937,7 @@ dependencies = [
  "anyhow",
  "kabul-core",
  "kabuld",
+ "reqwest",
  "serde",
  "serde_json",
  "tauri",
