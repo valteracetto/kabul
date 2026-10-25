@@ -3,18 +3,20 @@ import { Sheet } from "../ui";
 import { AGENT_LABEL } from "../kabuld";
 import { ext, files, type ChatSummary } from "./api";
 import type { AskTarget } from "./Viewer";
+import { t } from "../../i18n";
+import { trError } from "../../i18n/errors";
 
 const MAX_LINES = 200;
 const MAX_CHARS = 12_000;
 
 /** Mensagem com o trecho citado (caminho:linhas e bloco de código). */
-export function askMessage(t: AskTarget, question: string): string {
-  let body = t.text.split("\n").slice(0, MAX_LINES).join("\n");
+export function askMessage(tg: AskTarget, question: string): string {
+  let body = tg.text.split("\n").slice(0, MAX_LINES).join("\n");
   if (body.length > MAX_CHARS) body = body.slice(0, MAX_CHARS) + "\n…";
-  const cut = t.text.split("\n").length > MAX_LINES || t.text.length > MAX_CHARS ? " (trecho cortado)" : "";
-  const where = t.a === t.b ? `${t.path}:${t.a}` : `${t.path}:${t.a}-${t.b}`;
+  const cut = tg.text.split("\n").length > MAX_LINES || tg.text.length > MAX_CHARS ? t("mobile.pv.ask.cut") : "";
+  const where = tg.a === tg.b ? `${tg.path}:${tg.a}` : `${tg.path}:${tg.a}-${tg.b}`;
   const fence = body.includes("```") ? "````" : "```";
-  return `Sobre \`${where}\`${cut}:\n${fence}${ext(t.path)}\n${body}\n${fence}\n\n${question.trim()}`;
+  return `${t("mobile.pv.ask.about", { where: `\`${where}\``, cut })}\n${fence}${ext(tg.path)}\n${body}\n${fence}\n\n${question.trim()}`;
 }
 
 /** "Perguntar sobre isto": manda o trecho e a pergunta para um chat do workspace e abre a conversa. */
@@ -39,21 +41,21 @@ export function AskSheet({ ws, target, from, onClose }: { ws: string; target: As
       setBusy(false);
     }
   };
-  const lines = target.a === target.b ? `linha ${target.a}` : `linhas ${target.a}–${target.b}`;
+  const lines = target.a === target.b ? t("mobile.pv.ask.line", { a: target.a }) : t("mobile.pv.ask.lines", { a: target.a, b: target.b });
   return (
-    <Sheet title="Perguntar no chat" onClose={onClose} testid="pv-ask-sheet">
+    <Sheet title={t("mobile.pv.ask.title")} onClose={onClose} testid="pv-ask-sheet">
       <div className="pv-ask">
         <div className="dim small"><code>{target.path}</code> · {lines}</div>
         <pre className="pv-ask-snippet">{target.text.split("\n").slice(0, 8).join("\n")}{target.text.split("\n").length > 8 ? "\n…" : ""}</pre>
-        {chats && chats.length === 0 && <div className="dim small" data-testid="pv-ask-nochat">Nenhuma conversa aberta neste workspace. Comece uma pela lista (+ Chat) e volte aqui.</div>}
+        {chats && chats.length === 0 && <div className="dim small" data-testid="pv-ask-nochat">{t("mobile.pv.ask.noChat")}</div>}
         {chats && chats.length > 0 && (
           <select value={chat} onChange={(e) => setChat(e.target.value)} data-testid="pv-ask-chat">
             {chats.map((c) => <option key={c.id} value={c.id}>{c.title} · {c.model} ({AGENT_LABEL[c.harness] ?? c.harness})</option>)}
           </select>
         )}
-        <textarea rows={3} value={q} onChange={(e) => setQ(e.target.value)} placeholder="O que você quer saber sobre este trecho?" data-testid="pv-ask-text" />
-        {err && <div className="m-error">{err}</div>}
-        <button className="m-btn primary big" disabled={busy || !chat || !q.trim()} onClick={() => void send()} data-testid="pv-ask-send">{busy ? "Enviando…" : "Enviar para o chat"}</button>
+        <textarea rows={3} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("mobile.pv.ask.placeholder")} data-testid="pv-ask-text" />
+        {err && <div className="m-error">{trError(err)}</div>}
+        <button className="m-btn primary big" disabled={busy || !chat || !q.trim()} onClick={() => void send()} data-testid="pv-ask-send">{busy ? t("mobile.pv.ask.sending") : t("mobile.pv.ask.send")}</button>
       </div>
     </Sheet>
   );

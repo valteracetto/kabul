@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { noSuggest } from "../noSuggest";
+import { t } from "../i18n";
 
 type HL = { set: (k: string, h: unknown) => void; delete: (k: string) => void };
 const highlights = (): HL | null => ((globalThis as unknown as { CSS?: { highlights?: HL } }).CSS?.highlights ?? null);
@@ -12,8 +13,8 @@ export function findRanges(root: HTMLElement, q: string): Range[] {
   const needle = q.toLowerCase();
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    const t = (n.textContent ?? "").toLowerCase();
-    for (let i = t.indexOf(needle); i >= 0; i = t.indexOf(needle, i + needle.length)) {
+    const txt = (n.textContent ?? "").toLowerCase();
+    for (let i = txt.indexOf(needle); i >= 0; i = txt.indexOf(needle, i + needle.length)) {
       const r = document.createRange();
       r.setStart(n, i);
       r.setEnd(n, i + needle.length);
@@ -73,15 +74,15 @@ export function ChatFind({ root, scroller, onClose, version }: { root: React.Ref
   }, []);
   return (
     <div className="chat-find" data-testid="chat-find">
-      <input ref={input} {...noSuggest} autoComplete="off" placeholder="Buscar nas mensagens e no raciocínio" value={q} onChange={(e) => (setQ(e.target.value), setI(0))} data-testid="chat-find-input"
+      <input ref={input} {...noSuggest} autoComplete="off" placeholder={t("chat.find.placeholder")} value={q} onChange={(e) => (setQ(e.target.value), setI(0))} data-testid="chat-find-input"
         onKeyDown={(e) => {
           if (e.key === "Escape") (e.preventDefault(), e.stopPropagation(), onClose());
           if (e.key === "Enter") (e.preventDefault(), step(e.shiftKey ? -1 : 1));
         }} />
       <span className="dim small" data-testid="chat-find-count">{q ? (count ? `${i + 1}/${count}` : "0/0") : ""}</span>
-      <button className="icon-btn" title="Anterior (⌘⇧G)" onClick={() => step(-1)} disabled={!count}>↑</button>
-      <button className="icon-btn" title="Próximo (⌘G)" onClick={() => step(1)} disabled={!count}>↓</button>
-      <button className="icon-btn" title="Fechar (Esc)" onClick={onClose}>×</button>
+      <button className="icon-btn" title={t("chat.find.prev")} onClick={() => step(-1)} disabled={!count}>↑</button>
+      <button className="icon-btn" title={t("chat.find.next")} onClick={() => step(1)} disabled={!count}>↓</button>
+      <button className="icon-btn" title={t("chat.find.close")} onClick={onClose}>×</button>
     </div>
   );
 }

@@ -106,6 +106,30 @@ test("sugestão sem outra conta: trocar de provedor (LLM) na mesma conversa", as
   await expect.poll(() => page.evaluate(() => (window as any).__kabulLastStart?.harness)).toBe("codex");
 });
 
+test("troca de LLM vale já no primeiro envio, mesmo com a lista de modelos chegando depois da mensagem", async ({ page }) => {
+  await setup(page);
+  await page.getByTestId("ws-row").click();
+  await send(page, "primeira");
+  await expect(chat(page).locator(".turn-meta")).toHaveCount(1);
+  await page.getByTestId("nav-usage").click();
+  const s = page.getByTestId("usage-suggestion").first();
+  await expect(s).toContainText("Codex");
+  await s.getByTestId("suggest-apply").click();
+  // A conversa remonta ao voltar e pede a lista de modelos de novo; ela só chega depois do envio já feito
+  // (máquina lenta, como no CI do macOS). A troca pendente tem que valer nesse envio, não no seguinte.
+  await page.evaluate(() => ((window as any).__mock.holdModels = "manual"));
+  await page.getByTestId("ws-row").click();
+  await send(page, "segunda");
+  await expect(chat(page)).toContainText("segunda");
+  expect(await page.evaluate(() => (window as any).__kabulStarts)).toBe(1);
+  await page.evaluate(() => ((window as any).__mock.holdModels = false, (window as any).__mock.releaseModels?.()));
+  await expect.poll(() => page.evaluate(() => (window as any).__kabulLastStart?.harness)).toBe("codex");
+  await expect(chat(page)).toContainText("Trocou para");
+  // Um agente só para o envio: o Codex. Nada saiu antes pelo Claude.
+  expect(await page.evaluate(() => (window as any).__kabulStarts)).toBe(2);
+  await expect(chat(page).locator(".turn-meta")).toHaveCount(2);
+});
+
 test("barra do Kabul: popover com gasto, limites, agentes e ações rápidas", async ({ page }) => {
   await page.goto("/?mock&view=tray");
   const pop = page.getByTestId("tray-popover");

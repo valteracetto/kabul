@@ -24,10 +24,10 @@ export function Row({ label, hint, children, id }: { label: string; hint?: React
 
 type BoolKeys = { [K in keyof AppSettings]-?: AppSettings[K] extends boolean | undefined ? K : never }[keyof AppSettings];
 
-export function Toggle({ s, save, k, label, hint, danger }: { s: AppSettings; save: (s: AppSettings) => void; k: BoolKeys; label: string; hint?: string; danger?: boolean }) {
+export function Toggle({ s, save, k, label, hint, danger, id }: { s: AppSettings; save: (s: AppSettings) => void; k: BoolKeys; label: string; hint?: string; danger?: boolean; id?: string }) {
   const on = !!s[k];
   return (
-    <Row label={label} hint={hint}>
+    <Row label={label} hint={hint} id={id}>
       <span className={"toggle" + (on ? " on" : "") + (danger ? " danger" : "")} role="switch" aria-checked={on} aria-label={label} tabIndex={0}
         onClick={() => save({ ...s, [k]: !on })} onKeyDown={(e) => (e.key === " " || e.key === "Enter") && (e.preventDefault(), save({ ...s, [k]: !on }))} data-testid={`toggle-${k}`}><span /></span>
     </Row>

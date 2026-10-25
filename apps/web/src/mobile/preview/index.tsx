@@ -9,11 +9,13 @@ import { back, filesHash, go, type FilesRoute, type Tab } from "./route";
 import { Tree } from "./Tree";
 import { Viewer, type AskTarget } from "./Viewer";
 import "./preview.css";
+import { t } from "../../i18n";
+import { trError } from "../../i18n/errors";
 
 export { filesRoute, openFile, openFiles } from "./route";
 export { ChangedChips, chatFileOpener, FilesButton, useFileTaps } from "./ChatLinks";
 
-const TABS: [Tab, string][] = [["files", "Arquivos"], ["changes", "Alterações"], ["app", "App"]];
+const tabs = (): [Tab, string][] => [["files", t("mobile.pv.files")], ["changes", t("mobile.pv.changes")], ["app", t("mobile.pv.appTab")]];
 
 /**
  * Arquivos de um workspace no celular: árvore com busca, alterações com diff, preview de cada tipo,
@@ -32,7 +34,7 @@ export function FilesScreen({ route }: { route: FilesRoute }) {
   useEffect(() => {
     k.workspaces().then((l) => {
       const w = l.find((x) => x.id === ws);
-      setTitle(w ? w.title || w.name : "Workspace");
+      setTitle(w ? w.title || w.name : t("mobile.pv.workspace"));
     }, () => {});
   }, [ws]);
   useEffect(() => {
@@ -56,23 +58,23 @@ export function FilesScreen({ route }: { route: FilesRoute }) {
   return (
     <div className="m-app pv-app" data-testid="pv-screen">
       <header className="m-top">
-        <button className="m-btn ghost" onClick={() => back(parent)} data-testid="pv-back" aria-label="Voltar">‹</button>
+        <button className="m-btn ghost" onClick={() => back(parent)} data-testid="pv-back" aria-label={t("common.back")}>‹</button>
         <div className="m-top-title">
-          <b className="m-ellipsis" data-testid="pv-title">{sub ? base(sub) : title || "Arquivos"}</b>
-          <span className="dim small m-ellipsis">{sub ? `${diff ? "Diff · " : ""}${dir(sub) || title}` : "Arquivos do workspace"}</span>
+          <b className="m-ellipsis" data-testid="pv-title">{sub ? base(sub) : title || t("mobile.pv.files")}</b>
+          <span className="dim small m-ellipsis">{sub ? `${diff ? t("mobile.pv.diffPrefix") : ""}${dir(sub) || title}` : t("mobile.pv.wsFiles")}</span>
         </div>
       </header>
       {!sub && (
         <div className="m-tabs" role="tablist">
-          {TABS.map(([t, l]) => (
-            <button key={t} className={tab === t ? "on" : ""} onClick={() => go({ ws, tab: t, from }, true)} data-testid={`pv-tab-${t}`} role="tab" aria-selected={tab === t}>
-              {l}{t === "changes" && changed.size > 0 && <span className="m-count">{changed.size}</span>}
+          {tabs().map(([id, l]) => (
+            <button key={id} className={tab === id ? "on" : ""} onClick={() => go({ ws, tab: id, from }, true)} data-testid={`pv-tab-${id}`} role="tab" aria-selected={tab === id}>
+              {l}{id === "changes" && changed.size > 0 && <span className="m-count">{changed.size}</span>}
             </button>
           ))}
         </div>
       )}
       <main className="m-scroll pv-main">
-        {err && <div className="m-error">{err}</div>}
+        {err && <div className="m-error">{trError(err)}</div>}
         {path ? (
           <Viewer key={path} ws={ws} path={path} line={line} known={known} onOpen={open} onAsk={onAsk} />
         ) : diff ? (
@@ -84,7 +86,7 @@ export function FilesScreen({ route }: { route: FilesRoute }) {
         ) : list ? (
           <Tree ws={ws} list={list} changed={changed} onOpen={(p) => open(p)} />
         ) : (
-          !err && <div className="pv-loading dim">Carregando…</div>
+          !err && <div className="pv-loading dim">{t("mobile.pv.loading")}</div>
         )}
       </main>
       {ask && <AskSheet ws={ws} target={ask} from={from} onClose={() => setAsk(null)} />}

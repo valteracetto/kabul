@@ -3,14 +3,15 @@ import { Floating } from "./Floating";
 import { useDismiss } from "./useDismiss";
 import { api, type OpenTarget } from "../api";
 import { IChevronDown, ICopy } from "../icons";
+import { t } from "../i18n";
 
 let cache: Promise<OpenTarget[]> | null = null;
 const KEY = "kabul.openIn.last";
 
-function AppIcon({ t, size = 18 }: { t: OpenTarget | undefined; size?: number }) {
-  if (t?.icon) return <img src={t.icon} width={size} height={size} alt="" draggable={false} />;
+function AppIcon({ target, size = 18 }: { target: OpenTarget | undefined; size?: number }) {
+  if (target?.icon) return <img src={target.icon} width={size} height={size} alt="" draggable={false} />;
   // Sem ícone (navegador/mock): quadrado com a inicial.
-  return <span className="app-fallback" style={{ width: size, height: size }}>{t?.name[0] ?? "?"}</span>;
+  return <span className="app-fallback" style={{ width: size, height: size }}>{target?.name[0] ?? "?"}</span>;
 }
 
 /** Botão dividido "Abrir em": abre no último app usado; o menu lista os apps detectados, com atalhos 1…N e ⌘O. */
@@ -35,7 +36,7 @@ export function OpenIn({ path, onError }: { path: string; onError: (e: string) =
     setLast(id);
     api.openIn(id, path).catch((e) => onError(String(e)));
   };
-  const items = [...targets.map((t) => t.id), "copy"];
+  const items = [...targets.map((x) => x.id), "copy"];
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -55,23 +56,23 @@ export function OpenIn({ path, onError }: { path: string; onError: (e: string) =
   }, [open, items.join(), path]);
   useDismiss(root, open, useCallback(() => setOpen(false), []));
 
-  const lastT = targets.find((t) => t.id === last) ?? targets[0];
+  const lastT = targets.find((x) => x.id === last) ?? targets[0];
   return (
     <div className="open-in" ref={root} data-testid="open-in">
       <div className="split-btn">
-        <button className="btn icon-only" title={lastT ? `Abrir em ${lastT.name}` : "Abrir"} onClick={() => lastT && run(lastT.id)}>{copied ? <span className="ok small">✓</span> : <AppIcon t={lastT} />}</button>
-        <button className="btn caret-btn" title="Abrir em…" onClick={() => setOpen(!open)} data-testid="open-in-menu"><IChevronDown size={12} /></button>
+        <button className="btn icon-only" title={lastT ? t("app.openIn.in", { app: lastT.name }) : t("common.open")} onClick={() => lastT && run(lastT.id)}>{copied ? <span className="ok small">✓</span> : <AppIcon target={lastT} />}</button>
+        <button className="btn caret-btn" title={t("app.openIn.menu")} onClick={() => setOpen(!open)} data-testid="open-in-menu"><IChevronDown size={12} /></button>
       </div>
       {open && (
         <Floating className="open-pop" placement="bottom-end">
-          {targets.map((t, i) => (
-            <div key={t.id} className={"pop-row" + (t.id === last ? " on" : "")} onClick={() => run(t.id)}>
-              <AppIcon t={t} size={20} /><span className="label">{t.name}</span><span className="grow" />
-              {t.id === (localStorage.getItem("kabul.openIn.default") || last) && <span className="kbd-hint">⌘O</span>}<span className="num">{i + 1}</span>
+          {targets.map((x, i) => (
+            <div key={x.id} className={"pop-row" + (x.id === last ? " on" : "")} onClick={() => run(x.id)}>
+              <AppIcon target={x} size={20} /><span className="label">{x.name}</span><span className="grow" />
+              {x.id === (localStorage.getItem("kabul.openIn.default") || last) && <span className="kbd-hint">⌘O</span>}<span className="num">{i + 1}</span>
             </div>
           ))}
           <div className="pop-row" onClick={() => run("copy")}>
-            <span className="app-glyph"><ICopy size={17} /></span><span className="label">Copiar caminho</span><span className="grow" /><span className="num">{targets.length + 1}</span>
+            <span className="app-glyph"><ICopy size={17} /></span><span className="label">{t("app.openIn.copyPath")}</span><span className="grow" /><span className="num">{targets.length + 1}</span>
           </div>
         </Floating>
       )}

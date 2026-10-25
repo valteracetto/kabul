@@ -5,9 +5,12 @@ import { Markdown } from "../components/Markdown";
 import { useDictation } from "../components/useDictation";
 import { AGENT_LABEL, canWrite, k, kcall, me, type AuthorView, type ChatView as Chat, type Entry, type LiveSession, type Present, type Queued, type TermInfo } from "./kabuld";
 import { AgentIcon, Avatar, BackButton, I, NavBar, PlanChip, StatusPill, haptic } from "./ui";
-import { PLAN_PREFIX, getPlan, setPlan, type PlanMode } from "./plan";
+import { planPrefix, getPlan, planBody, setPlan, type PlanMode } from "./plan";
 import { ModelSheet } from "./ModelSheet";
 import { ChangedChips, chatFileOpener, FilesButton, useFileTaps } from "./preview";
+import { t } from "../i18n";
+import { tNode } from "../i18n/react";
+import { trError } from "../i18n/errors";
 
 /** Sessão aberta: chat estruturado (sessão do Kabul) ou terminal ao vivo (qualquer tmux). */
 export function SessionView({ id, onBack }: { id: string; onBack: () => void }) {
@@ -16,9 +19,9 @@ export function SessionView({ id, onBack }: { id: string; onBack: () => void }) 
   const load = useCallback(() => k.live().then((r) => setS(r.sessions.find((x) => x.id === id) ?? null), (e) => setErr(String(e))), [id]);
   useEffect(() => {
     load();
-    const t = setInterval(load, 4000);
+    const iv = setInterval(load, 4000);
     const off = transport.subscribe("session-status", (p: { id: string }) => p.id === id && load());
-    return () => (clearInterval(t), off());
+    return () => (clearInterval(iv), off());
   }, [load, id]);
   const isChat = id.startsWith("chat:");
   const name = id.slice(id.indexOf(":") + 1);
@@ -55,7 +58,7 @@ export function SessionView({ id, onBack }: { id: string; onBack: () => void }) 
           ) : null
         }
       />
-      {err && <div className="m-error">{err}</div>}
+      {err && <div className="m-error">{trError(err)}</div>}
       {isChat ? <ChatPane chatId={name} ws={wsId} sheet={sheet} setSheet={setSheet} /> : <TermPane session={name} agent={s?.agent ?? "shell"} />}
     </div>
   );
@@ -76,10 +79,10 @@ export function PresenceBar({ ws, target }: { ws: string; target: string }) {
     <div className="m-presence" data-testid="m-presence">
       {[...seen.values()].map((u) => (
         <span key={u.id} className={"m-presence-av" + (u.target === target ? " here" : "")} data-testid="m-presence-user" data-name={u.name}>
-          <Avatar name={u.name} color={u.color} size={22} title={`${u.name} · ${u.device}${u.target === target ? " (aqui)" : ""}`} />
+          <Avatar name={u.name} color={u.color} size={22} title={`${u.name} · ${u.device}${u.target === target ? t("mobile.session.here") : ""}`} />
         </span>
       ))}
-      {typing.length > 0 && <span className="m-typing" data-testid="m-typing">{typing.map((u) => u.name).join(", ")} digitando…</span>}
+      {typing.length > 0 && <span className="m-typing" data-testid="m-typing">{t("mobile.session.typing", { names: typing.map((u) => u.name).join(", ") })}</span>}
     </div>
   );
 }
@@ -106,7 +109,7 @@ function TermPane({ session, agent }: { session: string; agent: string }) {
   const write = canWrite();
   useEffect(() => {
     let alive = true;
-    k.termAttach(session).then((t) => alive && setInfo(t), (e) => setErr(String(e)));
+    k.termAttach(session).then((ti) => alive && setInfo(ti), (e) => setErr(String(e)));
     return () => void (alive = false);
   }, [session]);
   useEffect(() => {
@@ -114,21 +117,21 @@ function TermPane({ session, agent }: { session: string; agent: string }) {
     const el = host.current;
     // Mantém o tamanho do pane (não encolhe a janela do Mac); a fonte se ajusta à largura do celular.
     const fit = () => Math.max(5, Math.min(13, Math.floor(((el.clientWidth - 8) / info.cols / 0.6) * 10) / 10));
-    const t = new Terminal({ cols: info.cols, rows: info.rows, fontSize: fit(), fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', scrollback: 3000, disableStdin: !write, cursorBlink: write, theme: termTheme() });
-    t.open(el);
-    t.write(info.snapshot);
-    term.current = t;
-    const off = transport.subscribe("term-output", (p: { session: string; data: number[] }) => p.session === info.session && t.write(new Uint8Array(p.data)));
-    const offClosed = transport.subscribe("term-closed", (p: { session: string }) => p.session === info.session && setErr("A sessão terminou."));
-    const sub = t.onData((d) => write && k.termInput(info.session, info.pane, d).catch((e) => setErr(String(e))));
-    const ro = new ResizeObserver(() => (t.options.fontSize = fit()));
+    const tm = new Terminal({ cols: info.cols, rows: info.rows, fontSize: fit(), fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', scrollback: 3000, disableStdin: !write, cursorBlink: write, theme: termTheme() });
+    tm.open(el);
+    tm.write(info.snapshot);
+    term.current = tm;
+    const off = transport.subscribe("term-output", (p: { session: string; data: number[] }) => p.session === info.session && tm.write(new Uint8Array(p.data)));
+    const offClosed = transport.subscribe("term-closed", (p: { session: string }) => p.session === info.session && setErr(t("mobile.session.ended")));
+    const sub = tm.onData((d) => write && k.termInput(info.session, info.pane, d).catch((e) => setErr(String(e))));
+    const ro = new ResizeObserver(() => (tm.options.fontSize = fit()));
     ro.observe(el);
     return () => {
       off();
       offClosed();
       sub.dispose();
       ro.disconnect();
-      t.dispose();
+      tm.dispose();
       term.current = null;
     };
   }, [info, write]);
@@ -137,7 +140,7 @@ function TermPane({ session, agent }: { session: string; agent: string }) {
     if (!info || !text) return;
     k.termInput(info.session, info.pane, text + "\r").then(() => setText(""), (e) => setErr(String(e)));
   };
-  const dict = useDictation(useCallback((t: string) => setText((x) => (x ? x + " " : "") + t), []), useCallback((e: string) => setErr(e), []));
+  const dict = useDictation(useCallback((said: string) => setText((x) => (x ? x + " " : "") + said), []), useCallback((e: string) => setErr(e), []));
   const fitWindow = () => {
     if (!info || !host.current) return;
     const cols = Math.max(30, Math.floor((host.current.clientWidth - 8) / (9 * 0.6)));
@@ -151,7 +154,7 @@ function TermPane({ session, agent }: { session: string; agent: string }) {
     <>
       <div className="m-term-wrap">
         <div className="m-term" ref={host} data-testid="m-terminal" />
-        {err && <div className="m-error m-float">{err}</div>}
+        {err && <div className="m-error m-float">{trError(err)}</div>}
       </div>
       {write ? (
         <div className="m-dock">
@@ -159,24 +162,25 @@ function TermPane({ session, agent }: { session: string; agent: string }) {
             {key("esc", ["Escape"])}
             {key("⌃C", ["C-c"], { testid: "m-key-ctrlc" })}
             {key("tab", ["Tab"])}
-            {key("↑", ["Up"], { aria: "Seta para cima" })}
-            {key("↓", ["Down"], { aria: "Seta para baixo" })}
-            {key("←", ["Left"], { aria: "Seta para a esquerda" })}
-            {key("→", ["Right"], { aria: "Seta para a direita" })}
+            {key("↑", ["Up"], { aria: t("mobile.session.arrowUp") })}
+            {key("↓", ["Down"], { aria: t("mobile.session.arrowDown") })}
+            {key("←", ["Left"], { aria: t("mobile.session.arrowLeft") })}
+            {key("→", ["Right"], { aria: t("mobile.session.arrowRight") })}
             {key("⏎", ["Enter"])}
             <span className="m-keys-sep" />
-            {key("Aprovar", APPROVE[agent] ?? ["y", "Enter"], { cls: "ok", testid: "m-key-approve" })}
-            {key("Negar", DENY[agent] ?? ["n", "Enter"], { cls: "no", testid: "m-key-deny" })}
-            <button onClick={(e) => (haptic(e.currentTarget), fitWindow())} title="Redimensiona a janela do tmux para a tela do celular (muda para todos)">Ajustar</button>
+            {key(t("mobile.session.approve"), APPROVE[agent] ?? ["y", "Enter"], { cls: "ok", testid: "m-key-approve" })}
+            {/* "no" é a classe CSS. i18n-ignore */}
+            {key(t("mobile.session.deny"), DENY[agent] ?? ["n", "Enter"], { cls: "no", testid: "m-key-deny" })}
+            <button onClick={(e) => (haptic(e.currentTarget), fitWindow())} title={t("mobile.session.fitTitle")}>{t("mobile.session.fit")}</button>
           </div>
           <div className="m-composer inline">
-            <textarea rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Digitar para ${AGENT_LABEL[agent] ?? agent}`} data-testid="m-term-input" enterKeyHint="send" autoCapitalize="off" autoCorrect="off" onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())} />
-            <button className={"m-composer-round mic " + dict.state} onClick={dict.toggle} aria-label="Ditado" data-testid="m-mic">{dict.state === "listening" ? <I.stop /> : <I.mic />}</button>
-            <button className="m-composer-round m-send" onClick={(e) => (haptic(e.currentTarget), send())} disabled={!text} aria-label="Enviar" data-testid="m-term-send"><I.up /></button>
+            <textarea rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={t("mobile.session.typeTo", { agent: AGENT_LABEL[agent] ?? agent })} data-testid="m-term-input" enterKeyHint="send" autoCapitalize="off" autoCorrect="off" onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())} />
+            <button className={"m-composer-round mic " + dict.state} onClick={dict.toggle} aria-label={t("mobile.session.dictation")} data-testid="m-mic">{dict.state === "listening" ? <I.stop /> : <I.mic />}</button>
+            <button className="m-composer-round m-send" onClick={(e) => (haptic(e.currentTarget), send())} disabled={!text} aria-label={t("common.send")} data-testid="m-term-send"><I.up /></button>
           </div>
         </div>
       ) : (
-        <div className="m-readonly" data-testid="m-readonly">Você está acompanhando como observador.</div>
+        <div className="m-readonly" data-testid="m-readonly">{t("mobile.session.observer")}</div>
       )}
     </>
   );
@@ -210,18 +214,25 @@ function fromEntries(entries: Entry[]): Item[] {
         out.push({ t: "approval", key, id: kk.request_id, tool: kk.tool, input: kk.input, decision: kk.decision ?? null });
         break;
       case "handoff":
-        out.push({ t: "note", key, text: `Trocou para ${kk.to}`, kind: "handoff" });
+        out.push({ t: "note", key, text: t("mobile.session.switchedTo", { to: kk.to }), kind: "handoff" });
         break;
       case "notice":
         out.push({ t: "note", key, text: kk.text, kind: "info" });
         break;
       case "error":
-        out.push({ t: "note", key, text: kk.text, kind: "error" });
+        out.push({ t: "note", key, text: trError(kk.text), kind: "error" });
         break;
     }
   }
   return out;
 }
+
+/** Decisão gravada pelo kabuld ("aprovado por Bia" / "negado por Bia") no idioma da tela. */
+const decisionLabel = (d: string) => {
+  const m = /^(aprovado|negado) por (.+)$/.exec(d);
+  if (m) return t(m[1] === "aprovado" ? "mobile.session.approvedBy" : "mobile.session.deniedBy", { name: m[2] });
+  return d[0].toUpperCase() + d.slice(1);
+};
 
 const summary = (input: unknown): string => {
   const i = (input ?? {}) as Record<string, unknown>;
@@ -266,13 +277,14 @@ function ChatPane({ chatId, ws, sheet, setSheet }: { chatId: string; ws: string 
           case "approval_request":
             return [...xs, { t: "approval", key, id: ev.request_id, tool: ev.tool, input: ev.input, decision: null }];
           case "approval_decided":
+            // Mesmo formato que o kabuld grava (dado, não texto da tela): decisionLabel traduz. i18n-ignore
             return xs.map((x) => (x.t === "approval" && x.id === ev.request_id ? { ...x, decision: `${ev.allow ? "aprovado" : "negado"} por ${ev.by.name}` } : x));
           case "handoff":
-            return [...xs, { t: "note", key, text: `Trocou para ${ev.to}`, kind: "handoff" }];
+            return [...xs, { t: "note", key, text: t("mobile.session.switchedTo", { to: ev.to }), kind: "handoff" }];
           case "error":
-            return [...xs, { t: "note", key, text: ev.message, kind: "error" }];
+            return [...xs, { t: "note", key, text: trError(ev.message), kind: "error" }];
           case "exited":
-            return [...xs, { t: "note", key, text: "O agente encerrou.", kind: "info" }];
+            return [...xs, { t: "note", key, text: t("mobile.session.agentExited"), kind: "info" }];
           default:
             return xs;
         }
@@ -295,16 +307,16 @@ function ChatPane({ chatId, ws, sheet, setSheet }: { chatId: string; ws: string 
     }
   };
   const send = (raw?: string) => {
-    const t = (raw ?? text).trim();
-    if (!t) return;
+    const msg = (raw ?? text).trim();
+    if (!msg) return;
     if (raw === undefined) setText("");
-    k.chatSend(chatId, getPlan(chatId) === "emulated" ? PLAN_PREFIX + t : t).then(
+    k.chatSend(chatId, getPlan(chatId) === "emulated" ? planPrefix() + msg : msg).then(
       () => void (ws && k.presence(ws, `chat:${chatId}`, false).catch(() => {})),
       (e) => setErr(String(e)),
     );
   };
   const decide = (rid: string, allow: boolean) => k.chatApprove(chatId, rid, allow).catch((e) => setErr(String(e)));
-  const dict = useDictation(useCallback((t: string) => setText((x) => (x ? x + " " : "") + t), []), useCallback((e: string) => setErr(e), []));
+  const dict = useDictation(useCallback((said: string) => setText((x) => (x ? x + " " : "") + said), []), useCallback((e: string) => setErr(e), []));
   const myName = me()?.user;
   const [planMode, setPlanMode] = useState<PlanMode>(() => getPlan(chatId));
   const setMode = (m: PlanMode) => (setPlan(chatId, m), setPlanMode(m));
@@ -319,7 +331,7 @@ function ChatPane({ chatId, ws, sheet, setSheet }: { chatId: string; ws: string 
     if (allow) (setOkFlash(true), setTimeout(() => setOkFlash(false), 700));
     void decide(rid, allow);
   };
-  const harness = AGENT_LABEL[chat?.harness ?? ""] ?? chat?.harness ?? "O agente";
+  const harness = AGENT_LABEL[chat?.harness ?? ""] ?? chat?.harness ?? t("mobile.session.theAgent");
   return (
     <>
       <div className="m-chat" ref={scroller} data-testid="m-chat">
@@ -334,7 +346,7 @@ function ChatPane({ chatId, ws, sheet, setSheet }: { chatId: string; ws: string 
               return (
                 <div key={it.key} className={"m-msg user" + (it.author.name === myName ? " mine" : "")} data-testid="m-msg-user" data-author={it.author.name}>
                   {it.author.name !== myName && <div className="m-msg-author"><Avatar name={it.author.name} color={it.author.color ?? colors[it.author.name] ?? "#7c8cff"} size={16} /> <b>{it.author.name}</b> <span className="dim">· {it.author.device}</span></div>}
-                  <div className="m-msg-body">{it.text.startsWith(PLAN_PREFIX) ? <><span className="m-msg-plan">plano</span>{it.text.slice(PLAN_PREFIX.length)}</> : it.text}</div>
+                  <div className="m-msg-body">{planBody(it.text) !== null ? <><span className="m-msg-plan">{t("mobile.session.plan")}</span>{planBody(it.text)}</> : it.text}</div>
                 </div>
               );
             case "agent":
@@ -350,92 +362,92 @@ function ChatPane({ chatId, ws, sheet, setSheet }: { chatId: string; ws: string 
               if (it.tool === "ExitPlanMode")
                 return (
                   <div key={it.key} className={"m-plan-card" + (it.decision ? " done" : "")} data-testid="m-plan-card">
-                    <div className="m-plan-head"><I.plan size={16} /> <b>Plano</b><span className="grow" />{!it.decision && <span className="m-approval-wait">Esperando você</span>}</div>
+                    <div className="m-plan-head"><I.plan size={16} /> <b>{t("mobile.session.planTitle")}</b><span className="grow" />{!it.decision && <span className="m-approval-wait">{t("mobile.session.waitingYou")}</span>}</div>
                     <div className="m-plan-body"><Markdown text={String((it.input as { plan?: string })?.plan ?? "")} /></div>
-                    {it.decision && <div className="m-decision" data-testid="m-decision">{it.decision[0].toUpperCase() + it.decision.slice(1)}</div>}
+                    {it.decision && <div className="m-decision" data-testid="m-decision">{decisionLabel(it.decision)}</div>}
                   </div>
                 );
               return (
                 <div key={it.key} className={"m-approval" + (it.decision ? " done" : "")} data-testid="m-approval">
-                  <div className="m-approval-title"><b>{it.tool}</b> {it.decision ? "pediu aprovação" : "pede aprovação"}</div>
+                  <div className="m-approval-title"><b>{it.tool}</b> {it.decision ? t("mobile.session.askedApproval") : t("mobile.session.asksApproval")}</div>
                   <code>{summary(it.input)}</code>
-                  {it.decision ? <div className="m-decision" data-testid="m-decision">{it.decision[0].toUpperCase() + it.decision.slice(1)}</div> : <div className="m-approval-wait">Esperando decisão…</div>}
+                  {it.decision ? <div className="m-decision" data-testid="m-decision">{decisionLabel(it.decision)}</div> : <div className="m-approval-wait">{t("mobile.session.waitingDecision")}</div>}
                 </div>
               );
             case "note":
               return <div key={it.key} className={`m-note ${it.kind}`} data-testid="m-note">{it.text}</div>;
           }
         })}
-        {chat?.status === "working" && <div className="m-working" data-testid="m-working"><span className="m-dots"><i /><i /><i /></span> Trabalhando…</div>}
+        {chat?.status === "working" && <div className="m-working" data-testid="m-working"><span className="m-dots"><i /><i /><i /></span> {t("mobile.session.working")}</div>}
       </div>
-      {err && <div className="m-error" onClick={() => setErr(null)}>{err}</div>}
+      {err && <div className="m-error" onClick={() => setErr(null)}>{trError(err)}</div>}
       {okFlash && <div className="m-flash-ok" aria-hidden="true"><I.check size={34} /></div>}
       {pending.length > 0 && pending[0].tool === "ExitPlanMode" && (
-        <div className="m-approve-sheet plan" data-testid="m-approve-sheet" role="dialog" aria-label="Plano">
+        <div className="m-approve-sheet plan" data-testid="m-approve-sheet" role="dialog" aria-label={t("mobile.session.planTitle")}>
           <span className="m-sheet-grab-bar" />
           <div className="m-approve-head">
             <span className="m-approve-badge plan"><I.plan size={15} /></span>
-            <span className="grow"><b>Plano pronto</b> · revise acima</span>
+            <span className="grow"><b>{t("mobile.session.planReady")}</b>{t("mobile.session.reviewAbove")}</span>
           </div>
           {write && adjusting !== null && (
-            <textarea className="m-plan-adjust" rows={2} value={adjusting} onChange={(e) => setAdjusting(e.target.value)} placeholder="O que mudar no plano?" data-testid="m-plan-adjust-text" autoFocus />
+            <textarea className="m-plan-adjust" rows={2} value={adjusting} onChange={(e) => setAdjusting(e.target.value)} placeholder={t("mobile.session.whatToChange")} data-testid="m-plan-adjust-text" autoFocus />
           )}
           {write ? (
             adjusting === null ? (
               <div className="m-approve-actions">
-                <button className="m-cta secondary" onClick={(e) => (haptic(e.currentTarget), setAdjusting(""))} data-testid="m-plan-adjust">Ajustar</button>
-                <button className="m-cta" onClick={(e) => (decideAndFlash(pending[0].id, true, e.currentTarget), setMode(null))} data-testid="m-plan-approve">Aprovar e executar</button>
+                <button className="m-cta secondary" onClick={(e) => (haptic(e.currentTarget), setAdjusting(""))} data-testid="m-plan-adjust">{t("mobile.session.adjust")}</button>
+                <button className="m-cta" onClick={(e) => (decideAndFlash(pending[0].id, true, e.currentTarget), setMode(null))} data-testid="m-plan-approve">{t("mobile.session.approveRun")}</button>
               </div>
             ) : (
               <div className="m-approve-actions">
-                <button className="m-cta secondary" onClick={() => setAdjusting(null)}>Cancelar</button>
+                <button className="m-cta secondary" onClick={() => setAdjusting(null)}>{t("common.cancel")}</button>
                 <button
                   className="m-cta"
                   disabled={!adjusting.trim()}
                   onClick={(e) => {
-                    const t = adjusting.trim();
+                    const msg = adjusting.trim();
                     decideAndFlash(pending[0].id, false, e.currentTarget);
                     setAdjusting(null);
-                    setTimeout(() => send(t), 300);
+                    setTimeout(() => send(msg), 300);
                   }}
                   data-testid="m-plan-adjust-send"
                 >
-                  Enviar ajustes
+                  {t("mobile.session.sendAdjust")}
                 </button>
               </div>
             )
           ) : (
-            <div className="m-approve-wait">Aguardando um editor decidir.</div>
+            <div className="m-approve-wait">{t("mobile.session.waitEditor")}</div>
           )}
         </div>
       )}
       {pending.length > 0 && pending[0].tool !== "ExitPlanMode" && (
-        <div className="m-approve-sheet" data-testid="m-approve-sheet" role="dialog" aria-label="Aprovação">
+        <div className="m-approve-sheet" data-testid="m-approve-sheet" role="dialog" aria-label={t("mobile.session.approval")}>
           <span className="m-sheet-grab-bar" />
           <div className="m-approve-head">
             <span className="m-approve-badge">!</span>
-            <span className="grow"><b>{harness}</b> quer usar <b>{pending[0].tool}</b>{pending.length > 1 && <span className="dim"> · 1 de {pending.length}</span>}</span>
+            <span className="grow">{tNode("mobile.session.wantsToUse", { agent: <b>{harness}</b>, tool: <b>{pending[0].tool}</b> })}{pending.length > 1 && <span className="dim">{t("mobile.session.oneOf", { n: pending.length })}</span>}</span>
           </div>
           <code className="m-approve-code">{summary(pending[0].input)}</code>
           {write ? (
             <div className="m-approve-actions">
-              <button className="m-cta secondary" onClick={(e) => decideAndFlash(pending[0].id, false, e.currentTarget)} data-testid="m-deny">Negar</button>
-              <button className="m-cta" onClick={(e) => decideAndFlash(pending[0].id, true, e.currentTarget)} data-testid="m-approve">Aprovar</button>
+              <button className="m-cta secondary" onClick={(e) => decideAndFlash(pending[0].id, false, e.currentTarget)} data-testid="m-deny">{t("mobile.session.deny")}</button>
+              <button className="m-cta" onClick={(e) => decideAndFlash(pending[0].id, true, e.currentTarget)} data-testid="m-approve">{t("mobile.session.approve")}</button>
             </div>
           ) : (
-            <div className="m-approve-wait">Aguardando um editor decidir.</div>
+            <div className="m-approve-wait">{t("mobile.session.waitEditor")}</div>
           )}
         </div>
       )}
       {queue.length > 0 && (
         <div className="m-queue" data-testid="m-queue">
-          <div className="m-queue-head">Na fila ({queue.length}) · sai na ordem de chegada quando o turno acabar</div>
+          <div className="m-queue-head">{t("mobile.session.queue", { n: queue.length })}</div>
           {queue.map((q) => (
             <div key={q.id} className="m-queue-item" data-testid="m-queue-item">
               <Avatar name={q.author.name} color={q.author.color} size={18} />
               <span className="grow m-ellipsis">{q.text}</span>
               <span className="dim small">{q.author.name}</span>
-              {write && <button className="m-queue-x" onClick={() => k.queueRemove(chatId, q.id)} aria-label="Tirar da fila"><I.close size={14} /></button>}
+              {write && <button className="m-queue-x" onClick={() => k.queueRemove(chatId, q.id)} aria-label={t("mobile.session.unqueue")}><I.close size={14} /></button>}
             </div>
           ))}
         </div>
@@ -444,7 +456,7 @@ function ChatPane({ chatId, ws, sheet, setSheet }: { chatId: string; ws: string 
       {write ? (
         <div className="m-dock">
           <div className={"m-composer" + (planMode ? " plan" : "")}>
-            <textarea rows={1} value={text} onChange={(e) => typing(e.target.value)} placeholder={chat?.status === "working" ? "Mensagem (entra na fila)" : "Mensagem"} data-testid="m-chat-input" enterKeyHint="send" onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())} />
+            <textarea rows={1} value={text} onChange={(e) => typing(e.target.value)} placeholder={chat?.status === "working" ? t("mobile.session.msgQueued") : t("mobile.session.msg")} data-testid="m-chat-input" enterKeyHint="send" onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())} />
             <div className="m-composer-bar">
               {chat && (
                 <button className="m-model-chip" onClick={(e) => (haptic(e.currentTarget), setSheet(true))} data-testid="m-chat-model-chip">
@@ -455,20 +467,20 @@ function ChatPane({ chatId, ws, sheet, setSheet }: { chatId: string; ws: string 
               {planMode ? (
                 <PlanChip mode={planMode} onClick={planMode === "emulated" ? () => setMode(null) : undefined} />
               ) : (
-                <button className="m-composer-icon" onClick={(e) => (haptic(e.currentTarget), setMode("emulated"))} aria-label="Ligar plan mode" title="Plan mode" data-testid="m-plan-toggle"><I.plan /></button>
+                <button className="m-composer-icon" onClick={(e) => (haptic(e.currentTarget), setMode("emulated"))} aria-label={t("mobile.session.planOn")} title={t("mobile.session.planMode")} data-testid="m-plan-toggle"><I.plan /></button>
               )}
               <span className="grow" />
-              <button className={"m-composer-round mic " + dict.state} onClick={dict.toggle} aria-label="Ditado" data-testid="m-mic">{dict.state === "listening" ? <I.stop /> : <I.mic />}</button>
+              <button className={"m-composer-round mic " + dict.state} onClick={dict.toggle} aria-label={t("mobile.session.dictation")} data-testid="m-mic">{dict.state === "listening" ? <I.stop /> : <I.mic />}</button>
               {chat?.status === "working" && !text.trim() ? (
-                <button className="m-composer-round stop" onClick={(e) => (haptic(e.currentTarget, "warn"), k.chatStop(chatId))} aria-label="Parar" data-testid="m-chat-stop"><I.stop /></button>
+                <button className="m-composer-round stop" onClick={(e) => (haptic(e.currentTarget, "warn"), k.chatStop(chatId))} aria-label={t("common.stop")} data-testid="m-chat-stop"><I.stop /></button>
               ) : (
-                <button className="m-composer-round m-send" onClick={(e) => (haptic(e.currentTarget), send())} disabled={!text.trim()} aria-label="Enviar" data-testid="m-chat-send"><I.up /></button>
+                <button className="m-composer-round m-send" onClick={(e) => (haptic(e.currentTarget), send())} disabled={!text.trim()} aria-label={t("common.send")} data-testid="m-chat-send"><I.up /></button>
               )}
             </div>
           </div>
         </div>
       ) : (
-        <div className="m-readonly" data-testid="m-readonly">Você está acompanhando como observador.</div>
+        <div className="m-readonly" data-testid="m-readonly">{t("mobile.session.observer")}</div>
       )}
       {sheet && chat && (
         <ModelSheet

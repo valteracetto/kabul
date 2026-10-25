@@ -15,6 +15,8 @@ import { back, navDir, onRoute, parseRoute, setNavDir, type Route } from "./nav"
 import { registerSW } from "./push";
 import { UpdateBanner } from "../components/Updates";
 import "./mobile.css";
+import { t } from "../i18n";
+import { trError } from "../i18n/errors";
 
 export type Tab = "home" | "usage" | "settings";
 const TAB_KEY = "kabul.m.tab";
@@ -107,9 +109,9 @@ function Incompatible({ reason }: { reason: string | null }) {
   return (
     <div className="m-app m-onboard" data-testid="m-incompatible">
       <div className="m-onboard-body">
-        <h1>Atualize o Kabul</h1>
-        <p className="dim">{reason ?? "Este app e o kabuld do computador estão em versões que não se entendem."}</p>
-        <button className="m-cta" onClick={() => location.reload()}>Tentar de novo</button>
+        <h1>{t("mobile.app.updateTitle")}</h1>
+        <p className="dim">{reason ? trError(reason) : t("mobile.app.incompatible")}</p>
+        <button className="m-cta" onClick={() => location.reload()}>{t("common.retry")}</button>
       </div>
     </div>
   );
@@ -175,9 +177,9 @@ function Screen({ children, anim, top, leaving }: { children: ReactNode; anim: "
 
 function TabBar({ tab, onTab, waiting }: { tab: Tab; onTab: (t: Tab) => void; waiting: number }) {
   const items: { t: Tab; label: string; icon: ReactNode }[] = [
-    { t: "home", label: "Workspaces", icon: <I.stack /> },
-    { t: "usage", label: "Uso", icon: <I.chart /> },
-    { t: "settings", label: "Configurações", icon: <I.gear /> },
+    { t: "home", label: t("mobile.app.tabWorkspaces"), icon: <I.stack /> },
+    { t: "usage", label: t("mobile.app.tabUsage"), icon: <I.chart /> },
+    { t: "settings", label: t("mobile.app.tabSettings"), icon: <I.gear /> },
   ];
   return (
     <nav className="m-tabbar" data-testid="m-tabbar">
@@ -227,18 +229,18 @@ function PairScreen({ token, invite }: { token: string; invite: boolean }) {
     <div className="m-app m-onboard" data-testid="m-pair">
       <div className="m-onboard-body">
         <Brand />
-        <h1>{invite ? "Convite para colaborar" : "Parear este aparelho"}</h1>
-        <p>{invite ? "Você vai acompanhar um workspace do Kabul ao vivo com quem te convidou." : "Depois de parear, este aparelho vê e opera as sessões do computador pela sua tailnet."}</p>
+        <h1>{invite ? t("mobile.app.inviteTitle") : t("mobile.app.pairTitle")}</h1>
+        <p>{invite ? t("mobile.app.inviteLead") : t("mobile.app.pairLead")}</p>
         <div className="m-grp">
           <div className="m-grp-body">
-            <label className="m-field"><span>Seu nome</span><input value={user} onChange={(e) => setUser(e.target.value)} placeholder="Como os outros te veem" data-testid="m-pair-user" autoComplete="name" /></label>
-            <label className="m-field"><span>Aparelho</span><input value={device} onChange={(e) => setDevice(e.target.value)} data-testid="m-pair-device" /></label>
+            <label className="m-field"><span>{t("mobile.app.yourName")}</span><input value={user} onChange={(e) => setUser(e.target.value)} placeholder={t("mobile.app.yourNamePh")} data-testid="m-pair-user" autoComplete="name" /></label>
+            <label className="m-field"><span>{t("mobile.app.device")}</span><input value={device} onChange={(e) => setDevice(e.target.value)} data-testid="m-pair-device" /></label>
           </div>
         </div>
-        {err && <div className="m-error" data-testid="m-pair-error">{err}</div>}
+        {err && <div className="m-error" data-testid="m-pair-error">{trError(err)}</div>}
       </div>
       <div className="m-onboard-foot">
-        <button className="m-cta" disabled={busy || !user.trim()} onClick={go} data-testid="m-pair-go">{busy ? "Pareando…" : invite ? "Entrar" : "Parear"}</button>
+        <button className="m-cta" disabled={busy || !user.trim()} onClick={go} data-testid="m-pair-go">{busy ? t("mobile.app.pairing") : invite ? t("mobile.app.join") : t("mobile.app.pair")}</button>
       </div>
     </div>
   );
@@ -251,17 +253,17 @@ function NeedPairing({ reason, revoked }: { reason: string | null; revoked: bool
     <div className="m-app m-onboard" data-testid="m-need-pairing">
       <div className="m-onboard-body">
         <Brand />
-        <h1>{revoked ? "Acesso revogado" : "Pareie este aparelho"}</h1>
-        <p>{revoked ? "O dono da máquina removeu este aparelho. Peça um novo QR ou convite." : "No computador, abra Kabul › Configurações › Celular e remoto e aponte a câmera para o QR. Ou cole aqui o link de pareamento."}</p>
-        {reason && !revoked && <p className="m-onboard-why">{reason}</p>}
+        <h1>{revoked ? t("mobile.app.revoked") : t("mobile.app.needPair")}</h1>
+        <p>{revoked ? t("mobile.app.revokedLead") : t("mobile.app.needPairLead")}</p>
+        {reason && !revoked && <p className="m-onboard-why">{trError(reason)}</p>}
         <div className="m-grp">
           <div className="m-grp-body">
-            <label className="m-field"><input value={link} onChange={(e) => setLink(e.target.value)} placeholder="Link de pareamento ou convite" data-testid="m-pair-link" autoCapitalize="off" autoCorrect="off" /></label>
+            <label className="m-field"><input value={link} onChange={(e) => setLink(e.target.value)} placeholder={t("mobile.app.pairLinkPh")} data-testid="m-pair-link" autoCapitalize="off" autoCorrect="off" /></label>
           </div>
         </div>
       </div>
       <div className="m-onboard-foot">
-        <button className="m-cta" disabled={!parsed} onClick={() => (clearCred(), (location.hash = link.slice(link.indexOf("#") + 1)), location.reload())}>Continuar</button>
+        <button className="m-cta" disabled={!parsed} onClick={() => (clearCred(), (location.hash = link.slice(link.indexOf("#") + 1)), location.reload())}>{t("common.continue")}</button>
       </div>
     </div>
   );

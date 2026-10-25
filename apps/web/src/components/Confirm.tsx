@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Leftover } from "../api";
+import { t } from "../i18n";
 
 /**
  * Diálogo de confirmação próprio. O WKWebView do Tauri (wry) não implementa `window.confirm`:
@@ -11,7 +12,7 @@ let push: ((r: Req) => void) | null = null;
 export function confirmDialog(message: string, opts: { ok?: string; danger?: boolean; checkbox?: { label: string; key: string } } = {}): Promise<boolean> {
   return new Promise((resolve) => {
     if (!push) return resolve(false);
-    push({ message, ok: opts.ok ?? "Confirmar", danger: opts.danger ?? false, checkbox: opts.checkbox, resolve });
+    push({ message, ok: opts.ok ?? t("common.confirm"), danger: opts.danger ?? false, checkbox: opts.checkbox, resolve });
   });
 }
 
@@ -25,10 +26,10 @@ export const liveChats = new Map<string, { chat: string; ws: string }>();
 export async function confirmClosing(chatIds: string[], message: string, opts: { ok?: string; danger?: boolean; checkbox?: { label: string; key: string }; ask?: boolean; workspaceId?: string | null } = {}): Promise<boolean> {
   const procs = chatIds.length ? await api.chatProcesses(chatIds).catch(() => [] as Leftover[]) : [];
   if (!procs.length && !opts.ask) return true;
-  const full = procs.length ? `${message}${message ? "\n\n" : ""}${procs.length === 1 ? "O agente deixou 1 processo rodando. Ele continua rodando, a não ser que você marque para encerrar:" : `Os agentes deixaram ${procs.length} processos rodando. Eles continuam rodando, a não ser que você marque para encerrar:`}` : message;
+  const full = procs.length ? `${message}${message ? "\n\n" : ""}${t("app.confirm.leftProcs", { count: procs.length })}` : message;
   const r = await new Promise<{ ok: boolean; kill: Leftover[] }>((resolve) => {
     if (!push) return resolve({ ok: false, kill: [] });
-    push({ message: full, ok: opts.ok ?? "Confirmar", danger: opts.danger ?? false, checkbox: opts.checkbox, procs, resolve: (ok, kill = []) => resolve({ ok, kill }) });
+    push({ message: full, ok: opts.ok ?? t("common.confirm"), danger: opts.danger ?? false, checkbox: opts.checkbox, procs, resolve: (ok, kill = []) => resolve({ ok, kill }) });
   });
   if (!r.ok) return false;
   const keep = procs.filter((p) => !r.kill.includes(p));
@@ -61,12 +62,12 @@ export function ConfirmHost() {
                 {p.ports.length > 0 && <span className="lo-port mono">:{p.ports.join(", :")}</span>}
               </label>
             ))}
-            <div className="dim small">Marcados serão encerrados (SIGTERM, depois SIGKILL).</div>
+            <div className="dim small">{t("app.confirm.killHint")}</div>
           </div>
         )}
         {req.checkbox && <label className="check-row"><input type="checkbox" defaultChecked={localStorage.getItem(req.checkbox.key) === "1"} onChange={(e) => localStorage.setItem(req.checkbox!.key, e.target.checked ? "1" : "0")} data-testid="confirm-check" /> {req.checkbox.label}</label>}
         <div className="row end">
-          <button className="btn" onClick={() => done(false)}>Cancelar</button>
+          <button className="btn" onClick={() => done(false)}>{t("common.cancel")}</button>
           <button ref={okRef} className={"btn " + (req.danger ? "danger" : "primary")} onClick={() => done(true)} data-testid="confirm-ok">{req.ok}</button>
         </div>
       </div>

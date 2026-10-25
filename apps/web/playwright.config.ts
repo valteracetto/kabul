@@ -13,6 +13,7 @@ export default defineConfig({
   timeout: 60_000,
   workers: 1,
   reporter: [["list"], ["json", { outputFile: "../../.context/e2e/resultado.json" }]],
-  use: { screenshot: "only-on-failure", baseURL: `http://localhost:${PORT}`, viewport: { width: 1440, height: 900 }, colorScheme: "dark" },
+  // Idioma fixo em pt-BR: os specs conferem textos em português (o spec em inglês é o idioma-en.spec.ts).
+  use: { locale: "pt-BR", screenshot: "only-on-failure", baseURL: `http://localhost:${PORT}`, viewport: { width: 1440, height: 900 }, colorScheme: "dark" },
   webServer: { command: `npx vite --port ${PORT} --strictPort`, url: `http://localhost:${PORT}`, reuseExistingServer: true, timeout: 60_000 },
 });

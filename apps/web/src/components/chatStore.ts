@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useRef, useSyncExternalStore } from "react";
 import { api, type AgentEvent, type HarnessKind } from "../api";
 import { liveChats } from "./Confirm";
@@ -66,7 +67,7 @@ const touch = (e: Entry, patch: Partial<ChatInfo>) => {
 function ensure(session: string, ws = "", wsName = ""): Entry {
   let e = entries.get(session);
   if (!e) {
-    e = { info: { session, ws, chat: null, harness: null, model: null, title: "Nova conversa", busy: false, waiting: false, queue: null, suspended: false, unread: false, startedAt: null, lastEventAt: 0, events: 0, tools: 0, costUsd: 0, tokensIn: 0, tokensOut: 0, subs: {} }, wsName, sink: null, mem: null, pending: [] };
+    e = { info: { session, ws, chat: null, harness: null, model: null, title: t("common.newChat"), busy: false, waiting: false, queue: null, suspended: false, unread: false, startedAt: null, lastEventAt: 0, events: 0, tools: 0, costUsd: 0, tokensIn: 0, tokensOut: 0, subs: {} }, wsName, sink: null, mem: null, pending: [] };
     entries.set(session, e);
   } else if (ws && (e.info.ws !== ws || e.wsName !== wsName)) (e.info = { ...e.info, ws }), (e.wsName = wsName);
   return e;
@@ -138,9 +139,9 @@ function applyDetached(e: Entry, chat_id: string, ev: AgentEvent) {
   if (ev.type === "turn_completed" || ev.type === "exited" || ev.type === "approval_request") m.busy = false;
   if (ev.type === "turn_completed") {
     touch(e, { unread: true });
-    api.notify(`Kabul · ${e.wsName}`, "O agente terminou o turno", { ws: e.info.ws, session: e.info.session }).catch(() => {});
+    api.notify(`Kabul · ${e.wsName}`, t("chat.notify.turnDone"), { ws: e.info.ws, session: e.info.session }).catch(() => {});
   }
-  if (ev.type === "approval_request") api.notify(`Kabul · ${e.wsName}`, `Pedido de permissão: ${ev.tool}`, { ws: e.info.ws, session: e.info.session }).catch(() => {});
+  if (ev.type === "approval_request") api.notify(`Kabul · ${e.wsName}`, t("chat.notify.permission", { tool: ev.tool }), { ws: e.info.ws, session: e.info.session }).catch(() => {});
   if (ev.type === "exited") (m.live = null), bind(e.info.session, null);
   const next = apply(m.items, ev, m.started);
   if (ev.type === "turn_completed") {
@@ -159,7 +160,7 @@ function persistSoon(e: Entry) {
     const m = e.mem;
     if (!m || e.sink || !m.items.length) return;
     const first = m.items.find((i) => i.k === "user") as { text: string } | undefined;
-    api.historySave({ id: e.info.session, workspace_id: e.info.ws, title: first ? first.text.slice(0, 40) : "Nova conversa", model_key: m.modelKey, agent_session: m.agentSession, updated_at: Math.floor(Date.now() / 1000), items: m.items.map((i) => (i.k === "assistant" ? { ...i, streaming: false } : i)) }).catch(() => {});
+    api.historySave({ id: e.info.session, workspace_id: e.info.ws, title: first ? first.text.slice(0, 40) : t("common.newChat"), model_key: m.modelKey, agent_session: m.agentSession, updated_at: Math.floor(Date.now() / 1000), items: m.items.map((i) => (i.k === "assistant" ? { ...i, streaming: false } : i)) }).catch(() => {});
   }, 1200);
 }
 
@@ -167,18 +168,18 @@ function persistSoon(e: Entry) {
 function dequeue(e: Entry) {
   const m = e.mem;
   if (!m || e.sink || !m.queue.length || m.queuePaused || !m.live || m.replay || m.stopped || e.info.waiting) return;
-  const [t, ...rest] = m.queue;
+  const [msgText, ...rest] = m.queue;
   const live = m.live;
   m.queue = rest;
   m.busy = true;
   m.started = Date.now();
   touch(e, { busy: true, startedAt: m.started });
-  void api.createCheckpoint(e.info.ws, `antes: ${t.slice(0, 60)}`).catch(() => null).then((ck) => {
-    const qi = m.items.findIndex((i) => i.k === "user" && i.queued && i.text === t);
-    const u: Item = { k: "user", text: t, checkpoint: ck?.id };
+  void api.createCheckpoint(e.info.ws, t("chat.checkpointBefore", { text: msgText.slice(0, 60) })).catch(() => null).then((ck) => {
+    const qi = m.items.findIndex((i) => i.k === "user" && i.queued && i.text === msgText);
+    const u: Item = { k: "user", text: msgText, checkpoint: ck?.id };
     m.items = qi >= 0 ? [...m.items.slice(0, qi), ...m.items.slice(qi + 1), u] : [...m.items, u];
     m.seq++;
-    api.chatSend(live.id, t).catch(() => touch(e, { busy: false }));
+    api.chatSend(live.id, msgText).catch(() => touch(e, { busy: false }));
   });
 }
 

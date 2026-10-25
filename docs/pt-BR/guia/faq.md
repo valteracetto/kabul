@@ -38,6 +38,9 @@ novo ou criar PR. **Configurações › Git › Simular ações do GitHub** most
 **Preciso do Tailscale?** Só para o celular, outras máquinas e colaboração. O `kabuld` escuta no localhost e na
 sua tailnet, nunca na internet aberta.
 
+**A interface está em inglês?** Sim, em inglês e em português do Brasil: o app desktop, o app do celular, os
+menus e as notificações. O Kabul segue o idioma do sistema; para escolher, vá em Configurações › Geral › Idioma.
+
 **Tem app na App Store ou no Google Play?** Ainda não. O app do celular é uma PWA que você instala pelo navegador
 (Adicionar à Tela de Início). As versões para as lojas estão no roadmap.
 

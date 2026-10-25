@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Floating } from "./Floating";
 import { api, HARNESS_LABEL, type HarnessKind, type McpShared } from "../api";
 import { IPlus } from "../icons";
+import { t } from "../i18n";
+import { fmtNum } from "../i18n/format";
 
 export interface McpLive { status: Record<string, string>; tools: Record<string, number>; total: number }
 
@@ -18,10 +20,10 @@ export const saveSessionDisabled = (sessionId: string, v: string[]) => localStor
 const originId = (h: HarnessKind) => (h === "antigravity" ? "agy" : h);
 const ORIGIN_LABEL: Record<string, string> = { claude: "Claude", codex: "Codex", agy: "Antigravity", opencode: "OpenCode", gemini: "Gemini CLI", qwen: "Qwen Code", goose: "Goose", cursor: "Cursor" };
 
-/** 3200 → "3,2k". */
+/** 3200 → "3,2k" (pt-BR) / "3.2k" (en). */
 export function fmtTokens(n: number): string {
   if (n < 1000) return String(Math.round(n));
-  return (n / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k";
+  return fmtNum(n / 1000, { maximumFractionDigits: 1 }) + "k";
 }
 
 /**
@@ -86,10 +88,10 @@ export function McpPanel({ workspaceId, repoId, harness, live, sessionOff, setSe
     }
   };
   const exportAgy = async (m: McpShared) => {
-    if (!confirm(`Gravar "${m.name}" na config global do Antigravity (~/.gemini/config/mcp_config.json)? O Kabul guarda um backup ao lado.`)) return;
+    if (!confirm(t("chat.mcp.exportConfirm", { name: m.name }))) return;
     try {
       const b = await api.mcpExportAgy(workspaceId, m.name);
-      setNote(b ? `“${m.name}” exportado para o Antigravity (backup em ${b}).` : `“${m.name}” exportado para o Antigravity.`);
+      setNote(b ? t("chat.mcp.exportedBackup", { name: m.name, backup: b }) : t("chat.mcp.exported", { name: m.name }));
       load();
     } catch (e) {
       onError(String(e));
@@ -109,69 +111,69 @@ export function McpPanel({ workspaceId, repoId, harness, live, sessionOff, setSe
   const all = (entries ?? []).filter(reaches).map((m) => m.name);
   return (
     <Floating className="apps-pop mcp-pop" placement="top-end" testid="mcp-panel">
-      <div className="pop-title row">MCP da sessão <span className="grow" /><span className="dim small">{HARNESS_LABEL[harness]}{live ? ` · ${live.total} ferramentas` : ""}</span></div>
+      <div className="pop-title row">{t("chat.mcp.title")} <span className="grow" /><span className="dim small">{HARNESS_LABEL[harness]}{live ? ` · ${t("chat.mcp.tools", { count: live.total })}` : ""}</span></div>
       {entries && entries.length > 0 && (
         <div className="mcp-profiles row" data-testid="mcp-profiles">
-          <button className={"mcp-chip" + (sessionOff.length === 0 ? " on" : "")} onClick={() => setSessionOff([])} data-testid="mcp-profile-all">Todos</button>
-          <button className="mcp-chip" disabled={!essential.length} title={essential.length ? "Liga só os marcados com ★" : "Marque com ★ os essenciais deste repositório"} onClick={() => setSessionOff(all.filter((n) => !essential.includes(n)))} data-testid="mcp-profile-essential">Só o essencial</button>
+          <button className={"mcp-chip" + (sessionOff.length === 0 ? " on" : "")} onClick={() => setSessionOff([])} data-testid="mcp-profile-all">{t("chat.mcp.all")}</button>
+          <button className="mcp-chip" disabled={!essential.length} title={essential.length ? t("chat.mcp.essentialOn") : t("chat.mcp.essentialMark")} onClick={() => setSessionOff(all.filter((n) => !essential.includes(n)))} data-testid="mcp-profile-essential">{t("chat.mcp.essential")}</button>
           <span className="grow" />
           {(using > 0 || saved > 0) && (
             <span className="dim small" data-testid="mcp-savings">
-              ~{fmtTokens(using)} tokens/turno{saved > 0 && <b className="mcp-saved"> · −{fmtTokens(saved)} tokens por turno</b>}
+              {t("chat.mcp.usingPerTurn", { n: fmtTokens(using) })}{saved > 0 && <b className="mcp-saved"> · {t("chat.mcp.savedPerTurn", { n: fmtTokens(saved) })}</b>}
             </span>
           )}
         </div>
       )}
       {note && <div className="pop-row dim small" data-testid="mcp-note">{note}</div>}
-      {entries === null && <div className="pop-row dim">Lendo configuração…</div>}
-      {entries?.length === 0 && <div className="pop-row dim">Nenhum MCP configurado em nenhuma IA.</div>}
+      {entries === null && <div className="pop-row dim">{t("chat.mcp.reading")}</div>}
+      {entries?.length === 0 && <div className="pop-row dim">{t("chat.mcp.none")}</div>}
       {entries?.map((m) => {
         const st = live?.status[m.name];
         const off = isOff(m.name);
         const here = reaches(m);
         const n = tools(m);
-        const t = tokens(m);
+        const tok = tokens(m);
         return (
           <div key={m.name} className={"mcp-row" + (off || !here ? " off" : "")} data-testid="mcp-row">
-            <span className={"dot " + (st === "connected" ? "st-done" : st === "failed" ? "st-fail" : st ? "st-in-progress" : "")} title={st ?? "ainda não iniciado nesta sessão"} />
+            <span className={"dot " + (st === "connected" ? "st-done" : st === "failed" ? "st-fail" : st ? "st-in-progress" : "")} title={st ?? t("chat.mcp.notStarted")} />
             <div className="mcp-main">
               <div className="row">
-                <button className={"text-btn star" + (essential.includes(m.name) ? " on" : "")} title="Essencial neste repositório (perfil “Só o essencial”)" onClick={() => toggleEssential(m.name)} data-testid="mcp-star">{essential.includes(m.name) ? "★" : "☆"}</button>
+                <button className={"text-btn star" + (essential.includes(m.name) ? " on" : "")} title={t("chat.mcp.starTitle")} onClick={() => toggleEssential(m.name)} data-testid="mcp-star">{essential.includes(m.name) ? "★" : "☆"}</button>
                 <b>{m.name}</b>
-                {m.origins.map((o) => <span key={o.harness} className="badge" title={`${o.scope} · ${o.source}`}>do {ORIGIN_LABEL[o.harness] ?? o.harness}</span>)}
-                {m.conflict && <span className="badge warn" title="Mesmo nome com configurações diferentes em CLIs diferentes: vale a primeira">conflito</span>}
-                {st === "failed" && <span className="error small">falhou</span>}
+                {m.origins.map((o) => <span key={o.harness} className="badge" title={`${o.scope} · ${o.source}`}>{t("chat.mcp.from", { origin: ORIGIN_LABEL[o.harness] ?? o.harness })}</span>)}
+                {m.conflict && <span className="badge warn" title={t("chat.mcp.conflictTitle")}>{t("chat.mcp.conflict")}</span>}
+                {st === "failed" && <span className="error small">{t("chat.mcp.failed")}</span>}
               </div>
-              <div className="dim small mcp-target" title={`${m.target}${m.env_keys.length ? ` · variáveis: ${m.env_keys.join(", ")}` : ""}`}>{m.transport} · {m.target}</div>
+              <div className="dim small mcp-target" title={`${m.target}${m.env_keys.length ? ` · ${t("chat.mcp.vars", { vars: m.env_keys.join(", ") })}` : ""}`}>{m.transport} · {m.target}</div>
               <div className="dim small row mcp-meta">
-                {n != null ? <span data-testid="mcp-weight">{n} ferramenta{n === 1 ? "" : "s"}{t != null ? ` · ~${fmtTokens(t)} tokens` : ""}</span> : m.transport === "stdio" ? <button className="text-btn small" onClick={() => weigh(m)} disabled={weighing === m.name} data-testid="mcp-weigh">{weighing === m.name ? "medindo…" : "medir peso"}</button> : <span>peso desconhecido</span>}
+                {n != null ? <span data-testid="mcp-weight">{t("chat.mcp.tools", { count: n })}{tok != null ? ` · ${t("chat.mcp.approxTokens", { n: fmtTokens(tok) })}` : ""}</span> : m.transport === "stdio" ? <button className="text-btn small" onClick={() => weigh(m)} disabled={weighing === m.name} data-testid="mcp-weigh">{weighing === m.name ? t("chat.mcp.weighing") : t("chat.mcp.weigh")}</button> : <span>{t("chat.mcp.unknownWeight")}</span>}
                 <span className="grow" />
                 {!native(m) && harness === "antigravity" ? (
-                  <button className="text-btn small" onClick={() => exportAgy(m)} title="A config de MCP do Antigravity é só global" data-testid="mcp-export-agy">Exportar para o Antigravity</button>
+                  <button className="text-btn small" onClick={() => exportAgy(m)} title={t("chat.mcp.agyGlobal")} data-testid="mcp-export-agy">{t("chat.mcp.exportAgy")}</button>
                 ) : (
-                  <label className="row mcp-share" title={m.shared ? "Disponível em todas as IAs" : m.transport !== "stdio" ? "Remoto com login: fica só no CLI de origem até você ligar" : "Só nos CLIs de origem"}>
-                    <span className={"toggle small" + (m.shared ? " on" : "")} onClick={() => toggleShared(m)} data-testid="mcp-share"><span /></span>todas as IAs
+                  <label className="row mcp-share" title={m.shared ? t("chat.mcp.sharedAll") : m.transport !== "stdio" ? t("chat.mcp.remoteLogin") : t("chat.mcp.originOnly")}>
+                    <span className={"toggle small" + (m.shared ? " on" : "")} onClick={() => toggleShared(m)} data-testid="mcp-share"><span /></span>{t("chat.mcp.allAis")}
                   </label>
                 )}
               </div>
             </div>
-            <label className="mcp-toggle" title={here ? "Ligar/desligar nesta sessão (vale no próximo turno)" : "Não chega a esta IA"}>
+            <label className="mcp-toggle" title={here ? t("chat.mcp.toggleSession") : t("chat.mcp.notReaching")}>
               <span className={"toggle" + (here && !sessionOff.includes(m.name) ? " on" : "")} onClick={() => here && setSessionOff(sessionOff.includes(m.name) ? sessionOff.filter((x) => x !== m.name) : [...sessionOff, m.name])}><span /></span>
             </label>
-            <button className={"text-btn small" + (repoOff.includes(m.name) ? " error" : "")} title="Desligar em todas as sessões deste repositório (padrão do repo)" onClick={() => toggleRepo(m.name)}>{repoOff.includes(m.name) ? "desligado no repo" : "desligar no repo"}</button>
+            <button className={"text-btn small" + (repoOff.includes(m.name) ? " error" : "")} title={t("chat.mcp.repoOffTitle")} onClick={() => toggleRepo(m.name)}>{repoOff.includes(m.name) ? t("chat.mcp.repoIsOff") : t("chat.mcp.repoOff")}</button>
           </div>
         );
       })}
       {adding ? (
         <div className="mcp-add">
-          <input autoFocus placeholder="nome (ex.: docs)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <input placeholder="comando ou URL (ex.: npx -y @org/mcp  ·  https://…/mcp)" value={form.command} onChange={(e) => setForm({ ...form, command: e.target.value })} onKeyDown={(e) => e.key === "Enter" && add()} />
-          <div className="row end"><button className="btn" onClick={() => setAdding(false)}>Cancelar</button><button className="btn primary" disabled={!form.name || !form.command} onClick={add}>Adicionar ao .mcp.json</button></div>
+          <input autoFocus placeholder={t("chat.mcp.namePh")} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <input placeholder={t("chat.mcp.commandPh")} value={form.command} onChange={(e) => setForm({ ...form, command: e.target.value })} onKeyDown={(e) => e.key === "Enter" && add()} />
+          <div className="row end"><button className="btn" onClick={() => setAdding(false)}>{t("common.cancel")}</button><button className="btn primary" disabled={!form.name || !form.command} onClick={add}>{t("chat.mcp.addToJson")}</button></div>
         </div>
       ) : (
-        <div className="pop-row add-models" onClick={() => setAdding(true)} data-testid="mcp-add"><IPlus /> <span>Adicionar MCP ao projeto</span></div>
+        <div className="pop-row add-models" onClick={() => setAdding(true)} data-testid="mcp-add"><IPlus /> <span>{t("chat.mcp.addToProject")}</span></div>
       )}
-      <div className="dim small mcp-foot">Mudanças valem no próximo turno, em qualquer IA (a conversa continua). Valores de variáveis e cabeçalhos não aparecem aqui.</div>
+      <div className="dim small mcp-foot">{t("chat.mcp.foot")}</div>
     </Floating>
   );
 }

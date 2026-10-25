@@ -3,6 +3,7 @@ import { transport } from "../../transport";
 import { base, files, splitLine, type Change } from "./api";
 import { resolveCited, useFileSet } from "./hooks";
 import { go, openFile, openFiles } from "./route";
+import { t } from "../../i18n";
 
 /**
  * Caminhos citados pelo agente viram links para o preview: código inline (`src/a.ts:12`,
@@ -69,7 +70,7 @@ export function ChangedChips({ ws, from }: { ws: string | null; from: string }) 
   if (!ws) return null;
   return (
     <div className="pv-chips" data-testid="pv-chips">
-      <button className="pv-chip files" onClick={() => openFiles(ws, from)} data-testid="pv-chip-files">Arquivos</button>
+      <button className="pv-chip files" onClick={() => openFiles(ws, from)} data-testid="pv-chip-files">{t("mobile.pv.files")}</button>
       {list.slice(0, 12).map((c) => (
         <button key={c.path} className="pv-chip" onClick={() => go({ ws, diff: c.path, from })} title={c.path} data-testid="pv-chip" data-path={c.path}>
           {base(c.path)} {c.added !== null && <><span className="pv-add">+{c.added}</span><span className="pv-del">−{c.removed ?? 0}</span></>}
@@ -82,5 +83,5 @@ export function ChangedChips({ ws, from }: { ws: string | null; from: string }) 
 
 /** Botão "Arquivos" (cabeçalho da sessão e grupo da lista). */
 export function FilesButton({ ws, from, small }: { ws: string; from?: string | null; small?: boolean }) {
-  return <button className={"m-btn" + (small ? " small" : " ghost pv-files-btn")} onClick={() => openFiles(ws, from)} data-testid="m-files" aria-label="Arquivos do workspace">{small ? "Arquivos" : "⧉"}</button>;
+  return <button className={"m-btn" + (small ? " small" : " ghost pv-files-btn")} onClick={() => openFiles(ws, from)} data-testid="m-files" aria-label={t("mobile.pv.wsFiles")}>{small ? t("mobile.pv.files") : "⧉"}</button>;
 }

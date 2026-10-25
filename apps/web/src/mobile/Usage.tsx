@@ -3,11 +3,15 @@ import { AGENT_LABEL, isOwner, k, type ChatView } from "./kabuld";
 import { push } from "./nav";
 import { refresh, useKabul } from "./data";
 import { AgentIcon, Group, NavBar, Row, useCollapse, usePullToRefresh } from "./ui";
+import { fmtTokens, fmtUsd } from "../components/Usage";
+import { t } from "../i18n";
+import { fmtMoney } from "../i18n/format";
 
 interface Spend { model: string; harness: string; input: number; output: number; cost: number; turns: number }
 
-const fmt = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} mi` : n >= 1e3 ? `${(n / 1e3).toFixed(1)} mil` : String(n));
-const usd = (n: number) => `US$ ${n.toFixed(n < 1 ? 3 : 2)}`;
+const fmt = fmtTokens;
+// Abaixo de US$ 1 com três casas (conversas curtas custam centavos).
+const usd = (n: number) => (n > 0 && n < 1 ? fmtMoney(n, 3).replace(/\u00a0/g, " ") : fmtUsd(n));
 
 /** Aba Uso: agentes agora (status e por agente) e tokens/custo das conversas do Kabul abertas neste computador. */
 export function Usage() {
@@ -50,38 +54,38 @@ export function Usage() {
   const max = Math.max(1, ...(spend ?? []).map((s) => s.input + s.output));
   return (
     <div className="m-page" data-testid="m-usage">
-      <NavBar collapsed={collapsed} title="Uso" />
+      <NavBar collapsed={collapsed} title={t("usage.title")} />
       <main className="m-scroll has-tabbar" onScroll={onScroll} {...ptr.handlers}>
         {ptr.indicator}
-        <h1 className="m-large-title">Uso</h1>
+        <h1 className="m-large-title">{t("usage.title")}</h1>
         <div className="m-stats">
-          <div className="m-stat working"><b>{count("working")}</b><span>Trabalhando</span></div>
-          <div className="m-stat waiting"><b>{count("waiting")}</b><span>Esperando você</span></div>
-          <div className="m-stat"><b>{count("idle")}</b><span>Ociosas</span></div>
+          <div className="m-stat working"><b>{count("working")}</b><span>{t("usage.m.working")}</span></div>
+          <div className="m-stat waiting"><b>{count("waiting")}</b><span>{t("usage.m.waiting")}</span></div>
+          <div className="m-stat"><b>{count("idle")}</b><span>{t("usage.m.idle")}</span></div>
         </div>
         {isOwner() && (
           <Group>
-            <Row title="Custos e limites" sub="Gasto por dia, limites das contas e sessões (30 dias)" chevron onClick={() => push("uso")} testid="m-open-usage" />
+            <Row title={t("usage.m.costsLimits")} sub={t("usage.m.costsLimitsSub")} chevron onClick={() => push("uso")} testid="m-open-usage" />
           </Group>
         )}
         {byAgent.length > 0 && (
-          <Group header="Sessões por agente">
+          <Group header={t("usage.m.byAgent")}>
             {byAgent.map(([a, n]) => (
               <Row key={a} icon={<AgentIcon agent={a} size={28} />} title={AGENT_LABEL[a] ?? a} value={String(n)} />
             ))}
           </Group>
         )}
-        <Group header="Conversas do Kabul" footer="Somado dos turnos das conversas abertas neste computador. O histórico completo por workspace, conta e dia fica no app desktop.">
-          {!spend && <Row title="Carregando…" />}
-          {spend && spend.length === 0 && <Row title="Nenhuma conversa aberta" />}
-          {spend && spend.length > 0 && <Row title="Total" value={`${fmt(total.tokens)} tokens · ${usd(total.cost)}`} testid="m-usage-total" />}
+        <Group header={t("usage.m.kabulChats")} footer={t("usage.m.kabulChatsFooter")}>
+          {!spend && <Row title={t("common.loading")} />}
+          {spend && spend.length === 0 && <Row title={t("usage.m.noChats")} />}
+          {spend && spend.length > 0 && <Row title={t("usage.m.total")} value={t("usage.m.totalValue", { tokens: fmt(total.tokens), cost: usd(total.cost) })} testid="m-usage-total" />}
           {spend?.map((s) => (
             <div key={s.model} className="m-row m-usage-row" data-testid="m-usage-model">
               <AgentIcon agent={s.harness} size={28} />
               <span className="m-row-text">
                 <span className="m-row-title">{s.model}</span>
                 <span className="m-bar"><span style={{ width: `${((s.input + s.output) / max) * 100}%` }} /></span>
-                <span className="m-row-sub">{fmt(s.input)} entrada · {fmt(s.output)} saída · {s.turns} {s.turns === 1 ? "turno" : "turnos"}</span>
+                <span className="m-row-sub">{t("usage.m.modelSub", { input: fmt(s.input), output: fmt(s.output), count: s.turns })}</span>
               </span>
               <span className="m-row-value">{usd(s.cost)}</span>
             </div>

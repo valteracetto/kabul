@@ -24,6 +24,7 @@ cd apps/web && npm run build            # interface
 cd apps/web && npm run e2e              # Playwright: backend mock e o núcleo real pelo kabul serve
 cd apps/web && npm run perf             # orçamentos de desempenho (100 workspaces, 30 agentes)
 cd apps/web && npm run docs:shortcuts   # regenera as tabelas de atalhos a partir de src/i18n/shortcuts.json
+cd apps/web && npm run i18n:check       # textos da interface: nada fixo no código, nenhuma chave faltando
 cd docs && npm ci && npm run docs:dev   # este site, recarregando ao salvar
 cd docs && npm run docs:build           # gera o site (precisa passar antes do merge de mudanças nos docs)
 ```
@@ -33,7 +34,10 @@ cd docs && npm run docs:build           # gera o site (precisa passar antes do m
 - Nada de dados pessoais em commits, fixtures ou capturas (use o usuário `dev`, `/home/dev` e domínios de
   exemplo).
 - Código novo que dependa do macOS fica atrás de um adaptador e entra na [referência do Windows](../../windows.md).
-- Textos da interface ficam em `apps/web/src/i18n`.
+- Textos da interface ficam em `apps/web/src/i18n/locales/{en,pt-BR}/*.json` e são lidos com `t("area.chave")`;
+  toda chave existe nos dois idiomas, plurais usam `{ "one", "other" }` com `count`, e datas, números, moeda e
+  durações passam por `src/i18n/format.ts`. O `npm run i18n:check` falha com texto fixo em JSX ou chave faltando
+  num idioma. Detalhes na [referência de i18n](../../i18n.md).
 - Mudanças na documentação vão nos dois idiomas. Não prometa o que não está confirmado: marque como beta ou
   "a confirmar".
 

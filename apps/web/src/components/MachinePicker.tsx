@@ -6,6 +6,7 @@ import { activeMachine, machines, switchMachine } from "./machines";
 import { discovered } from "./RemotePanel";
 import { IChevronDown, IGear, IPlus } from "../icons";
 import type { Route } from "../App";
+import { t } from "../i18n";
 
 const Avatar = ({ src, name, size = 18 }: { src?: string | null; name: string; size?: number }) =>
   src ? <img className="mach-avatar" src={src} alt="" width={size} height={size} /> : <span className="mach-avatar mono" style={{ width: size, height: size }}>{name.slice(0, 1).toUpperCase()}</span>;
@@ -32,12 +33,12 @@ export function MachinePicker({ onRoute }: { onRoute: (r: Route) => void }) {
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [ids.join()]);
-  const localName = info?.name ?? "Este Mac";
+  const localName = info?.name ?? t("chat.machine.thisMac");
   const current = act === "local" ? localName : list.find((m) => m.id === act)?.name ?? localName;
-  const who = info?.user ? info.user.email ?? `@${info.user.login}` : "GitHub não conectado";
+  const who = info?.user ? info.user.email ?? `@${info.user.login}` : t("chat.machine.noGithub");
   return (
     <div className="picker machine-picker" ref={ref}>
-      <button className="machine-btn" onClick={() => setOpen(!open)} data-testid="machine-picker" title="Trocar de máquina (⌃1…⌃9)">
+      <button className="machine-btn" onClick={() => setOpen(!open)} data-testid="machine-picker" title={t("chat.machine.switch")}>
         {act === "local" ? <Avatar src={info?.user?.avatar} name={localName} /> : <IServer />}
         <span className="machine-name">{current}</span>
         <IChevronDown size={12} />
@@ -55,14 +56,14 @@ export function MachinePicker({ onRoute }: { onRoute: (r: Route) => void }) {
             </div>
           ))}
           {discovered().filter((d) => !list.some((m) => m.url.includes(d.dns_name ?? d.ip))).map((d) => (
-            <div key={d.ip} className="pop-row" onClick={() => (setOpen(false), onRoute({ kind: "settings", tab: "celular" }))} data-testid="machine-found" title="kabuld achado na tailnet: pareie para operar">
-              <IServer /> <span className="label">{d.machine ?? d.name}</span><span className="grow" /><span className="dim small">parear</span>
+            <div key={d.ip} className="pop-row" onClick={() => (setOpen(false), onRoute({ kind: "settings", tab: "celular" }))} data-testid="machine-found" title={t("chat.machine.found")}>
+              <IServer /> <span className="label">{d.machine ?? d.name}</span><span className="grow" /><span className="dim small">{t("chat.machine.pair")}</span>
             </div>
           ))}
-          <div className="pop-row" onClick={() => (setOpen(false), onRoute({ kind: "settings", tab: "remoto" }))} data-testid="machine-add"><IPlus size={14} /> <span className="label">Adicionar máquina…</span><span className="grow" /><span className="dim small">Tailscale</span></div>
-          <div className="pop-row disabled" title="em breve"><ICloud /> <span className="label">Nuvem Kabul</span><span className="grow" /><span className="dim small">em breve</span></div>
+          <div className="pop-row" onClick={() => (setOpen(false), onRoute({ kind: "settings", tab: "remoto" }))} data-testid="machine-add"><IPlus size={14} /> <span className="label">{t("chat.machine.add")}</span><span className="grow" /><span className="dim small">Tailscale</span></div>
+          <div className="pop-row disabled" title={t("chat.machine.soon")}><ICloud /> <span className="label">{t("chat.machine.cloud")}</span><span className="grow" /><span className="dim small">{t("chat.machine.soon")}</span></div>
           <div className="pop-sep" />
-          <div className="pop-row" onClick={() => (setOpen(false), onRoute({ kind: "settings", tab: "geral" }))}><IGear size={14} /> <span className="label">Configurações</span><span className="grow" /><span className="kbd-hint">⌘,</span></div>
+          <div className="pop-row" onClick={() => (setOpen(false), onRoute({ kind: "settings", tab: "geral" }))}><IGear size={14} /> <span className="label">{t("common.settings")}</span><span className="grow" /><span className="kbd-hint">⌘,</span></div>
         </Floating>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { t } from "../i18n";
 
 /**
  * Markdown sem HTML cru: títulos, parágrafos, listas (inclusive tarefas), citações, regras, tabelas,
@@ -14,20 +15,21 @@ export function highlight(code: string): ReactNode[] {
   const kw = (s: string) => s.split(KW).map((p, i) => (i % 2 ? <span key={k++} className="hl-kw">{p}</span> : p));
   for (const m of code.matchAll(re)) {
     out.push(...kw(code.slice(last, m.index)));
-    const t = m[0];
-    out.push(<span key={k++} className={t.startsWith("//") || t.startsWith("#") ? "hl-com" : /^\d/.test(t) ? "hl-num" : "hl-str"}>{t}</span>);
-    last = m.index! + t.length;
+    const tok = m[0];
+    // i18n-ignore (classes CSS hl-*)
+    out.push(<span key={k++} className={tok.startsWith("//") || tok.startsWith("#") ? "hl-com" : /^\d/.test(tok) ? "hl-num" : "hl-str"}>{tok}</span>);
+    last = m.index! + tok.length;
   }
   out.push(...kw(code.slice(last)));
   return out;
 }
 
-export function inline(t: string, onFile?: (p: string) => void): ReactNode[] {
+export function inline(src: string, onFile?: (p: string) => void): ReactNode[] {
   const out: ReactNode[] = [];
   const re = /(!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|(?<![*\w])\*[^*\n]+\*(?!\w)|https?:\/\/[^\s)]+)/g;
   let last = 0, k = 0;
-  for (const m of t.matchAll(re)) {
-    if (m.index! > last) out.push(t.slice(last, m.index));
+  for (const m of src.matchAll(re)) {
+    if (m.index! > last) out.push(src.slice(last, m.index));
     const s = m[0];
     if (s.startsWith("![")) {
       const [, alt, src] = /!\[([^\]]*)\]\(([^)]+)\)/.exec(s)!;
@@ -45,7 +47,7 @@ export function inline(t: string, onFile?: (p: string) => void): ReactNode[] {
     else out.push(<i key={k++}>{s.slice(1, -1)}</i>);
     last = m.index! + s.length;
   }
-  out.push(t.slice(last));
+  out.push(src.slice(last));
   return out;
 }
 
@@ -75,7 +77,7 @@ function Rendered({ lang, body }: { lang: string; body: string }) {
     })();
     return () => void (alive = false);
   }, [lang, body]);
-  return err ? <><pre className="md-code">{body}</pre><div className="dim small md-render-err">Não deu para desenhar: {err}</div></> : <div ref={ref} className={"md-rendered md-" + (lang === "mermaid" ? "mermaid" : "math")} data-testid={lang === "mermaid" ? "mermaid" : "katex"} />;
+  return err ? <><pre className="md-code">{body}</pre><div className="dim small md-render-err">{t("chat.md.renderError", { err })}</div></> : <div ref={ref} className={"md-rendered md-" + (lang === "mermaid" ? "mermaid" : "math")} data-testid={lang === "mermaid" ? "mermaid" : "katex"} />;
 }
 
 function CodeBlock({ lang, body }: { lang: string; body: string }) {
@@ -83,7 +85,7 @@ function CodeBlock({ lang, body }: { lang: string; body: string }) {
   const special = lang === "mermaid" || lang === "math" || lang === "latex";
   return (
     <div className="md-codewrap">
-      <div className="md-codebar"><span>{special ? (lang === "mermaid" ? "Mermaid" : "Fórmula") : lang || "código"}</span><span className="grow" /><button className="text-btn small" onClick={() => (navigator.clipboard.writeText(body), setCopied(true), setTimeout(() => setCopied(false), 1000))}>{copied ? "copiado" : special ? (lang === "mermaid" ? "Copiar fonte do Mermaid" : "Copiar fonte") : "Copiar"}</button></div>
+      <div className="md-codebar"><span>{special ? (lang === "mermaid" ? "Mermaid" : t("chat.md.formula")) : lang || t("chat.md.code")}</span><span className="grow" /><button className="text-btn small" onClick={() => (navigator.clipboard.writeText(body), setCopied(true), setTimeout(() => setCopied(false), 1000))}>{copied ? t("chat.md.copied") : special ? (lang === "mermaid" ? t("chat.md.copyMermaid") : t("chat.md.copySource")) : t("common.copy")}</button></div>
       {special ? <Rendered lang={lang} body={body} /> : <pre className="md-code">{highlight(body)}</pre>}
     </div>
   );
@@ -95,7 +97,7 @@ const cells = (l: string) => l.trim().replace(/^\||\|$/g, "").split("|").map((c)
 export function Markdown({ text, onFile }: { text: string; onFile?: (p: string) => void }) {
   const blocks: ReactNode[] = [];
   const lines = text.split("\n");
-  const inl = (t: string) => inline(t, onFile);
+  const inl = (x: string) => inline(x, onFile);
   for (let i = 0; i < lines.length; ) {
     const l = lines[i];
     if (l.trim() === "$$") {

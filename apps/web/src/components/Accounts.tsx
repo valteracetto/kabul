@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { trLabel } from "./Usage";
 import { api, type AccountRow } from "../api";
 import { confirmDialog } from "./Confirm";
 import { LoginFlow, reduceLogin, MAX_RESTARTS, type LoginState } from "./LoginFlow";
+import { t } from "../i18n";
 
 const PROVIDERS: [string, string][] = [["claude", "Claude"], ["codex", "ChatGPT / Codex"], ["agy", "Google / Gemini (Antigravity)"], ["gh", "GitHub"]];
 
@@ -31,7 +33,7 @@ function ProviderAccounts({ provider, label, onError }: { provider: string; labe
   const iso = rows[0];
   return (
     <div className="account acc-provider" data-testid={`accounts-${provider}`}>
-      <div className="acc-head"><b>{label}</b><span className="dim small">{iso?.env_var ? `isolamento: ${iso.env_var}${iso.env_confirmed ? "" : " (a confirmar)"}` : ""}</span></div>
+      <div className="acc-head"><b>{label}</b><span className="dim small">{iso?.env_var ? t("settings.accounts.isolation", { env: iso.env_var }) + (iso.env_confirmed ? "" : t("settings.accounts.unconfirmed")) : ""}</span></div>
       {rows.map((r) => {
         const f = flow[r.id];
         return (
@@ -40,17 +42,17 @@ function ProviderAccounts({ provider, label, onError }: { provider: string; labe
               <input autoFocus value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                 onKeyDown={(e) => { if (e.key === "Enter") api.accountUpdate(r.id, { nickname: editing.name }).then(() => (setEditing(null), load())); if (e.key === "Escape") setEditing(null); }} data-testid="account-rename-input" />
             ) : (
-              <span className="acc-name">{r.nickname}{r.email && <span className="dim small"> · {r.email}</span>}</span>
+              <span className="acc-name">{trLabel(r.nickname)}{r.email && <span className="dim small"> · {r.email}</span>}</span>
             )}
-            {r.default && <span className="badge ok">padrão</span>}
-            <span className={"badge " + (r.logged_in ? "ok" : "")}>{r.logged_in == null ? "?" : r.logged_in ? "logado" : "não logado"}</span>
+            {r.default && <span className="badge ok">{t("settings.accounts.default")}</span>}
+            <span className={"badge " + (r.logged_in ? "ok" : "")}>{r.logged_in == null ? "?" : r.logged_in ? t("settings.accounts.loggedIn") : t("settings.accounts.notLoggedIn")}</span>
             <span className="grow" />
             {r.dir && (
               <>
-                {!r.default && <button className="text-btn small" onClick={() => api.accountUpdate(r.id, { makeDefault: true }).then(load)} data-testid="account-default">Tornar padrão</button>}
-                <button className="text-btn small" onClick={() => setEditing({ id: r.id, name: r.nickname })} data-testid="account-rename">Renomear</button>
-                <button className="text-btn small" onClick={async () => (await confirmDialog(`Remover a conta "${r.nickname}"? As credenciais dela no Kabul são apagadas.`, { ok: "Remover", danger: true })) && api.accountUpdate(r.id, { remove: true }).then(load)} data-testid="account-remove">Remover</button>
-                {!f && <button className="btn" onClick={() => ((restarts.current[r.id] = 0), setFlow({ ...flow, [r.id]: {} }), start(r.id))} data-testid="account-login">Entrar</button>}
+                {!r.default && <button className="text-btn small" onClick={() => api.accountUpdate(r.id, { makeDefault: true }).then(load)} data-testid="account-default">{t("settings.accounts.makeDefault")}</button>}
+                <button className="text-btn small" onClick={() => setEditing({ id: r.id, name: r.nickname })} data-testid="account-rename">{t("common.rename")}</button>
+                <button className="text-btn small" onClick={async () => (await confirmDialog(t("settings.accounts.removeConfirm", { name: r.nickname }), { ok: t("common.remove"), danger: true })) && api.accountUpdate(r.id, { remove: true }).then(load)} data-testid="account-remove">{t("common.remove")}</button>
+                {!f && <button className="btn" onClick={() => ((restarts.current[r.id] = 0), setFlow({ ...flow, [r.id]: {} }), start(r.id))} data-testid="account-login">{t("settings.accounts.signIn")}</button>}
               </>
             )}
             {f && (
@@ -66,8 +68,8 @@ function ProviderAccounts({ provider, label, onError }: { provider: string; labe
         );
       })}
       <div className="row acc-add">
-        <input placeholder={`Apelido da nova conta ${label} (ex.: Trabalho)`} value={adding} onChange={(e) => setAdding(e.target.value)} onKeyDown={(e) => e.key === "Enter" && adding.trim() && api.accountAdd(provider, adding.trim()).then(() => (setAdding(""), load()), (x) => onError(String(x)))} data-testid={`account-add-${provider}`} />
-        <button className="btn" disabled={!adding.trim()} onClick={() => api.accountAdd(provider, adding.trim()).then(() => (setAdding(""), load()), (x) => onError(String(x)))}>Adicionar conta</button>
+        <input placeholder={t("settings.accounts.nickname", { provider: label })} value={adding} onChange={(e) => setAdding(e.target.value)} onKeyDown={(e) => e.key === "Enter" && adding.trim() && api.accountAdd(provider, adding.trim()).then(() => (setAdding(""), load()), (x) => onError(String(x)))} data-testid={`account-add-${provider}`} />
+        <button className="btn" disabled={!adding.trim()} onClick={() => api.accountAdd(provider, adding.trim()).then(() => (setAdding(""), load()), (x) => onError(String(x)))}>{t("settings.accounts.addAccount")}</button>
       </div>
     </div>
   );

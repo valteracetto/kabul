@@ -10,6 +10,8 @@ import { openSession, push } from "./nav";
 import { ModelSheet } from "./ModelSheet";
 import { FilesButton } from "./preview";
 import { AgentIcon, Avatar, Empty, Group, I, NavBar, Row, RoundButton, RunsOnLabel, Segmented, Sheet, StatusPill, Swipe, TicketCard, haptic, useCollapse, useCountdown, usePullToRefresh, type SwipeAction } from "./ui";
+import { t } from "../i18n";
+import { trError } from "../i18n/errors";
 
 type Filter = "all" | "waiting";
 
@@ -47,15 +49,15 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
       <NavBar
         collapsed={collapsed}
         left={
-          <button className="m-round avatar" onClick={(e) => (haptic(e.currentTarget), onSettings())} aria-label="Configurações" data-testid="m-menu">
+          <button className="m-round avatar" onClick={(e) => (haptic(e.currentTarget), onSettings())} aria-label={t("mobile.home.settings")} data-testid="m-menu">
             {who ? <Avatar name={who.user} color={who.color || "#8a847f"} size={36} /> : <I.gear size={20} />}
           </button>
         }
         right={
           <>
-            <RoundButton onClick={() => setSheet({ kind: "sort" })} label="Ordenar e filtrar" testid="m-sort"><I.filter /></RoundButton>
+            <RoundButton onClick={() => setSheet({ kind: "sort" })} label={t("mobile.home.sortFilter")} testid="m-sort"><I.filter /></RoundButton>
             <button className="m-pill" onClick={(e) => (haptic(e.currentTarget), setSheet({ kind: "machine" }))} data-testid="m-machine-pill">
-              <span className={`m-conn m-conn-${conn}`} title={conn === "open" ? "Conectado" : "Reconectando…"} data-testid="m-conn" />
+              <span className={`m-conn m-conn-${conn}`} title={conn === "open" ? t("mobile.home.connected") : t("mobile.home.reconnecting")} data-testid="m-conn" />
               <span className="m-ellipsis" data-testid="m-machine">{snap.machine || "Kabul"}</span>
               <I.updown />
             </button>
@@ -64,20 +66,20 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
       />
       <main className="m-scroll has-tabbar" onScroll={onScroll} {...ptr.handlers}>
         {ptr.indicator}
-        <h1 className="m-large-title">Workspaces</h1>
+        <h1 className="m-large-title">{t("mobile.home.title")}</h1>
         <div className="m-under-title">
           <Segmented
             value={filter}
             onChange={setFilter}
             options={[
-              { v: "all", label: <>Todas <span className="dim">{list.length}</span></> },
-              { v: "waiting", label: <>Esperando você {waiting > 0 && <span className="m-count">{waiting}</span>}</>, testid: "m-filter-waiting" },
+              { v: "all", label: <>{t("mobile.home.all")} <span className="dim">{list.length}</span></> },
+              { v: "waiting", label: <>{t("mobile.home.waitingYou")} {waiting > 0 && <span className="m-count">{waiting}</span>}</>, testid: "m-filter-waiting" },
             ]}
           />
         </div>
-        {snap.err && <div className="m-error">{snap.err}</div>}
+        {snap.err && <div className="m-error">{trError(snap.err)}</div>}
         {snap.loaded && groups.length === 0 && (
-          filter === "waiting" ? <Empty testid="m-empty" title="Ninguém esperando você" sub="Quando um agente pedir uma decisão, ele aparece aqui." /> : <Empty testid="m-empty" title="Nenhuma sessão rodando" sub="Sessões e workspaces deste computador aparecem aqui sozinhos." />
+          filter === "waiting" ? <Empty testid="m-empty" title={t("mobile.home.emptyWaiting")} sub={t("mobile.home.emptyWaitingSub")} /> : <Empty testid="m-empty" title={t("mobile.home.empty")} sub={t("mobile.home.emptySub")} />
         )}
         {groups.map((g) => (
           <section key={g.key} className="m-group" data-testid="m-group" data-repo={g.repo}>
@@ -98,7 +100,7 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
       </main>
       {isOwner() && (
         <button className="m-fab" onClick={(e) => (haptic(e.currentTarget), push("v=new"))} data-testid="m-create">
-          <I.plus size={20} /> Criar
+          <I.plus size={20} /> {t("mobile.home.create")}
         </button>
       )}
       {sheet?.kind === "sort" && <SortSheet onClose={() => setSheet(null)} />}
@@ -106,7 +108,7 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
       {sheet?.kind === "invite" && <InviteSheet ws={sheet.ws} name={sheet.name} onClose={() => setSheet(null)} />}
       {sheet?.kind === "chat" && (
         <ModelSheet
-          title={`Nova conversa em ${sheet.name}`}
+          title={t("mobile.home.newChatIn", { name: sheet.name })}
           testid="m-chat-sheet"
           mode="start"
           onClose={() => setSheet(null)}
@@ -156,13 +158,14 @@ function buildGroups(list: LiveSession[], wss: Workspace[], repos: { id: string;
   const sessOrder = (a: LiveSession, b: LiveSession) => rankOf([a]) - rankOf([b]) || a.idle_secs - b.idle_secs;
   vis.forEach((n) => n.sessions.sort(sessOrder));
 
-  const repoHead = (r: string) => (r === "Outras sessões" ? <span className="m-grp-title">Outras sessões</span> : <><RepoMark name={r || "?"} size={16} /><span className="m-grp-title">{r}</span></>);
+  // "Outras sessões" é o rótulo que o kabuld dá às sessões soltas (dado, não texto da tela). i18n-ignore
+  const repoHead = (r: string) => (r === "Outras sessões" ? <span className="m-grp-title">{t("mobile.home.otherSessions")}</span> : <><RepoMark name={r || "?"} size={16} /><span className="m-grp-title">{r}</span></>);
 
   if (p.sort === "recent") {
     const items: (WsNode | Loose)[] = [...vis.map((n) => n as WsNode | Loose), ...looseVis.map((s) => ({ kind: "s" as const, key: s.id, s }))];
     const act = (x: WsNode | Loose) => (x.kind === "ws" ? x.activity : now() - x.s.idle_secs);
     items.sort((a, b) => act(b) - act(a));
-    return items.length ? [{ key: "recentes", label: "Recentes", repo: "Recentes", head: <span className="m-grp-title">Atividade recente</span>, items, rank: 0 }] : [];
+    return items.length ? [{ key: "recentes", label: t("mobile.home.recent"), repo: "Recentes", head: <span className="m-grp-title">{t("mobile.home.recentActivity")}</span>, items, rank: 0 }] : [];
   }
 
   const groups = new Map<string, GroupNode>();
@@ -174,7 +177,7 @@ function buildGroups(list: LiveSession[], wss: Workspace[], repos: { id: string;
   const secs = [...sections].sort((a, b) => a.order - b.order);
   for (const n of vis) {
     const sec = p.sort === "sections" && n.ws?.section ? secs.find((s) => s.id === n.ws!.section) : undefined;
-    if (p.sort === "sections" && n.ws?.pinned) put("pinned", "Fixados", <><span className="m-grp-emoji">📌</span><span className="m-grp-title">Fixados</span></>, -2, n);
+    if (p.sort === "sections" && n.ws?.pinned) put("pinned", t("mobile.home.pinned"), <><span className="m-grp-emoji">📌</span><span className="m-grp-title">{t("mobile.home.pinned")}</span></>, -2, n);
     else if (sec) put(`sec:${sec.id}`, sec.name, <><span className="m-grp-emoji">{sec.emoji || "▪︎"}</span><span className="m-grp-title">{sec.name}</span></>, -1 + secs.indexOf(sec) / 1000, n);
     else put(`repo:${n.repo}`, n.repo, repoHead(n.repo), 0, n);
   }
@@ -198,8 +201,8 @@ function WsBlock({ n, manual, onDrop, onChat, onInvite, os, machine }: { n: WsNo
   const [over, setOver] = useState(false);
   const actions: SwipeAction[] = [];
   if (owner && w) {
-    actions.push({ label: w.pinned ? "Desafixar" : "Fixar", tone: "orange", icon: <span>📌</span>, onClick: () => void k.workspaceUpdate(w.id, { pinned: !w.pinned }).then(refresh), testid: "m-ws-pin" });
-    actions.push({ label: w.archived ? "Restaurar" : "Arquivar", tone: w.archived ? "blue" : "gray", icon: <ArchiveIcon />, onClick: () => void k.workspaceArchive(w.id, !w.archived).then(refresh, (e) => alert(String(e))), testid: "m-ws-archive" });
+    actions.push({ label: w.pinned ? t("mobile.home.unpin") : t("mobile.home.pin"), tone: "orange", icon: <span>📌</span>, onClick: () => void k.workspaceUpdate(w.id, { pinned: !w.pinned }).then(refresh), testid: "m-ws-pin" });
+    actions.push({ label: w.archived ? t("mobile.home.restore") : t("mobile.home.archive"), tone: w.archived ? "blue" : "gray", icon: <ArchiveIcon />, onClick: () => void k.workspaceArchive(w.id, !w.archived).then(refresh, (e) => alert(trError(e))), testid: "m-ws-archive" });
   }
   const drag = useDragHandle(n.id, onDrop, setOver);
   const status = w ? WS_STATUS[w.status] ?? w.status : null;
@@ -209,22 +212,22 @@ function WsBlock({ n, manual, onDrop, onChat, onInvite, os, machine }: { n: WsNo
         <div className="m-row m-ws-row" data-testid="m-ws" data-ws={n.id}>
           <span className="m-row-icon m-ws-icon"><I.branch /></span>
           <span className="m-row-text">
-            <span className="m-row-title">{n.title}{w?.unread && <span className="m-unread" aria-label="Novidade" />}</span>
-            <span className="m-row-sub">{[n.branch, status, w?.archived ? "arquivado" : null].filter(Boolean).join(" · ")}</span>
+            <span className="m-row-title">{n.title}{w?.unread && <span className="m-unread" aria-label={t("mobile.home.new")} />}</span>
+            <span className="m-row-sub">{[n.branch, status, w?.archived ? t("mobile.home.archived") : null].filter(Boolean).join(" · ")}</span>
           </span>
           {w && !w.archived && <FilesButton ws={w.id} small />}
           {owner && !w?.archived && (
-            <button className="m-icon-btn" onClick={(e) => (haptic(e.currentTarget), onInvite())} data-testid="m-invite" aria-label="Convidar">
+            <button className="m-icon-btn" onClick={(e) => (haptic(e.currentTarget), onInvite())} data-testid="m-invite" aria-label={t("mobile.home.invite")}>
               <I.personPlus />
             </button>
           )}
           {canWrite() && !w?.archived && (
-            <button className="m-icon-btn" onClick={(e) => (haptic(e.currentTarget), onChat())} data-testid="m-new-chat" aria-label="Nova conversa">
+            <button className="m-icon-btn" onClick={(e) => (haptic(e.currentTarget), onChat())} data-testid="m-new-chat" aria-label={t("common.newChat")}>
               <I.chatPlus />
             </button>
           )}
           {manual && (
-            <span className="m-grip" {...drag} aria-label="Arrastar para reordenar" data-testid="m-grip">
+            <span className="m-grip" {...drag} aria-label={t("mobile.home.dragReorder")} data-testid="m-grip">
               <I.grip />
             </span>
           )}
@@ -260,9 +263,9 @@ function useDragHandle(id: string, onDrop: (to: string) => void, setOver: (b: bo
     onPointerMove: (e: React.PointerEvent<HTMLElement>) => e.currentTarget.hasPointerCapture(e.pointerId) && mark(target(e.clientX, e.clientY)),
     onPointerUp: (e: React.PointerEvent<HTMLElement>) => {
       setOver(false);
-      const t = target(e.clientX, e.clientY);
+      const tgt = target(e.clientX, e.clientY);
       mark(null);
-      if (t && t.dataset.wsRow && t.dataset.wsRow !== id) onDrop(t.dataset.wsRow);
+      if (tgt && tgt.dataset.wsRow && tgt.dataset.wsRow !== id) onDrop(tgt.dataset.wsRow);
     },
   };
 }
@@ -273,13 +276,13 @@ function SessionRow({ s, os, machine, nested }: { s: LiveSession; os: string; ma
   const actions: SwipeAction[] = [];
   if (canWrite() && s.status !== "idle")
     actions.push({
-      label: "Parar",
+      label: t("common.stop"),
       tone: "red",
       icon: <I.stop size={16} />,
       onClick: () => void (chat ? k.chatStop(chatId) : s.pane ? k.termKeys(s.name, s.pane, ["C-c"]) : Promise.resolve()).catch(() => {}),
       testid: "m-swipe-stop",
     });
-  if (isOwner() && chat) actions.push({ label: "Arquivar", tone: "gray", icon: <ArchiveIcon />, onClick: () => void k.chatClose(chatId).then(refresh, () => {}), testid: "m-swipe-archive" });
+  if (isOwner() && chat) actions.push({ label: t("mobile.home.archive"), tone: "gray", icon: <ArchiveIcon />, onClick: () => void k.chatClose(chatId).then(refresh, () => {}), testid: "m-swipe-archive" });
   const sub = s.status === "waiting" && s.detail ? s.detail : chat ? s.preview : `${AGENT_LABEL[s.agent] ?? s.agent} · ${s.preview}`;
   return (
     <Swipe actions={actions} className={nested ? "nested" : ""}>
@@ -305,23 +308,23 @@ function SortSheet({ onClose }: { onClose: () => void }) {
   const p = useListPrefs();
   const { sections, repos } = useKabul();
   const [sub, setSub] = useState<null | "workspaces" | "section" | "repo">(null);
-  const wsLabel = { active: "Ativos", archived: "Arquivados", all: "Todos" };
-  const secName = p.section === "all" ? "Todas" : sections.find((s) => s.id === p.section)?.name ?? "Todas";
+  const wsLabel = { active: t("mobile.home.wsActive"), archived: t("mobile.home.wsArchived"), all: t("mobile.home.wsAll") };
+  const secName = p.section === "all" ? t("mobile.home.all") : sections.find((s) => s.id === p.section)?.name ?? t("mobile.home.all");
   const pick = (patch: Partial<ListPrefs>) => (setListPrefs(patch), setSub(null));
-  const title = sub === "workspaces" ? "Workspaces" : sub === "section" ? "Seções" : sub === "repo" ? "Repositório" : "Ordenar e filtrar";
+  const title = sub === "workspaces" ? t("mobile.home.title") : sub === "section" ? t("mobile.home.sections") : sub === "repo" ? t("mobile.home.repo") : t("mobile.home.sortFilter");
   return (
     <Sheet title={title} onClose={onClose} testid="m-sort-sheet" full onBack={sub ? () => setSub(null) : undefined}>
       {!sub && (
         <>
-          <Group header="Ordenar">
-            <Row title="Seções primeiro" check={p.sort === "sections"} onClick={() => setListPrefs({ sort: "sections" })} testid="m-sort-sections" />
-            <Row title="Workspaces primeiro" check={p.sort === "workspaces"} onClick={() => setListPrefs({ sort: "workspaces" })} testid="m-sort-workspaces" />
-            <Row title="Atividade recente" check={p.sort === "recent"} onClick={() => setListPrefs({ sort: "recent" })} testid="m-sort-recent" />
+          <Group header={t("mobile.home.sort")}>
+            <Row title={t("mobile.home.sectionsFirst")} check={p.sort === "sections"} onClick={() => setListPrefs({ sort: "sections" })} testid="m-sort-sections" />
+            <Row title={t("mobile.home.workspacesFirst")} check={p.sort === "workspaces"} onClick={() => setListPrefs({ sort: "workspaces" })} testid="m-sort-workspaces" />
+            <Row title={t("mobile.home.recentActivity")} check={p.sort === "recent"} onClick={() => setListPrefs({ sort: "recent" })} testid="m-sort-recent" />
           </Group>
-          <Group header="Filtrar">
-            <Row title="Workspaces" value={wsLabel[p.workspaces]} chevron onClick={() => setSub("workspaces")} testid="m-filter-ws" />
-            <Row title="Seções" value={secName} chevron onClick={() => setSub("section")} />
-            <Row title="Repositório" value={p.repo === "all" ? "Todos" : p.repo} chevron onClick={() => setSub("repo")} />
+          <Group header={t("mobile.home.filter")}>
+            <Row title={t("mobile.home.title")} value={wsLabel[p.workspaces]} chevron onClick={() => setSub("workspaces")} testid="m-filter-ws" />
+            <Row title={t("mobile.home.sections")} value={secName} chevron onClick={() => setSub("section")} />
+            <Row title={t("mobile.home.repo")} value={p.repo === "all" ? t("mobile.home.wsAll") : p.repo} chevron onClick={() => setSub("repo")} />
           </Group>
         </>
       )}
@@ -333,8 +336,8 @@ function SortSheet({ onClose }: { onClose: () => void }) {
         </Group>
       )}
       {sub === "section" && (
-        <Group footer={sections.length ? undefined : "Crie seções na barra lateral do app desktop."}>
-          <Row title="Todas" check={p.section === "all"} onClick={() => pick({ section: "all" })} />
+        <Group footer={sections.length ? undefined : t("mobile.home.createSectionsHint")}>
+          <Row title={t("mobile.home.all")} check={p.section === "all"} onClick={() => pick({ section: "all" })} />
           {[...sections].sort((a, b) => a.order - b.order).map((s) => (
             <Row key={s.id} icon={<span>{s.emoji || "▪︎"}</span>} title={s.name} check={p.section === s.id} onClick={() => pick({ section: s.id })} />
           ))}
@@ -342,7 +345,7 @@ function SortSheet({ onClose }: { onClose: () => void }) {
       )}
       {sub === "repo" && (
         <Group>
-          <Row title="Todos" check={p.repo === "all"} onClick={() => pick({ repo: "all" })} />
+          <Row title={t("mobile.home.wsAll")} check={p.repo === "all"} onClick={() => pick({ repo: "all" })} />
           {repos.map((r) => (
             <Row key={r.id} icon={<RepoMark name={r.name} size={22} />} title={r.name} sub={r.default_branch} check={p.repo === r.name} onClick={() => pick({ repo: r.name })} />
           ))}
@@ -356,14 +359,14 @@ function MachineSheet({ conn, onClose }: { conn: ConnState; onClose: () => void 
   const { machine, os, list } = useKabul();
   const sistema = os === "macos" ? "macOS" : os === "windows" ? "Windows" : os === "linux" ? "Linux" : os || "—";
   return (
-    <Sheet title="Este computador" onClose={onClose} testid="m-machine-sheet">
-      <Group footer="O celular fala com o kabuld deste computador pela sua tailnet. Outras máquinas pareadas aparecem no app desktop.">
+    <Sheet title={t("mobile.home.thisComputer")} onClose={onClose} testid="m-machine-sheet">
+      <Group footer={t("mobile.home.machineFooter")}>
         <Row icon={<I.laptop />} title={machine || "—"} sub={sistema} check />
-        <Row title="Conexão" value={<span className="m-conn-label"><span className={`m-conn m-conn-${conn}`} />{conn === "open" ? "Conectado" : "Reconectando…"}</span>} />
-        <Row title="Sessões" value={String(list.length)} />
+        <Row title={t("mobile.home.connection")} value={<span className="m-conn-label"><span className={`m-conn m-conn-${conn}`} />{conn === "open" ? t("mobile.home.connected") : t("mobile.home.reconnecting")}</span>} />
+        <Row title={t("mobile.home.sessions")} value={String(list.length)} />
       </Group>
       <Group>
-        <Row title="Atualizar agora" onClick={() => void refresh().then(onClose)} />
+        <Row title={t("mobile.home.refreshNow")} onClick={() => void refresh().then(onClose)} />
       </Group>
     </Sheet>
   );
@@ -371,26 +374,26 @@ function MachineSheet({ conn, onClose }: { conn: ConnState; onClose: () => void 
 
 function InviteSheet({ ws: wsId, name, onClose }: { ws: string; name: string; onClose: () => void }) {
   const [role, setRole] = useState<"editor" | "observer">("editor");
-  const [t, setT] = useState<Ticket | null>(null);
+  const [tk, setTk] = useState<Ticket | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const left = useCountdown(t?.expires_at ?? null);
-  const make = () => k.invite(wsId, role).then(setT, (e) => setErr(String(e)));
+  const left = useCountdown(tk?.expires_at ?? null);
+  const make = () => k.invite(wsId, role).then(setTk, (e) => setErr(String(e)));
   return (
-    <Sheet title={`Convidar para ${name}`} onClose={onClose} testid="m-invite-sheet">
-      <p className="m-sheet-note">Quem abrir o link (pela sua tailnet) entra só neste workspace: vê o stream, a conversa e o terminal. Editor também manda mensagens, aprova e digita.</p>
+    <Sheet title={t("mobile.home.inviteTo", { name })} onClose={onClose} testid="m-invite-sheet">
+      <p className="m-sheet-note">{t("mobile.home.inviteNote")}</p>
       <div className="m-pad">
         <Segmented
           value={role}
-          onChange={(v) => (setRole(v), setT(null))}
+          onChange={(v) => (setRole(v), setTk(null))}
           options={[
-            { v: "editor", label: "Editor", testid: "m-role-editor" },
-            { v: "observer", label: "Observador", testid: "m-role-observer" },
+            { v: "editor", label: t("mobile.home.editor"), testid: "m-role-editor" },
+            { v: "observer", label: t("mobile.home.observer"), testid: "m-role-observer" },
           ]}
         />
       </div>
-      {!t && <div className="m-pad"><button className="m-cta" onClick={make} data-testid="m-invite-go">Gerar convite</button></div>}
-      {t && <TicketCard svg={t.qr_svg} url={t.url} left={left} onRegen={make} />}
-      {err && <div className="m-error">{err}</div>}
+      {!tk && <div className="m-pad"><button className="m-cta" onClick={make} data-testid="m-invite-go">{t("mobile.home.makeInvite")}</button></div>}
+      {tk && <TicketCard svg={tk.qr_svg} url={tk.url} left={left} onRegen={make} />}
+      {err && <div className="m-error">{trError(err)}</div>}
     </Sheet>
   );
 }
@@ -405,16 +408,16 @@ function ExternalSection() {
     const load = () => k.external().then(setExt, () => {});
     load();
     k.models().then(setModels, () => {});
-    const t = setInterval(load, 15000);
-    return () => clearInterval(t);
+    const iv = setInterval(load, 15000);
+    return () => clearInterval(iv);
   }, []);
   if (!ext || (!ext.running.length && !ext.recent.length)) return null;
-  const t = now();
+  const nowS = now();
   const cont = async (agent: string, id: string | null, cwd: string | null) => {
     const w = workspaceFor(cwd, wss);
     // A lista de modelos pode demorar (o Codex lista pelo app-server): espera aqui se ainda não chegou.
     const m = modelFor(agent, models.length ? models : await k.models().catch(() => []));
-    if (!w || !id || !m) return setErr(!w ? "Nenhum workspace do Kabul nesta pasta." : !id ? "Id da sessão ainda desconhecido." : `Sem modelo do ${agent}.`);
+    if (!w || !id || !m) return setErr(!w ? t("mobile.home.noWorkspaceHere") : !id ? t("mobile.home.sessionIdUnknown") : t("mobile.home.noModelFor", { agent }));
     k.chatStart(w.id, m, id).then((c) => openSession(`chat:${c.id}`), (e) => setErr(String(e)));
   };
   const row = (key: string, agent: string, title: string, sub: string, id: string | null, cwd: string | null, testid: string) => (
@@ -424,16 +427,16 @@ function ExternalSection() {
         <span className="m-row-title">{title}</span>
         <span className="m-row-sub">{sub}</span>
       </span>
-      <button className="m-chip-btn" disabled={!id || !workspaceFor(cwd, wss)} onClick={(e) => (haptic(e.currentTarget), cont(agent, id, cwd))} data-testid="m-external-continue">Continuar</button>
+      <button className="m-chip-btn" disabled={!id || !workspaceFor(cwd, wss)} onClick={(e) => (haptic(e.currentTarget), cont(agent, id, cwd))} data-testid="m-external-continue">{t("common.continue")}</button>
     </div>
   );
   return (
     <section className="m-group" data-testid="m-external">
-      <div className="m-grp-head"><span className="m-grp-title">Fora do Kabul</span></div>
-      {err && <div className="m-error">{err}</div>}
+      <div className="m-grp-head"><span className="m-grp-title">{t("mobile.home.outsideKabul")}</span></div>
+      {err && <div className="m-error">{trError(err)}</div>}
       <div className="m-grp-body">
-        {ext.running.map((r) => row(`r${r.pid}`, r.agent, `${AGENT_LABEL[r.agent] ?? r.agent} · ${r.repo ?? "?"}`, `${r.terminal ?? "outro terminal"} · ${ago(r.running_secs)}${r.branch ? ` · ${r.branch}` : ""}`, r.session_id, r.cwd, "m-external-running"))}
-        {ext.recent.slice(0, 10).map((r) => row(`h${r.agent}${r.id}`, r.agent, r.title, `${AGENT_LABEL[r.agent] ?? r.agent} · ${r.repo ?? "?"} · há ${ago(t - r.updated)}`, r.id, r.cwd, "m-external-recent"))}
+        {ext.running.map((r) => row(`r${r.pid}`, r.agent, `${AGENT_LABEL[r.agent] ?? r.agent} · ${r.repo ?? "?"}`, `${r.terminal ?? t("mobile.home.otherTerminal")} · ${ago(r.running_secs)}${r.branch ? ` · ${r.branch}` : ""}`, r.session_id, r.cwd, "m-external-running"))}
+        {ext.recent.slice(0, 10).map((r) => row(`h${r.agent}${r.id}`, r.agent, r.title, t("mobile.home.recentSub", { agent: AGENT_LABEL[r.agent] ?? r.agent, repo: r.repo ?? "?", ago: ago(nowS - r.updated) }), r.id, r.cwd, "m-external-recent"))}
       </div>
     </section>
   );

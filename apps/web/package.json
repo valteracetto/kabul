@@ -10,7 +10,8 @@
     "e2e": "playwright test",
     "e2e:kabuld": "playwright test -c playwright.kabuld.config.ts",
     "perf": "playwright test -c playwright.perf.config.ts",
-    "docs:shortcuts": "node scripts/gen-shortcuts-doc.mjs"
+    "docs:shortcuts": "node scripts/gen-shortcuts-doc.mjs",
+    "i18n:check": "node scripts/i18n-check.mjs"
   },
   "dependencies": {
     "@floating-ui/dom": "^1.8.0",

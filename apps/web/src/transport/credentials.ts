@@ -1,4 +1,5 @@
 import type { Credential } from "./websocket";
+import { t } from "../i18n";
 
 /** Credencial deste aparelho para o kabuld que serve a página (PWA). Fica só neste navegador. */
 const KEY = "kabul.cred";
@@ -33,7 +34,7 @@ export function parsePairLink(input: string): { token: string; workspace: string
 export async function pairWith(base: string, token: string, user: string, device: string): Promise<Paired> {
   const r = await fetch(`${base}/api/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token, user, device }) });
   const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
-  if (!j.ok) throw new Error(j.error ?? "falha no pareamento");
+  if (!j.ok) throw new Error(j.error ?? t("app.pair.failed"));
   return j.value as Paired;
 }
 
@@ -45,5 +46,5 @@ export function deviceName(): string {
   if (/Android/.test(ua)) return "Android";
   if (/Macintosh/.test(ua)) return "Mac";
   if (/Windows/.test(ua)) return "Windows";
-  return "Navegador";
+  return t("app.device.browser");
 }

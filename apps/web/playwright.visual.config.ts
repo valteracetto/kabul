@@ -10,6 +10,6 @@ export default defineConfig({
   timeout: 120_000,
   workers: 1,
   reporter: [["list"]],
-  use: { baseURL: `http://localhost:${PORT}`, viewport: { width: 1855, height: 1050 }, deviceScaleFactor: 2 },
+  use: { locale: "pt-BR", baseURL: `http://localhost:${PORT}`, viewport: { width: 1855, height: 1050 }, deviceScaleFactor: 2 },
   webServer: { command: `npx vite --port ${PORT} --strictPort`, url: `http://localhost:${PORT}`, reuseExistingServer: true, timeout: 60_000 },
 });

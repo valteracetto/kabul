@@ -10,6 +10,7 @@ import { confirmDialog } from "../components/Confirm";
 import { chatStore, statusOf, useChatSelect } from "../components/chatStore";
 import { useDismiss, usePopover } from "../components/useDismiss";
 import { noSuggest } from "../noSuggest";
+import { t } from "../i18n";
 import { IBranch, IEye, IEyeOff, IHistory, ILink, IList, IPR, ITrash } from "../icons";
 import { IArchive, IBack, IChevronDown, IChevronRight, ICube, IFwd, IGauge, IGear, IGrid, IHelp, IHome, IMore, IPin, IPlus, ISearch, ISidebar, RepoMark } from "../icons";
 
@@ -29,23 +30,23 @@ const WsRow = memo(function WsRow({ w, s, ag, on, dragging, dragActive, byStatus
       onContextMenu={(e) => h.current!.ctx(w, e)}
       onMouseEnter={() => !dragActive && h.current!.enter(w)} onMouseLeave={() => h.current!.leave()} onMouseDown={() => h.current!.mdown()}
       data-testid="ws-row" data-ws={w.id}>
-      {ag === "working" ? <span className="spinner tiny" title="Agente trabalhando" /> : ag === "waiting" ? <span className="agent-dot waiting" title="Esperando você" /> : ag === "queued" ? <span className="agent-dot queued" title="Agente aguardando vaga" data-testid="ws-queued" /> : w.state === "setting_up" ? <span className="spinner tiny" title="Rodando setup" /> : byStatus ? <RepoMark name={repoName || "?"} size={14} /> : w.pr_url ? <span className="ws-ico" data-status={w.status} title={`PR · ${STATUS_LABEL[w.status] ?? w.status}`}><IPR size={14} /></span> : <span className="ws-ico" data-status={w.status} title={STATUS_LABEL[w.status] ?? w.status}><IBranch size={14} /></span>}
+      {ag === "working" ? <span className="spinner tiny" title={t("app.side.agentWorking")} /> : ag === "waiting" ? <span className="agent-dot waiting" title={t("app.agents.status.waiting")} /> : ag === "queued" ? <span className="agent-dot queued" title={t("app.side.agentQueued")} data-testid="ws-queued" /> : w.state === "setting_up" ? <span className="spinner tiny" title={t("app.side.settingUp")} /> : byStatus ? <RepoMark name={repoName || "?"} size={14} /> : w.pr_url ? <span className="ws-ico" data-status={w.status} title={`PR · ${STATUS_LABEL[w.status] ?? w.status}`}><IPR size={14} /></span> : <span className="ws-ico" data-status={w.status} title={STATUS_LABEL[w.status] ?? w.status}><IBranch size={14} /></span>}
       <span className="ws-title">{wsTitle(w)}</span>
       {cloud && <RunsOnBadge r={cloudRunsOn(cloud)} size={12} />}
-      {w.unread && !on && <span className="unread-dot" title="Não lido" />}
+      {w.unread && !on && <span className="unread-dot" title={t("app.side.unread")} />}
       <span className="grow" />
       {s && (s[0] > 0 || s[1] > 0) && <span className="ws-stat"><span className="add">+{fmt(s[0])}</span>{s[1] > 0 && <span className="del"> -{fmt(s[1])}</span>}</span>}
-      <button className="icon-btn hover-only" title="Arquivar (⌘⇧A)" data-testid="archive" onClick={(e) => (e.stopPropagation(), window.dispatchEvent(new CustomEvent("kabul:archive", { detail: w.id })))}><IArchive size={14} /></button>
+      <button className="icon-btn hover-only" title={t("app.side.archiveTitle")} data-testid="archive" onClick={(e) => (e.stopPropagation(), window.dispatchEvent(new CustomEvent("kabul:archive", { detail: w.id })))}><IArchive size={14} /></button>
       {peek && (
         <Floating className="ws-peek" placement="right-start" gap={8} testid="ws-peek">
           <div onMouseEnter={() => h.current!.stay()} onMouseLeave={() => h.current!.leave()} onClick={(e) => e.stopPropagation()}>
             <div className="peek-title">{wsTitle(w)}</div>
             <div className="dim small">{repoName} · <span className="mono">{w.branch}</span></div>
-            <div className="peek-row"><span className={"st-icon st-" + w.status} /> {STATUS_LABEL[w.status] ?? w.status}{ag && <span className="dim"> · {ag === "working" ? "agente trabalhando" : ag === "queued" ? "aguardando vaga" : "esperando você"}</span>}</div>
-            {s && (s[0] > 0 || s[1] > 0) && <div className="peek-row mono small"><span className="add">+{s[0]}</span> <span className="del">−{s[1]}</span> <span className="dim">linhas</span></div>}
-            {w.pr_url && <div className="peek-row small">PR <span className="mono">{w.pr_url.split("/").pop()}</span></div>}
+            <div className="peek-row"><span className={"st-icon st-" + w.status} /> {STATUS_LABEL[w.status] ?? w.status}{ag && <span className="dim"> · {ag === "working" ? t("app.side.peek.working") : ag === "queued" ? t("app.side.peek.queued") : t("app.side.peek.waiting")}</span>}</div>
+            {s && (s[0] > 0 || s[1] > 0) && <div className="peek-row mono small"><span className="add">+{s[0]}</span> <span className="del">−{s[1]}</span> <span className="dim">{t("app.side.lines")}</span></div>}
+            {w.pr_url && <div className="peek-row small">{"PR" /* i18n-ignore */} <span className="mono">{w.pr_url.split("/").pop()}</span></div>}
             {w.notes && <div className="peek-notes small">{w.notes}</div>}
-            <div className="dim small">Porta {w.port} · {w.path.split(/[\\/]/).slice(-2).join("/")}</div>
+            <div className="dim small">{t("app.side.port", { port: w.port, path: w.path.split(/[\\/]/).slice(-2).join("/") })}</div>
           </div>
         </Floating>
       )}
@@ -225,53 +226,53 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
   return (
     <aside className="sidebar" data-testid="sidebar">
       <div className="side-top" data-tauri-drag-region>
-        <button className="icon-btn" title="Ocultar barra lateral (⌘B)" onClick={onCollapse}><ISidebar /></button>
+        <button className="icon-btn" title={t("app.side.hideSidebar")} onClick={onCollapse}><ISidebar /></button>
         <div className="grow" data-tauri-drag-region />
         <ResourcesChip workspaces={workspaces} onOpen={(id, chat) => (onRoute({ kind: "workspace", id }), chat && setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:focus-chat", { detail: chat })), 50))} />
-        <button className="icon-btn" title="Voltar (⌘[)" disabled={!onBack} onClick={onBack}><IBack /></button>
-        <button className="icon-btn" title="Avançar (⌘])" disabled={!onFwd} onClick={onFwd}><IFwd /></button>
+        <button className="icon-btn" title={t("app.side.back")} disabled={!onBack} onClick={onBack}><IBack /></button>
+        <button className="icon-btn" title={t("app.side.forward")} disabled={!onFwd} onClick={onFwd}><IFwd /></button>
       </div>
       <div className="machine"><MachinePicker onRoute={onRoute} /></div>
       <nav className="side-nav">
-        <button className={route.kind === "sessions" ? "on" : ""} onClick={() => onRoute({ kind: "sessions" })}><IGrid /> Painel</button>
-        <button className={route.kind === "agents" ? "on" : ""} onClick={() => onRoute({ kind: "agents" })} data-testid="nav-agents"><ICube /> Agentes <span className="grow" />{activeAgents > 0 && <span className="nav-count" data-testid="agents-count">{activeAgents}</span>}</button>
-        <button className={route.kind === "dashboard" ? "on" : ""} onClick={() => onRoute({ kind: "dashboard" })} data-testid="nav-dashboard"><IList /> Quadro</button>
-        <button className={route.kind === "home" ? "on" : ""} onClick={() => onRoute({ kind: "home" })}><IHome /> Início <span className="grow" /><kbd>⌘⇧H</kbd></button>
-        <button onClick={() => onCreate()} data-testid="create-ws"><IPlus /> Criar <span className="grow" /><kbd>⌘N</kbd></button>
-        <button className={route.kind === "routines" ? "on" : ""} onClick={() => onRoute({ kind: "routines" })} data-testid="nav-routines"><IHistory /> Rotinas</button>
-        <button onClick={onSearch}><ISearch /> Buscar <span className="grow" /><kbd>⌘K</kbd></button>
-        <button className={route.kind === "local" ? "on" : ""} onClick={() => onRoute({ kind: "local" })}><ICube /> Modelos locais</button>
-        <button className={route.kind === "usage" ? "on" : ""} onClick={() => onRoute({ kind: "usage" })} data-testid="nav-usage"><IGauge /> Uso</button>
+        <button className={route.kind === "sessions" ? "on" : ""} onClick={() => onRoute({ kind: "sessions" })}><IGrid /> {t("app.sessions.title")}</button>
+        <button className={route.kind === "agents" ? "on" : ""} onClick={() => onRoute({ kind: "agents" })} data-testid="nav-agents"><ICube /> {t("app.agents.title")} <span className="grow" />{activeAgents > 0 && <span className="nav-count" data-testid="agents-count">{activeAgents}</span>}</button>
+        <button className={route.kind === "dashboard" ? "on" : ""} onClick={() => onRoute({ kind: "dashboard" })} data-testid="nav-dashboard"><IList /> {t("app.board.title")}</button>
+        <button className={route.kind === "home" ? "on" : ""} onClick={() => onRoute({ kind: "home" })}><IHome /> {t("app.pal.n.home")} <span className="grow" /><kbd>⌘⇧H</kbd></button>
+        <button onClick={() => onCreate()} data-testid="create-ws"><IPlus /> {t("app.side.create")} <span className="grow" /><kbd>⌘N</kbd></button>
+        <button className={route.kind === "routines" ? "on" : ""} onClick={() => onRoute({ kind: "routines" })} data-testid="nav-routines"><IHistory /> {t("app.routine.title")}</button>
+        <button onClick={onSearch}><ISearch /> {t("common.search")} <span className="grow" /><kbd>⌘K</kbd></button>
+        <button className={route.kind === "local" ? "on" : ""} onClick={() => onRoute({ kind: "local" })}><ICube /> {t("app.pal.n.local")}</button>
+        <button className={route.kind === "usage" ? "on" : ""} onClick={() => onRoute({ kind: "usage" })} data-testid="nav-usage"><IGauge /> {t("app.side.usage")}</button>
       </nav>
       <div className="side-section side-group-head">
-        <span>Meus workspaces</span><span className="grow" />
+        <span>{t("app.side.myWorkspaces")}</span><span className="grow" />
         <span className="picker" ref={groupMenu.ref}>
-          <button className="icon-btn" title="Agrupar, ordenar, seções" onClick={groupMenu.toggle} data-testid="group-menu"><IMore size={13} /></button>
+          <button className="icon-btn" title={t("app.side.groupTitle")} onClick={groupMenu.toggle} data-testid="group-menu"><IMore size={13} /></button>
           {groupMenu.open && (
             <Floating className="status-pop group-pop" placement="bottom-end" testid="group-pop">
-              <div className="pop-title">Agrupar por</div>
-              <div className={"pop-row" + (prefs.groupBy === "project" ? " on" : "")} onClick={() => setPrefs({ groupBy: "project" })} data-testid="group-project">Projeto</div>
-              <div className={"pop-row" + (prefs.groupBy === "status" ? " on" : "")} onClick={() => setPrefs({ groupBy: "status" })} data-testid="group-status">Status</div>
+              <div className="pop-title">{t("app.side.groupBy")}</div>
+              <div className={"pop-row" + (prefs.groupBy === "project" ? " on" : "")} onClick={() => setPrefs({ groupBy: "project" })} data-testid="group-project">{t("app.side.groupProject")}</div>
+              <div className={"pop-row" + (prefs.groupBy === "status" ? " on" : "")} onClick={() => setPrefs({ groupBy: "status" })} data-testid="group-status">{t("app.side.groupStatus")}</div>
               <div className="pop-sep" />
-              <div className="pop-title">Ordenar por</div>
-              <div className={"pop-row" + (prefs.sortBy === "updated" ? " on" : "")} onClick={() => setPrefs({ sortBy: "updated" })}>Atualização</div>
-              <div className={"pop-row" + (prefs.sortBy === "created" ? " on" : "")} onClick={() => setPrefs({ sortBy: "created" })} data-testid="sort-created">Criação</div>
+              <div className="pop-title">{t("app.side.sortBy")}</div>
+              <div className={"pop-row" + (prefs.sortBy === "updated" ? " on" : "")} onClick={() => setPrefs({ sortBy: "updated" })}>{t("app.side.sortUpdated")}</div>
+              <div className={"pop-row" + (prefs.sortBy === "created" ? " on" : "")} onClick={() => setPrefs({ sortBy: "created" })} data-testid="sort-created">{t("app.side.sortCreated")}</div>
               <div className="pop-sep" />
-              <div className="pop-row" onClick={() => (groupMenu.close(), setDialog({ kind: "section" }))} data-testid="new-section">Nova seção…</div>
-              <div className="pop-row" onClick={() => (groupMenu.close(), onAddProject())}>Adicionar projeto…</div>
-              {repos.some((r) => r.hidden) && <div className="pop-row" onClick={() => setPrefs({ showHidden: !prefs.showHidden })} data-testid="toggle-hidden">{prefs.showHidden ? "Esconder repositórios ocultos" : "Mostrar repositórios ocultos"}</div>}
-              {archived.length > 0 && <div className="pop-row" onClick={() => (groupMenu.close(), window.dispatchEvent(new CustomEvent("kabul:palette", { detail: "archived" })))} data-testid="view-archived">Ver arquivados ({archived.length}) <span className="grow" /><span className="kbd-hint">⌘K</span></div>}
+              <div className="pop-row" onClick={() => (groupMenu.close(), setDialog({ kind: "section" }))} data-testid="new-section">{t("app.side.newSection")}</div>
+              <div className="pop-row" onClick={() => (groupMenu.close(), onAddProject())}>{t("app.side.addProject")}</div>
+              {repos.some((r) => r.hidden) && <div className="pop-row" onClick={() => setPrefs({ showHidden: !prefs.showHidden })} data-testid="toggle-hidden">{prefs.showHidden ? t("app.side.hideHidden") : t("app.side.showHidden")}</div>}
+              {archived.length > 0 && <div className="pop-row" onClick={() => (groupMenu.close(), window.dispatchEvent(new CustomEvent("kabul:palette", { detail: "archived" /* i18n-ignore: id */ })))} data-testid="view-archived">{t("app.side.viewArchived", { n: archived.length })} <span className="grow" /><span className="kbd-hint">⌘K</span></div>}
             </Floating>
           )}
         </span>
       </div>
       <div className="side-scroll" ref={scroll}>
-        {repos.length === 0 && <div className="side-empty">Adicione um projeto para começar. <button className="text-btn" onClick={() => onAddProject()} data-testid="empty-add-project">Adicionar projeto…</button></div>}
+        {repos.length === 0 && <div className="side-empty">{t("app.side.emptyLead")} <button className="text-btn" onClick={() => onAddProject()} data-testid="empty-add-project">{t("app.side.addProject")}</button></div>}
         {(pinned.length > 0 || drag) && (
           <div className={"repo-group pinned-group" + over("pinned")} {...dropProps("pinned", { kind: "pinned" })} data-testid="pinned">
-            {groupHead("pinned", <><IPin size={13} /><span className="repo-name">Fixados</span></>, pinned.length, undefined, { kind: "pinned" })}
+            {groupHead("pinned", <><IPin size={13} /><span className="repo-name">{t("app.side.pinned")}</span></>, pinned.length, undefined, { kind: "pinned" })}
             {!collapsed.includes("pinned") && pinned.map(row)}
-            {pinned.length === 0 && <div className="ws-empty">Solte aqui para fixar</div>}
+            {pinned.length === 0 && <div className="ws-empty">{t("app.side.dropToPin")}</div>}
           </div>
         )}
         {sections.map((s) => {
@@ -281,7 +282,7 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
             <div key={s.id} className={"repo-group" + over(key)} {...dropProps(key, { kind: "section", id: s.id })} data-testid="section">
               {groupHead(key, <><span className="sec-emoji">{s.emoji || "•"}</span><span className="repo-name">{s.name}</span></>, list.length, undefined, { kind: "section", id: s.id }, (e) => (e.preventDefault(), setMenu({ kind: "section", s, x: e.clientX, y: e.clientY })))}
               {!collapsed.includes(key) && list.map(row)}
-              {!collapsed.includes(key) && list.length === 0 && <div className="ws-empty">Arraste um workspace para cá</div>}
+              {!collapsed.includes(key) && list.length === 0 && <div className="ws-empty">{t("app.side.dragHere")}</div>}
             </div>
           );
         })}
@@ -308,12 +309,12 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
                     {r.icon ? <span className="sec-emoji">{r.icon}</span> : <RepoMark name={r.name} />}
                     <span className="repo-name">{r.name}</span>
                     {list.length > 0 && <span className="dim small">{list.length}</span>}
-                    {isCollapsed && liveAg.length > 0 && <span className={"agent-dot " + (liveAg.includes("waiting") ? "waiting" : "working")} title={liveAg.includes("waiting") ? "Agente esperando você" : "Agente trabalhando"} data-testid="collapsed-indicator" />}
+                    {isCollapsed && liveAg.length > 0 && <span className={"agent-dot " + (liveAg.includes("waiting") ? "waiting" : "working")} title={liveAg.includes("waiting") ? t("app.side.agentWaiting") : t("app.side.agentWorking")} data-testid="collapsed-indicator" />}
                     <span className="grow" />
-                    <button className="icon-btn hover-only-repo" title="Ações do repositório" onClick={(e) => { e.stopPropagation(); const b = e.currentTarget.getBoundingClientRect(); setMenu({ kind: "repo", r, x: Math.max(8, b.left - 24), y: b.bottom + 4 }); }} data-testid={`repo-more-${r.name}`}><IMore size={13} /></button>
-                    <button className="icon-btn" title="Novo workspace (⌘N)" onClick={(e) => (e.stopPropagation(), onCreate(r.id))} data-testid={`new-ws-${r.name}`}><IPlus /></button>
+                    <button className="icon-btn hover-only-repo" title={t("app.side.repoActions")} onClick={(e) => { e.stopPropagation(); const b = e.currentTarget.getBoundingClientRect(); setMenu({ kind: "repo", r, x: Math.max(8, b.left - 24), y: b.bottom + 4 }); }} data-testid={`repo-more-${r.name}`}><IMore size={13} /></button>
+                    <button className="icon-btn" title={t("app.side.newWorkspace")} onClick={(e) => (e.stopPropagation(), onCreate(r.id))} data-testid={`new-ws-${r.name}`}><IPlus /></button>
                   </div>
-                  {!isCollapsed && list.length === 0 && <div className="ws-empty">Sem workspaces. <button className="text-btn" onClick={() => onCreate(r.id)}>Criar um</button></div>}
+                  {!isCollapsed && list.length === 0 && <div className="ws-empty">{t("app.side.noWorkspaces")} <button className="text-btn" onClick={() => onCreate(r.id)}>{t("app.side.createOne")}</button></div>}
                   {!isCollapsed && list.map(row)}
                 </div>
               );
@@ -321,8 +322,8 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
       </div>
       <div className="side-foot">
         <span className="grow" />
-        <button className="icon-btn" title="Ajuda" onClick={onHelp} data-testid="help"><IHelp /></button>
-        <button className={"icon-btn" + (route.kind === "settings" ? " on" : "")} title="Configurações (⌘,)" onClick={() => onRoute({ kind: "settings", tab: "geral" })} data-testid="settings"><IGear /></button>
+        <button className="icon-btn" title={t("app.side.help")} onClick={onHelp} data-testid="help"><IHelp /></button>
+        <button className={"icon-btn" + (route.kind === "settings" ? " on" : "")} title={t("app.side.settingsTitle")} onClick={() => onRoute({ kind: "settings", tab: "geral" })} data-testid="settings"><IGear /></button>
       </div>
 
       {drag && createPortal(<div className="drag-ghost" style={{ left: drag.x + 10, top: drag.y + 6 }}>{wsTitle(drag.w)}</div>, document.body)}
@@ -334,32 +335,32 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
             const close = () => setMenu(null);
             return (
               <>
-                <div className="pop-row" onClick={() => (close(), onRoute({ kind: "workspace", id: w.id }))}>Abrir</div>
-                <div className="pop-row" onClick={() => (close(), patch(w, { unread: !w.unread }))} data-testid="ctx-read">{w.unread ? "Marcar como lido" : "Marcar como não lido"}<span className="grow" /><span className="kbd-hint">R</span></div>
-                <div className="pop-row" onClick={() => (close(), patch(w, { pinned: !w.pinned, pin_order: pinned.length }))} data-testid="ctx-pin">{w.pinned ? "Desafixar" : "Fixar"}<span className="grow" /><span className="kbd-hint">P</span></div>
-                <div className="pop-row sub" onMouseEnter={() => setSub("status")} onClick={() => setSub("status")} data-testid="ctx-status">Status <span className="grow" />▸
+                <div className="pop-row" onClick={() => (close(), onRoute({ kind: "workspace", id: w.id }))}>{t("common.open")}</div>
+                <div className="pop-row" onClick={() => (close(), patch(w, { unread: !w.unread }))} data-testid="ctx-read">{w.unread ? t("app.side.markRead") : t("app.side.markUnread")}<span className="grow" /><span className="kbd-hint">R</span></div>
+                <div className="pop-row" onClick={() => (close(), patch(w, { pinned: !w.pinned, pin_order: pinned.length }))} data-testid="ctx-pin">{w.pinned ? t("app.side.unpin") : t("app.side.pin")}<span className="grow" /><span className="kbd-hint">P</span></div>
+                <div className="pop-row sub" onMouseEnter={() => setSub("status")} onClick={() => setSub("status")} data-testid="ctx-status">{t("app.side.groupStatus")} <span className="grow" />▸
                   {sub === "status" && (
                     <div className="popover status-pop submenu-pop">
                       {STATUS_ORDER.map((st) => <div key={st} className={"pop-row" + (w.status === st ? " on" : "")} onClick={(e) => (e.stopPropagation(), close(), patch(w, { status: st }))} data-testid={`ctx-status-${st}`}><span className={"st-icon st-" + st} /> {STATUS_LABEL[st]}</div>)}
                     </div>
                   )}
                 </div>
-                <div className="pop-row sub" onMouseEnter={() => setSub("section")} onClick={() => setSub("section")} data-testid="ctx-section">Mover para seção <span className="grow" />▸
+                <div className="pop-row sub" onMouseEnter={() => setSub("section")} onClick={() => setSub("section")} data-testid="ctx-section">{t("app.side.moveToSection")} <span className="grow" />▸
                   {sub === "section" && (
                     <div className="popover status-pop submenu-pop">
                       {sections.map((s) => <div key={s.id} className={"pop-row" + (w.section === s.id ? " on" : "")} onClick={(e) => (e.stopPropagation(), close(), patch(w, { section: s.id, pinned: false }))} data-testid="ctx-section-item">{s.emoji} {s.name}</div>)}
-                      {w.section && <div className="pop-row" onClick={(e) => (e.stopPropagation(), close(), patch(w, { section: "" }))}>Tirar da seção</div>}
+                      {w.section && <div className="pop-row" onClick={(e) => (e.stopPropagation(), close(), patch(w, { section: "" }))}>{t("app.side.removeFromSection")}</div>}
                       <div className="pop-sep" />
-                      <div className="pop-row" onClick={(e) => (e.stopPropagation(), close(), setDialog({ kind: "section", ws: w.id }))} data-testid="ctx-section-new">Nova seção…</div>
+                      <div className="pop-row" onClick={(e) => (e.stopPropagation(), close(), setDialog({ kind: "section", ws: w.id }))} data-testid="ctx-section-new">{t("app.side.newSection")}</div>
                     </div>
                   )}
                 </div>
                 <div className="pop-sep" />
-                <div className="pop-row" onClick={() => (close(), setDialog({ kind: "rename", w }))} data-testid="ctx-rename">Renomear…</div>
-                <div className="pop-row" onClick={() => (close(), navigator.clipboard.writeText(workspaceLink(w)))} data-testid="ctx-link">Copiar link<span className="grow" /><span className="kbd-hint">⌘⇧C</span></div>
-                <div className="pop-row" onClick={() => (close(), navigator.clipboard.writeText(w.path))}>Copiar caminho</div>
+                <div className="pop-row" onClick={() => (close(), setDialog({ kind: "rename", w }))} data-testid="ctx-rename">{t("app.side.renameDots")}</div>
+                <div className="pop-row" onClick={() => (close(), navigator.clipboard.writeText(workspaceLink(w)))} data-testid="ctx-link">{t("app.side.copyLink")}<span className="grow" /><span className="kbd-hint">⌘⇧C</span></div>
+                <div className="pop-row" onClick={() => (close(), navigator.clipboard.writeText(w.path))}>{t("app.openIn.copyPath")}</div>
                 <div className="pop-sep" />
-                <div className="pop-row danger" onClick={() => (close(), window.dispatchEvent(new CustomEvent("kabul:archive", { detail: w.id })))} data-testid="ctx-archive">Arquivar<span className="grow" /><span className="kbd-hint">⌘⇧A</span></div>
+                <div className="pop-row danger" onClick={() => (close(), window.dispatchEvent(new CustomEvent("kabul:archive", { detail: w.id })))} data-testid="ctx-archive">{t("app.side.archive")}<span className="grow" /><span className="kbd-hint">⌘⇧A</span></div>
               </>
             );
           })()}
@@ -368,19 +369,19 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
             const close = () => setMenu(null);
             return (
               <>
-                <div className="pop-row" onClick={() => (close(), onCreate(r.id))} data-testid="repo-ctx-create"><IPlus size={14} /> Criar workspace</div>
-                <div className="pop-row" onClick={() => (close(), onCreate(r.id, true))} data-testid="repo-ctx-from"><ILink size={14} /> Criar a partir de…</div>
-                <div className="pop-row" onClick={() => (close(), onRoute({ kind: "settings", tab: "repo", repoId: r.id }))} data-testid="repo-ctx-config"><IGear size={14} /> Configuração</div>
-                <div className="pop-row" onClick={() => (close(), api.repoUpdate(r.id, { hidden: !r.hidden }).then(onChange, (e) => onError(String(e))))} data-testid="repo-ctx-hide">{r.hidden ? <IEye size={14} /> : <IEyeOff size={14} />} {r.hidden ? "Mostrar repositório" : "Ocultar repositório"}</div>
+                <div className="pop-row" onClick={() => (close(), onCreate(r.id))} data-testid="repo-ctx-create"><IPlus size={14} /> {t("app.pal.g.createWorkspace")}</div>
+                <div className="pop-row" onClick={() => (close(), onCreate(r.id, true))} data-testid="repo-ctx-from"><ILink size={14} /> {t("app.side.createFrom")}</div>
+                <div className="pop-row" onClick={() => (close(), onRoute({ kind: "settings", tab: "repo", repoId: r.id }))} data-testid="repo-ctx-config"><IGear size={14} /> {t("app.side.repoConfig")}</div>
+                <div className="pop-row" onClick={() => (close(), api.repoUpdate(r.id, { hidden: !r.hidden }).then(onChange, (e) => onError(String(e))))} data-testid="repo-ctx-hide">{r.hidden ? <IEye size={14} /> : <IEyeOff size={14} />} {r.hidden ? t("app.side.showRepo") : t("app.side.hideRepo")}</div>
                 <div className="pop-sep" />
-                <div className="pop-row danger" onClick={async () => { close(); if (await confirmDialog(`Remover ${r.name} do Kabul? A pasta e o repositório continuam no disco; os workspaces precisam estar arquivados.`, { ok: "Remover", danger: true })) api.removeRepo(r.id).then(onChange, (e) => onError(String(e))); }} data-testid="repo-ctx-remove"><ITrash size={14} /> Remover repositório…</div>
+                <div className="pop-row danger" onClick={async () => { close(); if (await confirmDialog(t("app.side.removeRepoConfirm", { name: r.name }), { ok: t("common.remove"), danger: true })) api.removeRepo(r.id).then(onChange, (e) => onError(String(e))); }} data-testid="repo-ctx-remove"><ITrash size={14} /> {t("app.side.removeRepo")}</div>
               </>
             );
           })()}
           {menu.kind === "section" && (
             <>
-              <div className="pop-row" onClick={() => (setMenu(null), setDialog({ kind: "section", s: menu.s }))} data-testid="section-edit">Editar seção…</div>
-              <div className="pop-row danger" onClick={() => (setMenu(null), api.sectionDelete(menu.s.id).then(() => (loadSections(), onChange()), (e) => onError(String(e))))} data-testid="section-delete">Apagar seção</div>
+              <div className="pop-row" onClick={() => (setMenu(null), setDialog({ kind: "section", s: menu.s }))} data-testid="section-edit">{t("app.side.editSectionDots")}</div>
+              <div className="pop-row danger" onClick={() => (setMenu(null), api.sectionDelete(menu.s.id).then(() => (loadSections(), onChange()), (e) => onError(String(e))))} data-testid="section-delete">{t("app.side.deleteSection")}</div>
             </>
           )}
         </div>, document.body)}
@@ -418,10 +419,10 @@ function SectionDialog({ s, onClose, onSave }: { s?: Section; onClose: () => voi
   return createPortal(
     <div className="overlay" onMouseDown={onClose}>
       <div className="popover dialog" onMouseDown={(e) => e.stopPropagation()} data-testid="section-dialog" onKeyDown={(e) => { if (e.key === "Escape") onClose(); if (e.key === "Enter" && (e.metaKey || (e.target as HTMLElement).tagName === "INPUT") && name.trim()) onSave(name.trim(), emoji); }}>
-        <div className="dialog-title">{s ? "Editar seção" : "Nova seção"}</div>
+        <div className="dialog-title">{s ? t("app.side.editSection") : t("app.pal.g.newSection")}</div>
         <div className="emoji-grid">{EMOJIS.map((e) => <button key={e} className={"emoji" + (e === emoji ? " on" : "")} onClick={() => setEmoji(e)}>{e}</button>)}</div>
-        <input autoFocus {...noSuggest} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome da seção" data-testid="section-name" />
-        <div className="row end"><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!name.trim()} onClick={() => onSave(name.trim(), emoji)} data-testid="section-save">Salvar <span className="kbd-hint">⌘↵</span></button></div>
+        <input autoFocus {...noSuggest} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("app.side.sectionName")} data-testid="section-name" />
+        <div className="row end"><button className="btn" onClick={onClose}>{t("common.cancel")}</button><button className="btn primary" disabled={!name.trim()} onClick={() => onSave(name.trim(), emoji)} data-testid="section-save">{t("common.save")} <span className="kbd-hint">⌘↵</span></button></div>
       </div>
     </div>, document.body);
 }
@@ -435,10 +436,10 @@ function RenameDialog({ w, onClose, onSave }: { w: Workspace; onClose: () => voi
   return createPortal(
     <div className="overlay" onMouseDown={onClose}>
       <div className="popover dialog" onMouseDown={(e) => e.stopPropagation()} data-testid="rename-dialog" onKeyDown={(e) => { if (e.key === "Escape") onClose(); if (e.key === "Enter") save(); }}>
-        <div className="dialog-title">Renomear workspace</div>
+        <div className="dialog-title">{t("app.side.renameWorkspace")}</div>
         <input autoFocus {...noSuggest} autoComplete="off" value={title} onChange={(e) => setTitle(e.target.value)} data-testid="rename-title" />
-        <label className="check-row"><input type="checkbox" checked={also} onChange={(e) => setAlso(e.target.checked)} data-testid="rename-branch" /> Renomear a branch também {also && slug && <code>{prefix + slug}</code>}</label>
-        <div className="row end"><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" onClick={save} data-testid="rename-save">Renomear ↵</button></div>
+        <label className="check-row"><input type="checkbox" checked={also} onChange={(e) => setAlso(e.target.checked)} data-testid="rename-branch" /> {t("app.side.renameBranchToo")} {also && slug && <code>{prefix + slug}</code>}</label>
+        <div className="row end"><button className="btn" onClick={onClose}>{t("common.cancel")}</button><button className="btn primary" onClick={save} data-testid="rename-save">{t("app.side.renameGo")}</button></div>
       </div>
     </div>, document.body);
 }

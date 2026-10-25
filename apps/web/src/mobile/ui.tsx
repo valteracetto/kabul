@@ -4,6 +4,8 @@ import type { RunsOn } from "../components/RunsOn";
 import { runsOnTooltip } from "../components/RunsOn";
 import { AGENT_LABEL, STATUS_LABEL, type Status } from "./kabuld";
 import { sheetHistory } from "./nav";
+import { t } from "../i18n";
+import { planLabel } from "./plan";
 
 // ---------------- plataforma ----------------
 
@@ -41,6 +43,7 @@ export const I = {
   key: ({ size = 22 }: IP) => svg(size, <><circle cx="8" cy="12" r="3.5" /><path d="M11.5 12H21M17.5 12v3M20 12v2" /></>, 1.6),
   moon: ({ size = 22 }: IP) => svg(size, <path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z" />, 1.6),
   bell: ({ size = 22 }: IP) => svg(size, <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16zM10 20.5a2.2 2.2 0 0 0 4 0" />, 1.6),
+  globe: ({ size = 22 }: IP) => svg(size, <><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5s1.2-6.2 3.6-8.5z" /></>, 1.6),
   info: ({ size = 22 }: IP) => svg(size, <><circle cx="12" cy="12" r="8.5" /><path d="M12 11v5.5M12 7.6v.2" /></>, 1.6),
   stack: ({ size = 24 }: IP) => svg(size, <><rect x="4" y="4" width="16" height="6" rx="2" /><rect x="4" y="14" width="16" height="6" rx="2" /></>, 1.7),
   chart: ({ size = 24 }: IP) => svg(size, <path d="M5 20V12M10 20V5M15 20v-9M20 20v-5" />, 1.9),
@@ -103,11 +106,11 @@ export function RunsOnLabel({ r, machine, os }: { r: RunsOn; machine?: string; o
   let cls = "local";
   switch (r.kind) {
     case "provider_cloud":
-      text = `Nuvem · ${provider[r.provider] ?? r.provider}`;
+      text = t("mobile.runsOn.cloud", { provider: provider[r.provider] ?? r.provider });
       cls = "cloud";
       break;
     case "kabul_cloud":
-      text = "Nuvem Kabul";
+      text = t("mobile.runsOn.kabulCloud");
       cls = "cloud";
       break;
     case "remote":
@@ -116,9 +119,9 @@ export function RunsOnLabel({ r, machine, os }: { r: RunsOn; machine?: string; o
       break;
     default:
       text = os === "windows" ? "PC" : os && os !== "macos" ? "Local" : "Mac";
-      if (r.mirrored) text += " · espelhada";
+      if (r.mirrored) text += t("mobile.runsOn.mirrored");
   }
-  const title = r.kind === "local" && machine ? `Rodando em ${machine}${r.mirrored ? ", espelhada no claude.ai e no celular" : ""}` : runsOnTooltip(r);
+  const title = r.kind === "local" && machine ? t(r.mirrored ? "mobile.runsOn.runningOnMirrored" : "mobile.runsOn.runningOn", { machine }) : runsOnTooltip(r);
   return <span className={`m-runs m-runs-${cls}`} title={title} data-testid="m-runs-on" data-kind={r.kind}>{text}</span>;
 }
 
@@ -151,7 +154,7 @@ export function RoundButton({ children, onClick, label, testid, className = "" }
 }
 
 export const BackButton = ({ onClick, testid = "m-back" }: { onClick: () => void; testid?: string }) => (
-  <RoundButton onClick={onClick} label="Voltar" testid={testid}>
+  <RoundButton onClick={onClick} label={t("common.back")} testid={testid}>
     <I.back />
   </RoundButton>
 );
@@ -358,9 +361,9 @@ export function Sheet({ title, onClose, children, testid, full, onBack }: { titl
         <div className="m-sheet-grab" {...drag}><span /></div>
         <div className="m-sheet-head" {...drag}>
           {onBack ? (
-            <RoundButton onClick={onBack} label="Voltar" className="small"><I.back size={18} /></RoundButton>
+            <RoundButton onClick={onBack} label={t("common.back")} className="small"><I.back size={18} /></RoundButton>
           ) : (
-            <RoundButton onClick={close} label="Fechar" className="small"><I.close size={18} /></RoundButton>
+            <RoundButton onClick={close} label={t("common.close")} className="small"><I.close size={18} /></RoundButton>
           )}
           <b className="m-ellipsis">{title}</b>
           <span className="m-round-spacer" />
@@ -392,12 +395,12 @@ export function TicketCard({ svg, url, left, onRegen, big, onBig }: { svg: strin
     <div className={"m-ticket" + (big ? " big" : "")} data-testid="ticket">
       <div className={"m-qr" + (left === 0 ? " expired" : "")} dangerouslySetInnerHTML={{ __html: svg }} onClick={onBig} data-testid="ticket-qr" />
       <div className="m-ticket-info">
-        <div className="m-ticket-left" data-testid="ticket-left">{left > 0 ? `Expira em ${mmss(left)}` : "Expirado"}</div>
+        <div className="m-ticket-left" data-testid="ticket-left">{left > 0 ? t("mobile.ticket.expiresIn", { time: mmss(left) }) : t("mobile.ticket.expired")}</div>
         <code className="m-ticket-url" data-testid="ticket-url">{url}</code>
         <div className="row">
-          <button className="m-btn" onClick={copy}>{copied ? "Copiado" : "Copiar link"}</button>
-          {"share" in navigator && <button className="m-btn" onClick={() => navigator.share({ title: "Kabul", url }).catch(() => {})}>Compartilhar</button>}
-          {onRegen && <button className="m-btn" onClick={onRegen} data-testid="ticket-regen">Gerar outro</button>}
+          <button className="m-btn" onClick={copy}>{copied ? t("common.copied") : t("mobile.ticket.copyLink")}</button>
+          {"share" in navigator && <button className="m-btn" onClick={() => navigator.share({ title: "Kabul", url }).catch(() => {})}>{t("mobile.ticket.share")}</button>}
+          {onRegen && <button className="m-btn" onClick={onRegen} data-testid="ticket-regen">{t("mobile.ticket.regen")}</button>}
         </div>
       </div>
     </div>
@@ -406,8 +409,8 @@ export function TicketCard({ svg, url, left, onRegen, big, onBig }: { svg: strin
 
 /** Indicador do plan mode (borda bege, listrado), "Plano" ou "Plano (emulado)". */
 export const PlanChip = ({ mode, onClick }: { mode: "native" | "emulated"; onClick?: () => void }) => (
-  <button className="m-plan-chip" onClick={(e) => (haptic(e.currentTarget), onClick?.())} disabled={!onClick} data-testid="m-plan-chip" data-mode={mode} title={mode === "emulated" ? "O agente não tem plano próprio: o Kabul pede o plano na mensagem" : "O agente planeja sem editar até você aprovar"}>
-    <I.plan size={15} /> {mode === "emulated" ? "Plano (emulado)" : "Plano"}
+  <button className="m-plan-chip" onClick={(e) => (haptic(e.currentTarget), onClick?.())} disabled={!onClick} data-testid="m-plan-chip" data-mode={mode} title={mode === "emulated" ? t("mobile.plan.emulatedTitle") : t("mobile.plan.nativeTitle")}>
+    <I.plan size={15} /> {planLabel(mode)}
   </button>
 );
 

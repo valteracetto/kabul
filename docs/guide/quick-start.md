@@ -6,8 +6,8 @@ From zero to a pull request written by an agent, in five steps. You need Kabul a
 installed and signed in (see [Installation](./installation.md)).
 
 ::: tip Interface language
-The app's interface is in Portuguese (Brazil) today; an English translation is in progress. This guide uses
-the English names of menus and buttons. Shortcuts are the same in both.
+Kabul follows your system language (English or Portuguese). To change it, go to Settings › General ›
+Language. Shortcuts are the same in both.
 :::
 
 ## 1. Add a project

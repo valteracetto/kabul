@@ -1,6 +1,7 @@
 //! Kabul desktop: comandos Tauri finos sobre o `kabul-core`.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use i18n::tr;
 use kabul_core::auth::{self, AuthEvent, LoginSession};
 use kabul_core::harness::{self, HarnessKind, Running};
 use kabul_core::history::{self, SessionRecord, SessionSummary};
@@ -19,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 mod gitcmds;
+mod i18n;
 mod menu;
 mod os;
 mod remote;
@@ -397,7 +399,7 @@ fn script_run(app: State<App>, workspace_id: String, which: String, run_id: Opti
         "setup" => (format!("{}-setup", w.tmux_session()), set.scripts.setup.clone(), Some(Path::new(&w.path).join(".context/setup-logs.txt"))),
         "archive" => (format!("{}-archive", w.tmux_session()), set.scripts.archive.clone(), None),
         _ => {
-            let id = run_id.or_else(|| set.scripts.run.iter().find(|(_, s)| s.default).map(|(k, _)| k.clone())).or_else(|| set.scripts.run.keys().next().cloned()).ok_or("nenhum run script configurado")?;
+            let id = run_id.or_else(|| set.scripts.run.iter().find(|(_, s)| s.default).map(|(k, _)| k.clone())).or_else(|| set.scripts.run.keys().next().cloned()).ok_or(tr("nenhum run script configurado", "no run script configured"))?;
             if set.scripts.run_mode.as_deref() == Some("nonconcurrent") {
                 let pre = format!("{}-run-", w.tmux_session());
                 for s in term::backend().sessions().into_iter().filter(|s| s.starts_with(&pre)) {
@@ -407,7 +409,7 @@ fn script_run(app: State<App>, workspace_id: String, which: String, run_id: Opti
             (format!("{}-run-{id}", w.tmux_session()), set.scripts.run.get(&id).map(|s| s.command.clone()), None)
         }
     };
-    let script = script.ok_or_else(|| format!("nenhum script de {which} configurado"))?;
+    let script = script.ok_or_else(|| if i18n::is_en() { format!("no {which} script configured") } else { format!("nenhum script de {which} configurado") })?;
     run_script(&name, &w.path, Cmd::Line(script), &w.full_env(&r), log.as_deref())
 }
 
@@ -450,7 +452,7 @@ fn term_open(handle: AppHandle, app: State<App>, workspace_id: String, name: Opt
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    let pane = pane.ok_or_else(|| format!("o terminal {session} não abriu (a sessão terminou logo ao iniciar)"))?;
+    let pane = pane.ok_or_else(|| if i18n::is_en() { format!("terminal {session} did not open (the session ended right after starting)") } else { format!("o terminal {session} não abriu (a sessão terminou logo ao iniciar)") })?;
     let snapshot = b.screen(&pane).unwrap_or_default();
     let mut terms = app.terms.lock().unwrap();
     if !terms.contains_key(&session) {
@@ -542,7 +544,7 @@ fn local_endpoint_remove(app: State<App>, id: String) -> R<()> {
 #[tauri::command]
 fn local_pull(source: String, model: String) -> R<String> {
     let rt = local::runtime(&source).ok_or("runtime desconhecido")?;
-    let spec = rt.pull_command(&model).ok_or("este runtime não baixa modelos")?;
+    let spec = rt.pull_command(&model).ok_or(tr("este runtime não baixa modelos", "this runtime does not download models"))?;
     let name = format!("kabul-pull-{}", store::slug(&model));
     term::backend().open(&Launch::new(&name, None, What::Exec(Cmd::Spec(spec)))).map_err(e)?;
     Ok(name)
@@ -551,7 +553,7 @@ fn local_pull(source: String, model: String) -> R<String> {
 #[tauri::command]
 async fn local_start(source: String) -> R<()> {
     let rt = local::runtime(&source).ok_or("runtime desconhecido")?;
-    let spec = rt.start_command().ok_or("sem comando para iniciar")?;
+    let spec = rt.start_command().ok_or(tr("sem comando para iniciar", "no start command"))?;
     spec.command().stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map_err(e)?;
     Ok(())
 }
@@ -659,7 +661,7 @@ async fn chat_start(
 }
 
 fn chat(app: &App, id: &str) -> R<Arc<Mutex<Running>>> {
-    app.chats.lock().unwrap().get(id).cloned().ok_or_else(|| "chat não encontrado (encerrado?)".into())
+    app.chats.lock().unwrap().get(id).cloned().ok_or_else(|| tr("chat não encontrado (encerrado?)", "chat not found (ended?)").into())
 }
 
 #[tauri::command]
@@ -867,7 +869,7 @@ fn auth_login(handle: AppHandle, app: State<App>, kind: String) -> R<()> {
 #[tauri::command]
 fn auth_code(app: State<App>, kind: String, code: String) -> R<()> {
     let k = self::kind(&kind)?;
-    app.logins.lock().unwrap().get_mut(&k).ok_or("nenhum login em andamento")?.enviar_codigo(&code).map_err(e)
+    app.logins.lock().unwrap().get_mut(&k).ok_or(tr("nenhum login em andamento", "no login in progress"))?.enviar_codigo(&code).map_err(e)
 }
 
 #[tauri::command]
@@ -1040,8 +1042,8 @@ fn account_update(app: State<App>, id: String, nickname: Option<String>, make_de
 #[tauri::command]
 fn account_login(handle: AppHandle, app: State<App>, id: String) -> R<()> {
     let a = kabul_core::accounts::Accounts::open(&app.home);
-    let p = a.get(&id).ok_or("conta não encontrada")?;
-    let (argv, kick) = kabul_core::accounts::login_argv(&p.provider).ok_or("este provedor não tem login pelo CLI")?;
+    let p = a.get(&id).ok_or(tr("conta não encontrada", "account not found"))?;
+    let (argv, kick) = kabul_core::accounts::login_argv(&p.provider).ok_or(tr("este provedor não tem login pelo CLI", "this provider has no CLI login"))?;
     if let Some(mut old) = app.account_logins.lock().unwrap().remove(&id) {
         let _ = old.cancelar();
     }
@@ -1059,7 +1061,7 @@ fn account_login(handle: AppHandle, app: State<App>, id: String) -> R<()> {
 
 #[tauri::command]
 fn account_code(app: State<App>, id: String, code: String) -> R<()> {
-    app.account_logins.lock().unwrap().get_mut(&id).ok_or("nenhum login em andamento")?.enviar_codigo(&code).map_err(e)
+    app.account_logins.lock().unwrap().get_mut(&id).ok_or(tr("nenhum login em andamento", "no login in progress"))?.enviar_codigo(&code).map_err(e)
 }
 
 #[tauri::command]
@@ -1197,7 +1199,7 @@ async fn mcp_shared(app: State<'_, App>, workspace_id: String) -> R<Vec<kabul_co
 async fn mcp_weigh(app: State<'_, App>, workspace_id: String, name: String) -> R<kabul_core::mcp_share::Weight> {
     let (w, r) = ws_repo(&app, &workspace_id)?;
     let all = kabul_core::mcp_share::shared(Path::new(&w.path), Path::new(&r.path));
-    let sv = all.into_iter().find(|x| x.server.name == name).ok_or_else(|| format!("MCP {name} não encontrado"))?.server;
+    let sv = all.into_iter().find(|x| x.server.name == name).ok_or_else(|| if i18n::is_en() { format!("MCP {name} not found") } else { format!("MCP {name} não encontrado") })?.server;
     let home = app.home.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let wt = kabul_core::mcp_share::weigh(&sv, std::time::Duration::from_secs(15)).map_err(e)?;
@@ -1213,7 +1215,7 @@ async fn mcp_weigh(app: State<'_, App>, workspace_id: String, name: String) -> R
 fn mcp_set_shared(app: State<App>, workspace_id: String, name: String, on: bool) -> R<()> {
     let (w, r) = ws_repo(&app, &workspace_id)?;
     let all = kabul_core::mcp_share::shared(Path::new(&w.path), Path::new(&r.path));
-    let sv = all.into_iter().find(|x| x.server.name == name).ok_or_else(|| format!("MCP {name} não encontrado"))?.server;
+    let sv = all.into_iter().find(|x| x.server.name == name).ok_or_else(|| if i18n::is_en() { format!("MCP {name} not found") } else { format!("MCP {name} não encontrado") })?.server;
     let mut p = kabul_core::mcp_share::Prefs::load(&app.home);
     p.set_shared(&sv, on);
     p.save(&app.home).map_err(e)
@@ -1224,7 +1226,7 @@ fn mcp_set_shared(app: State<App>, workspace_id: String, name: String, on: bool)
 fn mcp_export_agy(app: State<App>, workspace_id: String, name: String) -> R<Option<String>> {
     let (w, r) = ws_repo(&app, &workspace_id)?;
     let all = kabul_core::mcp_share::shared(Path::new(&w.path), Path::new(&r.path));
-    let sv = all.into_iter().find(|x| x.server.name == name).ok_or_else(|| format!("MCP {name} não encontrado"))?.server;
+    let sv = all.into_iter().find(|x| x.server.name == name).ok_or_else(|| if i18n::is_en() { format!("MCP {name} not found") } else { format!("MCP {name} não encontrado") })?.server;
     Ok(kabul_core::mcp_share::export_agy(&sv, &kabul_core::mcp_share::agy_config_file()).map_err(e)?.map(|b| b.display().to_string()))
 }
 
@@ -1319,7 +1321,7 @@ async fn open_targets(app: State<'_, App>) -> R<Vec<OpenTarget>> {
 #[tauri::command]
 fn open_in(target: String, path: String) -> R<()> {
     let t = os::open_apps().into_iter().find(|t| t.id == target).ok_or("app desconhecido")?;
-    let app_path = t.found().cloned().ok_or("app não instalado")?;
+    let app_path = t.found().cloned().ok_or(tr("app não instalado", "app not installed"))?;
     // Só caminho absoluto real; terminal só recebe pasta ([`kabul_core::open::open_in_path`]).
     let path = kabul_core::open::open_in_path(&path, t.kind).map_err(e)?;
     os::open_in(&t, &app_path, &path.display().to_string())
@@ -1431,14 +1433,14 @@ fn sound_play(name: String) -> R<()> {
 fn open_external(target: String) -> R<()> {
     // Links vêm de texto de fora (agente, Linear, PR): só web e e-mail ([`kabul_core::open`]).
     if !kabul_core::open::external_url_ok(&target) {
-        return Err(format!("link não aberto (só http, https e mailto): {}", target.chars().take(80).collect::<String>()));
+        return Err(format!("{}: {}", tr("link não aberto (só http, https e mailto)", "link not opened (only http, https and mailto)"), target.chars().take(80).collect::<String>()));
     }
     os::open_external(target.trim())
 }
 
 #[tauri::command]
 async fn transcribe(audio: Vec<u8>, ext: String) -> R<String> {
-    speech::transcribe(&audio, &ext, "pt").map_err(e)
+    speech::transcribe(&audio, &ext, if i18n::is_en() { "en" } else { "pt" }).map_err(e)
 }
 
 #[tauri::command]
@@ -1471,6 +1473,8 @@ fn main() {
         None => Store::default_paths(),
     };
     let home = file.parent().unwrap().to_path_buf();
+    // Idioma dos textos nativos (menu, barra, notificações) até o frontend confirmar o dele.
+    i18n::init(&home);
     AppSettings::load(&home.join("app-settings.json")).apply_bin_overrides();
     let prefix = AppSettings::load(&home.join("app-settings.json")).branch_prefix();
     let store = Store::open(file, root, prefix).expect("abrindo o estado do Kabul");
@@ -1684,7 +1688,8 @@ fn main() {
             tray::tray_hide,
             updates::app_version,
             updates::update_check,
-            updates::update_install
+            updates::update_install,
+            i18n::set_ui_lang
         ])
         .menu(menu::build)
         .on_menu_event(|app, ev| menu::on_event(app, ev.id().as_ref()))

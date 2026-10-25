@@ -4,6 +4,8 @@ import { transport } from "../transport";
 import type { WsTransport } from "../transport/websocket";
 import { APP_VERSION, type Compat } from "../version";
 import { Row } from "../views/settingsUi";
+import { t } from "../i18n";
+import { trError } from "../i18n/errors";
 
 const wsT = (): WsTransport | null => ("compat" in transport ? (transport as WsTransport) : null);
 
@@ -11,10 +13,10 @@ const wsT = (): WsTransport | null => ("compat" in transport ? (transport as WsT
 export function useCompat(): Compat {
   const [c, setC] = useState<Compat>(() => wsT()?.compat() ?? { kind: "ok" });
   useEffect(() => {
-    const t = wsT();
-    if (!t) return;
-    setC(t.compat());
-    return t.onState(() => setC(t.compat()));
+    const ws = wsT();
+    if (!ws) return;
+    setC(ws.compat());
+    return ws.onState(() => setC(ws.compat()));
   }, []);
   return c;
 }
@@ -32,7 +34,7 @@ export function UpdateBanner() {
     return (
       <div className="update-banner warn" role="status" data-testid="version-mismatch">
         <span>{compat.message}</span>
-        <button className="btn" onClick={() => setHidden(true)}>Entendi</button>
+        <button className="btn" onClick={() => setHidden(true)}>{t("settings.updates.gotIt")}</button>
       </div>
     );
   }
@@ -44,9 +46,9 @@ export function UpdateBanner() {
   };
   return (
     <div className="update-banner" role="status" data-testid="update-banner">
-      <span>Kabul {update.version} disponível{update.channel === "beta" ? " (beta)" : ""}. {err ?? ""}</span>
-      <button className="btn primary" disabled={busy} onClick={install} data-testid="update-install">{busy ? "Instalando…" : "Instalar e reiniciar"}</button>
-      <button className="btn" onClick={() => setHidden(true)}>Depois</button>
+      <span>{t("settings.updates.available", { version: update.version })}{update.channel === "beta" ? t("settings.updates.beta") : ""}. {err ? trError(err) : ""}</span>
+      <button className="btn primary" disabled={busy} onClick={install} data-testid="update-install">{busy ? t("settings.updates.installing") : t("settings.updates.installRestart")}</button>
+      <button className="btn" onClick={() => setHidden(true)}>{t("settings.updates.later")}</button>
     </div>
   );
 }
@@ -68,30 +70,30 @@ export function UpdatesSection({ s, save }: { s: AppSettings; save: (s: AppSetti
     api.updateInstall().catch((e) => setState({ kind: "error", text: String(e) }));
   };
   const status =
-    state.kind === "checking" ? "Procurando…"
-    : state.kind === "none" ? `Você já está na versão mais nova (${ver?.version ?? APP_VERSION}).`
-    : state.kind === "error" ? state.text
-    : state.kind === "found" || state.kind === "installing" ? `Kabul ${state.update?.version} disponível.`
+    state.kind === "checking" ? t("settings.updates.searching")
+    : state.kind === "none" ? t("settings.updates.upToDate", { version: ver?.version ?? APP_VERSION })
+    : state.kind === "error" ? trError(state.text ?? "")
+    : state.kind === "found" || state.kind === "installing" ? t("settings.updates.available", { version: state.update?.version }) + "."
     : null;
   return (
     <>
-      <Row label="Versão do Kabul" hint={ver ? `Protocolo do kabuld v${ver.protocol}` : undefined}><code className="small" data-testid="app-version">{ver?.version ?? APP_VERSION}</code></Row>
+      <Row label={t("settings.updates.version")} hint={ver ? t("settings.updates.protocol", { n: ver.protocol }) : undefined}><code className="small" data-testid="app-version">{ver?.version ?? APP_VERSION}</code></Row>
       {ver?.updater !== false && (
         <>
-          <Row label="Atualizações automáticas" hint="Procura uma versão nova ao abrir o app e avisa no topo; a instalação só acontece quando você confirmar">
-            <span className={"toggle" + (on ? " on" : "")} role="switch" aria-checked={on} aria-label="Atualizações automáticas" tabIndex={0}
+          <Row label={t("settings.updates.auto")} hint={t("settings.updates.auto.hint")}>
+            <span className={"toggle" + (on ? " on" : "")} role="switch" aria-checked={on} aria-label={t("settings.updates.auto")} tabIndex={0}
               onClick={() => save({ ...s, auto_update: !on })} onKeyDown={(e) => (e.key === " " || e.key === "Enter") && (e.preventDefault(), save({ ...s, auto_update: !on }))} data-testid="toggle-auto_update"><span /></span>
           </Row>
-          <Row label="Canal de atualização" hint="Beta recebe as versões de teste antes (e também as estáveis)">
+          <Row label={t("settings.updates.channel")} hint={t("settings.updates.channel.hint")}>
             <select value={channel} onChange={(e) => save({ ...s, update_channel: e.target.value })} data-testid="update-channel">
-              <option value="stable">Estável</option>
-              <option value="beta">Beta</option>
+              <option value="stable">{t("settings.updates.stable")}</option>
+              <option value="beta">{t("settings.updates.betaOpt")}</option>
             </select>
           </Row>
-          <Row label="Procurar atualizações" hint={status ? <span data-testid="update-status">{status}</span> : undefined}>
+          <Row label={t("settings.updates.check")} hint={status ? <span data-testid="update-status">{status}</span> : undefined}>
             <div className="row">
-              {(state.kind === "found" || state.kind === "installing") && <button className="btn primary" disabled={state.kind === "installing"} onClick={install} data-testid="update-install-now">{state.kind === "installing" ? "Instalando…" : "Instalar e reiniciar"}</button>}
-              <button className="btn" disabled={state.kind === "checking" || state.kind === "installing"} onClick={() => check()} data-testid="update-check">Procurar agora</button>
+              {(state.kind === "found" || state.kind === "installing") && <button className="btn primary" disabled={state.kind === "installing"} onClick={install} data-testid="update-install-now">{state.kind === "installing" ? t("settings.updates.installing") : t("settings.updates.installRestart")}</button>}
+              <button className="btn" disabled={state.kind === "checking" || state.kind === "installing"} onClick={() => check()} data-testid="update-check">{t("settings.updates.checkNow")}</button>
             </div>
           </Row>
         </>

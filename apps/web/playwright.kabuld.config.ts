@@ -9,7 +9,8 @@ export default defineConfig({
   workers: 1,
   globalSetup: "./e2e-kabuld/global-setup.ts",
   reporter: [["list"]],
-  use: { screenshot: "only-on-failure", trace: "retain-on-failure" },
+  // Idioma fixo em pt-BR: os specs conferem textos em português.
+  use: { locale: "pt-BR", screenshot: "only-on-failure", trace: "retain-on-failure" },
   projects: [
     { name: "iphone", testMatch: /celular|colaboracao|fora|preview|plano/, use: { ...devices["iPhone 15"] } },
     { name: "android", testMatch: /celular|fora|android|plano/, use: { ...devices["Pixel 8"] } },

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { api, STATUS_LABEL, wsTitle, type Repo, type Workspace } from "../api";
+import { t } from "../i18n";
 
 /** Quadro: workspaces por status (Backlog, Em andamento, Em revisão, Concluído, Cancelado). Arrastar um cartão
  *  para outra coluna muda o status (por ponteiro: o arrastar nativo do HTML é interceptado pelo app). */
@@ -37,7 +38,7 @@ export function DashboardView({ workspaces, repos, stats, onOpen, onChange, onEr
   };
   return (
     <section className="page dashboard" data-testid="dashboard">
-      <header className="page-head" data-tauri-drag-region><h2>Quadro</h2><span className="dim">arraste um cartão para mudar o status</span></header>
+      <header className="page-head" data-tauri-drag-region><h2>{t("app.board.title")}</h2><span className="dim">{t("app.board.hint")}</span></header>
       <div className="kanban">
         {Object.entries(STATUS_LABEL).map(([k, label]) => {
           const cards = live.filter((w) => (w.status || "in-progress") === k);

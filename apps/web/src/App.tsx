@@ -1,4 +1,6 @@
 import { cronMatches, loadRoutines, parseCron, PR_EVENTS, saveRoutines, type Routine } from "./components/routines";
+import { trError } from "./i18n/errors";
+import { t } from "./i18n";
 import { lastNotify, parseKabulLink } from "./components/links";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api, wsTitle, type Repo, type Workspace } from "./api";
@@ -75,6 +77,8 @@ export function App() {
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const setError = useCallback((e: string | null) => {
     if (!e) return setToasts([]);
+    // Erros do backend chegam em português: traduz os conhecidos (i18n/errors.ts).
+    e = trError(e);
     const id = Date.now() + Math.random();
     setToasts((t) => (t.some((x) => x.text === e) ? t : [...t, { id, text: e }].slice(-4)));
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 10000);
@@ -226,15 +230,15 @@ export function App() {
   const openLink = useRef((_: string) => {});
   openLink.current = (url: string) => {
     const l = parseKabulLink(url);
-    if (!l) return setError(`Link do Kabul inválido: ${url}`);
+    if (!l) return setError(t("app.link.invalid", { url }));
     if (l.kind === "workspace") {
-      if (!workspaces.some((w) => w.id === l.id && !w.archived)) return setError("Workspace do link não encontrado (arquivado?)");
+      if (!workspaces.some((w) => w.id === l.id && !w.archived)) return setError(t("app.link.wsNotFound"));
       go({ kind: "workspace", id: l.id });
       if (l.session) setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:activate-tab", { detail: l.session })), 150);
     } else if (l.kind === "settings") go({ kind: "settings", tab: l.tab ?? "geral" });
     else {
       const r = repos.find((x) => (l.repo && (x.id === l.repo || x.name === l.repo)) || (l.path && x.path === l.path));
-      setCreating({ repo: r?.id, text: [l.prompt, l.branch && `(branch base: ${l.branch})`, l.linear && `Issue ${l.linear}`].filter(Boolean).join("\n") || undefined });
+      setCreating({ repo: r?.id, text: [l.prompt, l.branch && t("app.link.baseBranch", { branch: l.branch }), l.linear && t("app.link.issue", { id: l.linear })].filter(Boolean).join("\n") || undefined });
     }
   };
   useEffect(() => {
@@ -256,7 +260,7 @@ export function App() {
   // Rotinas locais: cada execução abre uma conversa nova no workspace (montado em segundo plano, sem trocar de tela).
   const runRoutine = useRef((_r: Routine, _why: string) => {});
   runRoutine.current = (r, why) => {
-    if (!workspaces.some((w) => w.id === r.workspace && !w.archived)) return setError(`Rotina "${r.name}": o workspace não existe mais`);
+    if (!workspaces.some((w) => w.id === r.workspace && !w.archived)) return setError(t("app.routine.wsGone", { name: r.name }));
     // Monta o workspace por alguns segundos (se não estiver na tela) só para abrir a conversa; depois ela segue no registro.
     setBg((o) => (o.includes(r.workspace) ? o : [...o, r.workspace]));
     setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:new-chat-with", { detail: { ws: r.workspace, text: r.prompt, title: r.name } })), 500);
@@ -270,20 +274,20 @@ export function App() {
       const key = `${now.toDateString()} ${now.getHours()}:${now.getMinutes()}`;
       if (key === last) return;
       last = key;
-      for (const r of loadRoutines()) if (r.enabled && r.trigger.kind === "cron") { const c = parseCron(r.trigger.cron); if (c && cronMatches(c, now)) runRoutine.current(r, "horário"); }
+      for (const r of loadRoutines()) if (r.enabled && r.trigger.kind === "cron") { const c = parseCron(r.trigger.cron); if (c && cronMatches(c, now)) runRoutine.current(r, t("app.routine.why.cron")); }
     };
     // Eventos do PR: compara com o que já viu (a primeira leitura só guarda o estado).
     const pr = async () => {
       for (const r of loadRoutines().filter((x) => x.enabled && x.trigger.kind === "pr")) {
-        const t = r.trigger as Extract<Routine["trigger"], { kind: "pr" }>;
+        const tr = r.trigger as Extract<Routine["trigger"], { kind: "pr" }>;
         const info = await api.prView(r.workspace).catch(() => null);
         if (!info) continue;
-        const checks = t.event === "checks_failed" ? await api.prChecks(r.workspace).catch(() => null) : null;
+        const checks = tr.event === "checks_failed" ? await api.prChecks(r.workspace).catch(() => null) : null;
         const now = { failing: checks?.checks.filter((c) => c.bucket === "fail").length, state: info.state, comments: info.comments.length };
         const seen = r.seen;
-        const fire = !!seen && (t.event === "checks_failed" ? (now.failing ?? 0) > 0 && !(seen.failing ?? 0) : t.event === "merged" ? now.state === "MERGED" && seen.state !== "MERGED" : now.comments > (seen.comments ?? 0));
+        const fire = !!seen && (tr.event === "checks_failed" ? (now.failing ?? 0) > 0 && !(seen.failing ?? 0) : tr.event === "merged" ? now.state === "MERGED" && seen.state !== "MERGED" : now.comments > (seen.comments ?? 0));
         saveRoutines(loadRoutines().map((x) => (x.id === r.id ? { ...x, seen: { ...x.seen, ...now } } : x)));
-        if (fire) runRoutine.current(r, PR_EVENTS[t.event]);
+        if (fire) runRoutine.current(r, PR_EVENTS[tr.event]);
       }
     };
     const every = (window as unknown as { __routinePoll?: number }).__routinePoll ?? 60_000;
@@ -300,9 +304,9 @@ export function App() {
     const w = workspaces.find((x) => x.id === id);
     if (!w || w.archived) return;
     const running = agents[id];
-    const msg = `Arquivar ${wsTitle(w)}? As mudanças ficam num checkpoint e dá para desarquivar.${running ? "\n\nHá um agente rodando neste workspace: ele será parado." : ""}`;
+    const msg = t("app.archive.confirm", { name: wsTitle(w) }) + (running ? "\n\n" + t("app.archive.running") : "");
     const chats = [...liveChats.values()].filter((c) => c.ws === id).map((c) => c.chat);
-    const ok = await confirmClosing(chats, msg, { ok: running ? "Parar agentes e arquivar" : "Arquivar", danger: true, ask: true, workspaceId: id, checkbox: w.pr_url ? { key: "kabul.archive.closePr", label: "Fechar o PR também" } : undefined });
+    const ok = await confirmClosing(chats, msg, { ok: running ? t("app.archive.stopAndArchive") : t("app.side.archive"), danger: true, ask: true, workspaceId: id, checkbox: w.pr_url ? { key: "kabul.archive.closePr", label: t("app.archive.closePr") } : undefined });
     if (!ok) return;
     if (running) await chatStore.stopWorkspace(id);
     try {
@@ -371,7 +375,7 @@ export function App() {
   quitRef.current = async () => {
     const running = chatStore.all().filter((c) => statusOf(c) !== "idle").length;
     const chats = [...liveChats.values()].map((c) => c.chat);
-    if (!(await confirmClosing(chats, running ? `Sair do Kabul? ${running === 1 ? "Há 1 agente rodando; ele será parado" : `Há ${running} agentes rodando; eles serão parados`}.` : "Sair do Kabul?", { ok: running ? "Parar agentes e sair" : "Sair", danger: true, ask: !!running }))) return;
+    if (!(await confirmClosing(chats, running ? `${t("app.quit.confirm")} ${t("app.quit.running", { count: running })}.` : t("app.quit.confirm"), { ok: running ? t("app.quit.stopAndQuit") : t("app.quit.quit"), danger: true, ask: !!running }))) return;
     api.appQuit().catch(() => {});
   };
 
@@ -381,7 +385,7 @@ export function App() {
       {sidebar && <Resizer axis="x" dir={1} {...side} onSize={side.setSize} onCollapse={() => setSidebar(false)} testid="resize-sidebar" />}
       <main className="main">
         <UpdateBanner />
-        {toasts.length > 0 && <div className="toasts">{toasts.map((t) => <div key={t.id} className="toast" role="alert" onClick={() => setToasts((x) => x.filter((y) => y.id !== t.id))}>{t.text}</div>)}</div>}
+        {toasts.length > 0 && <div className="toasts">{toasts.map((toast) => <div key={toast.id} className="toast" role="alert" onClick={() => setToasts((x) => x.filter((y) => y.id !== toast.id))}>{toast.text}</div>)}</div>}
         {/* Só o workspace visível fica montado; os outros guardam o estado (abas, rascunho, rolagem, terminal) e remontam iguais. */}
         {[...new Set([...(route.kind === "workspace" ? [route.id] : []), ...bg])].map((id) => {
           const w = workspaces.find((x) => x.id === id && !x.archived);
@@ -400,7 +404,7 @@ export function App() {
         {route.kind === "usage" && <UsageView onError={onError} onRoute={go} />}
         </Suspense>
         {(route.kind === "home" || (route.kind === "workspace" && !current)) && <Home repos={repos} workspaces={workspaces} onRoute={go} onOpen={openProject} onClone={() => setAddDialog("clone")} onQuick={() => setAddDialog("quick")} />}
-        {!sidebar && <button className="icon-btn sidebar-reopen" title="Mostrar barra lateral (⌘B)" onClick={() => setSidebar(true)}>☰</button>}
+        {!sidebar && <button className="icon-btn sidebar-reopen" title={t("app.side.showSidebar")} onClick={() => setSidebar(true)}>☰</button>}
       </main>
       <ConfirmHost />
       {help && <HelpMenu onClose={() => setHelp(false)} onRoute={go} onFeedback={() => setFeedback(true)} />}
@@ -418,7 +422,7 @@ export function App() {
             reload();
             go({ kind: "workspace", id: w.id });
             // Contexto da issue para o agente (o arquivo completo está em .context/).
-            setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:compose", { detail: { ws: w.id, text: `Trabalhe na issue ${i.identifier}: ${i.title} (${i.url}). Detalhes em .context/[LINEAR]-${i.identifier}.md` } })), 900);
+            setTimeout(() => window.dispatchEvent(new CustomEvent("kabul:compose", { detail: { ws: w.id, text: t("app.link.workOnIssue", { id: i.identifier, title: i.title, url: i.url }) } })), 900);
           }} />
       )}
       {palette && <Palette repos={repos} workspaces={workspaces} current={current} archived={palette === "archived"} onClose={() => setPalette(false)} onRoute={(r) => (go(r), setPalette(false))} onCreate={(o) => setCreating(o)} onChange={reload} />}
@@ -433,11 +437,11 @@ function Home({ repos, workspaces, onRoute, onOpen, onClone, onQuick }: { repos:
       <div className="home-inner">
         <div className="home-mark">◆</div>
         <h1>Kabul</h1>
-        <p className="dim">{repos.length ? "Agentes em paralelo, cada um no seu worktree." : "Adicione um repositório git em Criar para começar."}</p>
+        <p className="dim">{repos.length ? t("app.home.tagline") : t("app.home.empty")}</p>
         <div className="home-cards">
-          <button className="home-card" onClick={onOpen} data-testid="home-open"><span className="hc-ico">📁</span>Abrir projeto</button>
-          <button className="home-card" onClick={onClone} data-testid="home-github"><span className="hc-ico">⎇</span>Abrir projeto do GitHub</button>
-          <button className="home-card" onClick={onQuick} data-testid="home-quick"><span className="hc-ico">⚡</span>Início rápido</button>
+          <button className="home-card" onClick={onOpen} data-testid="home-open"><span className="hc-ico">📁</span>{t("app.create.openProject")}</button>
+          <button className="home-card" onClick={onClone} data-testid="home-github"><span className="hc-ico">⎇</span>{t("app.create.openGitHub")}</button>
+          <button className="home-card" onClick={onQuick} data-testid="home-quick"><span className="hc-ico">⚡</span>{t("app.quick.title")}</button>
         </div>
         {recent.length > 0 && (
           <div className="home-list">
@@ -449,7 +453,7 @@ function Home({ repos, workspaces, onRoute, onOpen, onClone, onQuick }: { repos:
             ))}
           </div>
         )}
-        <div className="home-keys"><span><kbd>⌘K</kbd> buscar</span><span><kbd>⌘N</kbd> workspace</span><span><kbd>⌘1</kbd>–<kbd>9</kbd> trocar</span><span><kbd>⌘⌥/</kbd> atalhos</span></div>
+        <div className="home-keys"><span><kbd>⌘K</kbd> {t("app.home.keySearch")}</span><span><kbd>⌘N</kbd> {t("app.home.keyWorkspace")}</span><span><kbd>⌘1</kbd>–<kbd>9</kbd> {t("app.home.keySwitch")}</span><span><kbd>⌘⌥/</kbd> {t("app.home.keyShortcuts")}</span></div>
       </div>
     </div>
   );

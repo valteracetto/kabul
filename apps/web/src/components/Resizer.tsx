@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { t } from "../i18n";
 
 /** Tamanho de painel persistido (por janela) com limites. */
 export function usePanelSize(key: string, def: number, min: number, max: number) {
@@ -52,5 +53,5 @@ export function Resizer({ axis, size, min, max, def, dir, onSize, onCollapse, te
     },
     [axis, size, min, max, def, dir, onSize, onCollapse],
   );
-  return <div className={"resizer resizer-" + axis} onPointerDown={down} onDoubleClick={() => onSize(def)} title="Arraste para redimensionar · duplo clique volta ao padrão" data-testid={testid} />;
+  return <div className={"resizer resizer-" + axis} onPointerDown={down} onDoubleClick={() => onSize(def)} title={t("app.resizer.title")} data-testid={testid} />;
 }

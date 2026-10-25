@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { api, type ResourceNode, type ResourceSnapshot, type Workspace } from "../api";
 import { useDismiss } from "./useDismiss";
 import { useSettings } from "./useSettings";
+import { t } from "../i18n";
 
 const P = { width: 14, height: 14, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 const IMem = () => <svg {...P}><rect x="4" y="2" width="8" height="12" rx="1.2" /><path d="M6.5 5h3M6.5 8h3M6.5 11h3M2.5 5h1.5M2.5 8h1.5M2.5 11h1.5M12 5h1.5M12 8h1.5M12 11h1.5" /></svg>;
@@ -49,8 +50,8 @@ export function ResourcesChip({ workspaces, onOpen }: { workspaces: Workspace[];
   useEffect(() => {
     if (!enabled) return;
     load();
-    const t = setInterval(load, open ? 2000 : 10000);
-    return () => clearInterval(t);
+    const timer = setInterval(load, open ? 2000 : 10000);
+    return () => clearInterval(timer);
   }, [enabled, open, load]);
   const wsName = useMemo(() => Object.fromEntries(workspaces.map((w) => [w.id, w.title || w.name])), [workspaces]);
 
@@ -95,23 +96,23 @@ export function ResourcesChip({ workspaces, onOpen }: { workspaces: Workspace[];
   const copy = () => navigator.clipboard.writeText(rows.map((r) => `${"  ".repeat(r.depth)}${r.n.name}\t${fmtCpu(r.n.cpu)}\t${fmtMem(r.n.mem)}`).join("\n")).catch(() => {});
   return (
     <div className="res-wrap" ref={ref}>
-      <button className={"res-chip" + (open ? " on" : "")} onClick={() => setOpen(!open)} title="Uso de recursos do Kabul e dos agentes" data-testid="res-chip">
+      <button className={"res-chip" + (open ? " on" : "")} onClick={() => setOpen(!open)} title={t("usage.res.chip")} data-testid="res-chip">
         <IMem /> <span className="mono">{snap ? fmtMem(snap.mem) : "…"}</span>
       </button>
       {open && snap && createPortal(
         // No body (a barra lateral corta o que passa da largura dela), abaixo do chip.
         <div className="popover res-pop" data-testid="res-pop" ref={popRef} style={{ top: (ref.current?.getBoundingClientRect().bottom ?? 30) + 6, left: Math.max(8, ref.current?.getBoundingClientRect().left ?? 8) }}>
           <div className="res-top">
-            <span className="res-title">RECURSOS</span>
+            <span className="res-title">{t("usage.res.title")}</span>
             <span className="grow" />
-            <button className={"icon-btn" + (view === "terminals" ? " on" : "")} title="Só agentes e terminais" onClick={() => setView(view === "terminals" ? "tree" : "terminals")} data-testid="res-view-terminals"><ITerm /></button>
-            <button className={"icon-btn" + (view === "workspace" ? " on" : "")} title="Agrupar por workspace" onClick={() => setView(view === "workspace" ? "tree" : "workspace")} data-testid="res-view-workspace"><ILayers /></button>
-            <button className={"icon-btn" + (view === "tree" ? " on" : "")} title="Árvore de processos" onClick={() => setView("tree")} data-testid="res-view-tree"><ITree /></button>
-            <button className="icon-btn" title="Copiar" onClick={copy} data-testid="res-copy"><ICopy /></button>
+            <button className={"icon-btn" + (view === "terminals" ? " on" : "")} title={t("usage.res.onlyAgents")} onClick={() => setView(view === "terminals" ? "tree" : "terminals")} data-testid="res-view-terminals"><ITerm /></button>
+            <button className={"icon-btn" + (view === "workspace" ? " on" : "")} title={t("usage.res.byWorkspace")} onClick={() => setView(view === "workspace" ? "tree" : "workspace")} data-testid="res-view-workspace"><ILayers /></button>
+            <button className={"icon-btn" + (view === "tree" ? " on" : "")} title={t("usage.res.tree")} onClick={() => setView("tree")} data-testid="res-view-tree"><ITree /></button>
+            <button className="icon-btn" title={t("common.copy")} onClick={copy} data-testid="res-copy"><ICopy /></button>
           </div>
-          <div className="res-totals" data-testid="res-totals"><span className="dim">CPU</span> {fmtCpu(snap.cpu)} <span className="dim">Memória</span> {fmtMem(snap.mem)}</div>
+          <div className="res-totals" data-testid="res-totals"><span className="dim">CPU</span> {fmtCpu(snap.cpu)} <span className="dim">{t("usage.res.memory")}</span> {fmtMem(snap.mem)}</div>
           <div className="res-table">
-            <div className="res-row res-head">{head("name", "Nome")}{head("cpu", "CPU")}{head("mem", "Mem")}</div>
+            <div className="res-row res-head">{head("name", t("usage.res.name"))}{head("cpu", "CPU")}{head("mem", t("usage.res.mem"))}</div>
             {shown.map((r) => {
               const go = r.n.workspace_id && (r.n.kind === "agent" || r.n.kind === "workspace");
               return (
@@ -128,7 +129,7 @@ export function ResourcesChip({ workspaces, onOpen }: { workspaces: Workspace[];
               );
             })}
           </div>
-          {rows.length > FIRST && <button className="res-all" onClick={() => setAll(!all)} data-testid="res-all">{all ? "Mostrar menos" : `Mostrar tudo (${rows.length})`}</button>}
+          {rows.length > FIRST && <button className="res-all" onClick={() => setAll(!all)} data-testid="res-all">{all ? t("usage.res.showLess") : t("usage.res.showAll", { count: rows.length })}</button>}
           <KeptProcesses every={2000} wsName={wsName} />
         </div>,
         document.body,

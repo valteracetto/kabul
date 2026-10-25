@@ -1,4 +1,5 @@
 import { isOwner, kcall } from "./kabuld";
+import { t } from "../i18n";
 
 /**
  * Plan mode no celular. Claude e Antigravity têm plano nativo (`--permission-mode plan`, escolhido ao
@@ -7,7 +8,15 @@ import { isOwner, kcall } from "./kabuld";
  */
 export type PlanMode = "native" | "emulated" | null;
 export const PLAN_NATIVE = new Set(["claude", "antigravity"]);
-export const PLAN_PREFIX = "[Modo plano] Antes de mexer em qualquer arquivo, apresente só um plano passo a passo e espere a minha aprovação.\n\n";
+/** Instrução enviada ao agente, no idioma da tela. */
+export const planPrefix = () => t("mobile.plan.prefix");
+// Mensagens de plano gravadas em qualquer idioma: "[Modo plano] …\n\n" ou "[Plan mode] …\n\n".
+const PLAN_RE = /^\[(?:Modo plano|Plan mode)\][^\n]*\n\n/; // i18n-ignore
+/** Texto da mensagem sem a instrução de plano (em qualquer idioma), ou null se não for mensagem de plano. */
+export function planBody(text: string): string | null {
+  const m = PLAN_RE.exec(text);
+  return m ? text.slice(m[0].length) : null;
+}
 
 const KEY = "kabul.m.plan";
 const all = (): Record<string, PlanMode> => {
@@ -29,4 +38,4 @@ export function setPlan(chatId: string, m: PlanMode) {
 export const defaultPlan = (): Promise<boolean> =>
   isOwner() ? kcall<{ default_plan?: boolean }>("app_settings_get").then((s) => !!s?.default_plan, () => false) : Promise.resolve(false);
 
-export const planLabel = (m: PlanMode) => (m === "emulated" ? "Plano (emulado)" : "Plano");
+export const planLabel = (m: PlanMode) => (m === "emulated" ? t("mobile.plan.emulated") : t("mobile.plan.label"));

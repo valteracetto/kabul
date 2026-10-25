@@ -1,5 +1,7 @@
 import type { AgentEvent, DockerContainer, HarnessKind, Leftover } from "../api";
 import type { McpLive } from "./McpPanel";
+import { t } from "../i18n";
+import { fmtDate, fmtDurationShort } from "../i18n/format";
 
 /** Itens da conversa (o que o chat desenha e o histórico salva). */
 export type Item =
@@ -17,10 +19,11 @@ export type Item =
 export interface Usage { input: number | null; output: number | null; cache_read: number | null; cache_write: number | null; duration_ms: number | null }
 export interface Live { id: string; harness: HarnessKind; key: string; effort: string | null; fast: boolean; plan: boolean; approvals: boolean; mcpOff: string; account: string | null; planKind?: "native" | "emulated" }
 
-const time = () => new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+// Hora do rodapé do turno sempre em 24 h ("23:36"), também em inglês: o rodapé é igual nos dois idiomas.
+const time = () => fmtDate(Date.now(), { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
-/** Duração humana como na referência: "21s", "2m, 21s", "1h, 3m". */
-export const humanDur = (secs: number) => (secs < 60 ? `${secs}s` : secs < 3600 ? `${Math.floor(secs / 60)}m, ${secs % 60}s` : `${Math.floor(secs / 3600)}h, ${Math.floor((secs % 3600) / 60)}m`);
+/** Duração do rodapé do turno, igual nos dois idiomas: "21s", "2m, 21s", "1h, 3m". */
+export const humanDur = (secs: number) => fmtDurationShort(secs);
 
 /**
  * Aplica um evento do agente à lista de itens (puro: devolve a mesma lista se nada mudou).
@@ -64,7 +67,7 @@ export function apply(items: Item[], ev: AgentEvent, started: number): Item[] {
       // O mesmo erro pode chegar duas vezes (notificação e fim do turno): mostra uma.
       return last?.k === "error" && last.text === ev.message ? items : [...items, { k: "error", text: ev.message }];
     case "exited":
-      return ev.code ? [...items, { k: "error", text: `o agente encerrou (código ${ev.code})` }] : items;
+      return ev.code ? [...items, { k: "error", text: t("chat.exited", { code: ev.code }) }] : items;
     default:
       return items;
   }
@@ -73,7 +76,7 @@ export function apply(items: Item[], ev: AgentEvent, started: number): Item[] {
 /** Passos pendentes viram "interrompido" e o marcador vai no fim do turno (Parar). */
 export const interrupted = (items: Item[]): Item[] => [
   ...items.map((i) => (i.k === "tool" && i.output === undefined ? { ...i, output: "", interrupted: true } : i.k === "assistant" && i.streaming ? { ...i, streaming: false } : i)),
-  { k: "notice", text: "Interrompido" },
+  { k: "notice", text: t("chat.interrupted") },
 ];
 
 /** Estado de uma conversa guardado quando a aba (ou o workspace) desmonta; volta igual ao remontar. */

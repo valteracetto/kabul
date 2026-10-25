@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { t } from "../i18n";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -185,12 +186,12 @@ export function TerminalTab({ ws, session, visible, initialCommand, gpu = false,
       const el = document.createElement("div");
       el.className = "term-el";
       el.style.height = "100%";
-      api.termOpen(ws.id, session ?? null).then((t) => {
+      api.termOpen(ws.id, session ?? null).then((ti) => {
         if (!alive || !host.current) return;
         // Terminal grande com preset: roda o comando escolhido uma vez por sessão.
-        if (initialCommand && !presetSent.has(t.session)) (presetSent.add(t.session), void api.termInput(t.session, t.pane, initialCommand + "\r").catch(() => {}));
+        if (initialCommand && !presetSent.has(ti.session)) (presetSent.add(ti.session), void api.termInput(ti.session, ti.pane, initialCommand + "\r").catch(() => {}));
         host.current.appendChild(el);
-        attach(live.get(key) ?? create(key, t, ws, el, (e) => errRef.current(e)));
+        attach(live.get(key) ?? create(key, ti, ws, el, (e) => errRef.current(e)));
       }, (e) => onError(String(e)));
     }
     return () => {
@@ -209,25 +210,25 @@ export function TerminalTab({ ws, session, visible, initialCommand, gpu = false,
 
   /** Manda o que está na tela do terminal para o chat (como texto no composer). */
   const attachToChat = () => {
-    const t = termRef.current;
-    if (!t) return;
-    const buf = t.buffer.active;
+    const term = termRef.current;
+    if (!term) return;
+    const buf = term.buffer.active;
     const lines: string[] = [];
     for (let i = Math.max(0, buf.length - 200); i < buf.length; i++) lines.push(buf.getLine(i)?.translateToString(true) ?? "");
     const text = lines.join("\n").replace(/\n+$/, "");
-    window.dispatchEvent(new CustomEvent("kabul:compose", { detail: { ws: ws.id, text: `Saída do terminal:\n\n\`\`\`\n${text.slice(-6000)}\n\`\`\`` } }));
+    window.dispatchEvent(new CustomEvent("kabul:compose", { detail: { ws: ws.id, text: `${t("code.term.output")}\n\n\`\`\`\n${text.slice(-6000)}\n\`\`\`` } }));
   };
 
   return (
     <div className="terminal" data-testid="terminal">
       <div className="term-tools">
-        <button className="text-btn small" title="Mandar a saída para o chat" onClick={attachToChat} data-testid="term-attach">Mandar ao chat</button>
-        <button className="text-btn small" title="Limpar (⌘K)" onClick={() => (termRef.current?.clear(), info && api.termInput(info.session, info.pane, "\x0c").catch(() => {}))} data-testid="term-clear">Limpar</button>
-        <button className="text-btn small" title="Buscar (⌘F)" onClick={() => setFind("")} data-testid="term-find">Buscar</button>
+        <button className="text-btn small" title={t("code.term.attachTitle")} onClick={attachToChat} data-testid="term-attach">{t("code.term.attach")}</button>
+        <button className="text-btn small" title={t("code.term.clearTitle")} onClick={() => (termRef.current?.clear(), info && api.termInput(info.session, info.pane, "\x0c").catch(() => {}))} data-testid="term-clear">{t("code.term.clear")}</button>
+        <button className="text-btn small" title={t("code.term.findTitle")} onClick={() => setFind("")} data-testid="term-find">{t("common.search")}</button>
       </div>
       {find !== null && (
         <div className="term-find" data-testid="term-find-bar">
-          <input autoFocus {...noSuggest} autoComplete="off" value={find} placeholder="Buscar no terminal" onChange={(e) => (setFind(e.target.value), searchRef.current?.findNext(e.target.value))} data-testid="term-find-input"
+          <input autoFocus {...noSuggest} autoComplete="off" value={find} placeholder={t("code.term.findPlaceholder")} onChange={(e) => (setFind(e.target.value), searchRef.current?.findNext(e.target.value))} data-testid="term-find-input"
             onKeyDown={(e) => {
               if (e.key === "Enter") (e.preventDefault(), e.shiftKey ? searchRef.current?.findPrevious(find) : searchRef.current?.findNext(find));
               if (e.key === "Escape") (e.stopPropagation(), setFind(null), searchRef.current?.clearDecorations(), termRef.current?.focus());

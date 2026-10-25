@@ -1,5 +1,6 @@
 import type { CloudInfo } from "../api";
 import { ProviderMark } from "../icons";
+import { t } from "../i18n";
 
 /** Espelha o enum `RunsOn` do core. */
 export type RunsOn =
@@ -8,14 +9,14 @@ export type RunsOn =
   | { kind: "kabul_cloud"; host: string }
   | { kind: "remote"; host: string };
 
-const PROVIDER: Record<string, [string, string]> = { claude: ["anthropic", "Rodando na nuvem da Anthropic (claude.ai)"], codex: ["openai", "Rodando na nuvem da OpenAI (Codex)"], gemini: ["google", "Rodando na nuvem do Google (Gemini)"] };
+const PROVIDER: Record<string, [string, () => string]> = { claude: ["anthropic", () => t("chat.runsOn.claude")], codex: ["openai", () => t("chat.runsOn.codex")], gemini: ["google", () => t("chat.runsOn.gemini")] };
 
 export function runsOnTooltip(r: RunsOn): string {
   switch (r.kind) {
-    case "local": return r.mirrored ? "Rodando neste Mac, espelhada no claude.ai e no celular" : "Rodando neste Mac";
-    case "provider_cloud": return PROVIDER[r.provider]?.[1] ?? `Rodando na nuvem do provedor (${r.provider})`;
-    case "kabul_cloud": return `Rodando na nuvem do Kabul (${r.host})`;
-    case "remote": return `Rodando em ${r.host}`;
+    case "local": return r.mirrored ? t("chat.runsOn.mirrored") : t("chat.runsOn.local");
+    case "provider_cloud": return PROVIDER[r.provider]?.[1]() ?? t("chat.runsOn.provider", { provider: r.provider });
+    case "kabul_cloud": return t("chat.runsOn.kabulCloud", { host: r.host });
+    case "remote": return t("chat.runsOn.remote", { host: r.host });
   }
 }
 

@@ -5,6 +5,7 @@ import { useDismiss } from "./useDismiss";
 import { EFFORT_LABEL, HARNESS_LABEL, type HarnessKind, type Model } from "../api";
 import { IArrowOut, IChevron, IChevronDown, IClose, IDrag, IGear, IPlus, ISearch, ProviderMark } from "../icons";
 import type { ModelPrefs } from "./prefs";
+import { t } from "../i18n";
 
 interface Props {
   models: Model[];
@@ -66,8 +67,8 @@ export function ModelPicker({ models, prefs, setPrefs, selected, effort, activeH
   return (
     <div className="picker" ref={root}>
       <button className="picker-trigger" onClick={() => setOpen(!open)}>
-        <span>{selected?.label ?? "Modelo"}</span>
-        {selected?.local && <span className="local-badge">Local</span>}
+        <span>{selected?.label ?? t("chat.model.model")}</span>
+        {selected?.local && <span className="local-badge">{t("chat.model.local")}</span>}
         {effort && <span className="dim">{EFFORT_LABEL[effort]}</span>}
         <IChevronDown size={12} />
       </button>
@@ -75,7 +76,7 @@ export function ModelPicker({ models, prefs, setPrefs, selected, effort, activeH
         <Floating className="picker-pop" placement="top-start">
           <label className="pop-search">
             <ISearch />
-            <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} ref={search} placeholder="Buscar modelos" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} ref={search} placeholder={t("chat.model.search")} value={q} onChange={(e) => setQ(e.target.value)} />
           </label>
           <div className="pop-sep" />
           <div className="pop-list">
@@ -85,11 +86,11 @@ export function ModelPicker({ models, prefs, setPrefs, selected, effort, activeH
               return (
                 <div key={m.key} className={"pop-row model" + (m.key === selected?.key ? " on" : "") + (drag === i ? " dragging" : "")} draggable={!needle}
                   onDragStart={() => setDrag(i)} onDragEnd={() => setDrag(null)} onDragOver={(e) => { e.preventDefault(); if (drag !== null && drag !== i) { move(drag, i); setDrag(i); } }}
-                  onClick={() => pick(m)} title={other ? "Outro agente: abre uma conversa nova" : undefined}>
+                  onClick={() => pick(m)} title={other ? t("chat.model.otherAgent") : undefined}>
                   <span className="handle"><IDrag size={14} /></span>
                   <ProviderMark provider={m.provider} />
                   <span className="label">{m.label}</span>
-                  {m.local && <span className="local-badge" title={m.local.note}>Local</span>}
+                  {m.local && <span className="local-badge" title={m.local.note}>{t("chat.model.local")}</span>}
                   {effortOf(m) && <span className="dim">{EFFORT_LABEL[effortOf(m)!]}</span>}
                   <span className="grow" />
                   {editing ? (
@@ -103,7 +104,7 @@ export function ModelPicker({ models, prefs, setPrefs, selected, effort, activeH
                 <span className="handle" />
                 <ProviderMark provider={m.provider} />
                 <span className="label">{m.label}</span>
-                {m.local && <span className="local-badge" title={m.local.note}>Local</span>}
+                {m.local && <span className="local-badge" title={m.local.note}>{t("chat.model.local")}</span>}
                 <span className="dim" title={m.local ? `${m.local.source_name} · ${m.local.note}` : undefined}>{m.local ? m.local.source_name : HARNESS_LABEL[m.harness]}</span>
                 <span className="grow" />
                 <IPlus size={13} />
@@ -111,7 +112,7 @@ export function ModelPicker({ models, prefs, setPrefs, selected, effort, activeH
             ))}
             {!needle && (
               <div className={"pop-row add-models" + (adding ? " on" : "")} onClick={() => setAdding(!adding)}>
-                <IPlus /> <span>{adding ? "Fechar lista" : "Adicionar modelos"}</span>
+                <IPlus /> <span>{adding ? t("chat.model.closeList") : t("chat.model.addModels")}</span>
                 <span className="grow" />
                 <IArrowOut size={14} />
               </div>
@@ -119,7 +120,7 @@ export function ModelPicker({ models, prefs, setPrefs, selected, effort, activeH
           </div>
           <div className="pop-sep" />
           <div className={"pop-row setting" + (selected?.efforts.length ? "" : " disabled")} onMouseEnter={() => selected?.efforts.length && setEffortOpen(true)} onMouseLeave={() => setEffortOpen(false)} onClick={() => selected?.efforts.length && setEffortOpen(true)}>
-            <span>Esforço</span>
+            <span>{t("chat.model.effort")}</span>
             <span className="grow" />
             <span className="dim">{effort ? EFFORT_LABEL[effort] : "—"}</span>
             <IChevron size={13} />
@@ -136,15 +137,15 @@ export function ModelPicker({ models, prefs, setPrefs, selected, effort, activeH
             )}
           </div>
           <div className="pop-row setting" onClick={() => setPrefs((p) => ({ ...p, fast: !p.fast }))}>
-            <span>Rápido</span>
+            <span>{t("chat.model.fast")}</span>
             <span className="grow" />
             <span className="kbd-hint">⌘⇧E</span>
             <span className={"toggle" + (prefs.fast ? " on" : "")}><span /></span>
           </div>
           <div className="pop-foot">
-            <button className="text-btn" onClick={() => setEditing(!editing)}><IGear size={14} /> {editing ? "Concluir" : "Editar"}</button>
+            <button className="text-btn" onClick={() => setEditing(!editing)}><IGear size={14} /> {editing ? t("chat.model.done") : t("common.edit")}</button>
             <span className="grow" />
-            <kbd>⌘⇧/</kbd> <span className="dim">Alternar esforço</span>
+            <kbd>⌘⇧/</kbd> <span className="dim">{t("chat.model.toggleEffort")}</span>
           </div>
         </Floating>
       )}

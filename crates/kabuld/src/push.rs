@@ -118,11 +118,21 @@ impl Push {
 
     /// Envia para todas as inscrições que podem ver o workspace. Rede em outra thread.
     pub fn notify(self: &Arc<Self>, title: &str, body: &str, url: &str, tag: &str, workspace: Option<&str>) {
+        self.notify_with(title, body, url, tag, workspace, serde_json::Value::Null);
+    }
+
+    /// Como `notify`, com campos a mais no payload. `kind`/`name`/`detail` deixam o service worker montar o
+    /// texto no idioma do aparelho (`title`/`body` são a versão em português, de reserva).
+    pub fn notify_with(self: &Arc<Self>, title: &str, body: &str, url: &str, tag: &str, workspace: Option<&str>, extra: serde_json::Value) {
         let targets: Vec<Subscription> = self.subs.lock().unwrap().iter().filter(|s| s.scope.allows_workspace(workspace) || s.scope == Scope::All).cloned().collect();
         if targets.is_empty() {
             return;
         }
-        let payload = json!({ "title": title, "body": body, "url": url, "tag": tag }).to_string();
+        let mut payload = json!({ "title": title, "body": body, "url": url, "tag": tag });
+        if let (Some(p), serde_json::Value::Object(x)) = (payload.as_object_mut(), extra) {
+            p.extend(x);
+        }
+        let payload = payload.to_string();
         let me = self.clone();
         std::thread::spawn(move || {
             for s in targets {
@@ -196,9 +206,10 @@ pub fn spawn_notifier(bus: &Bus, push: Arc<Push>) {
             }
             if status == "waiting" {
                 let body = p["detail"].as_str().unwrap_or("Precisa de uma decisão sua.").to_string();
-                push.notify(&format!("{title} está esperando você"), &body, &url, &id, ev.workspace.as_deref());
+                let extra = json!({ "kind": "waiting", "name": title, "detail": p["detail"].as_str() });
+                push.notify_with(&format!("{title} está esperando você"), &body, &url, &id, ev.workspace.as_deref(), extra);
             } else if status == "idle" && prev == "working" && agent != "shell" {
-                push.notify(&format!("{title} terminou"), "O agente concluiu o turno.", &url, &id, ev.workspace.as_deref());
+                push.notify_with(&format!("{title} terminou"), "O agente concluiu o turno.", &url, &id, ev.workspace.as_deref(), json!({ "kind": "done", "name": title }));
             }
         }
     });

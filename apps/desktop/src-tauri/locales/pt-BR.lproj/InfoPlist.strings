@@ -1,0 +1,3 @@
+/* Textos do Info.plist em português (o macOS escolhe pelo idioma do sistema). */
+NSMicrophoneUsageDescription = "O Kabul usa o microfone para o ditado no campo de mensagem.";
+NSSpeechRecognitionUsageDescription = "O Kabul transcreve o ditado para o campo de mensagem.";

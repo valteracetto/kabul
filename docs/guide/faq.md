@@ -14,8 +14,9 @@ MCP servers.
 **Which agent should I use?** The one made for your model: Kabul picks it when you choose the model. See
 [Agents and harnesses](./agents.md) for what each one supports and what is still being confirmed.
 
-**Is the interface in English?** Not yet. The app's interface is in Portuguese (Brazil) today; the English
-translation is in progress. These docs use the English names of menus and buttons, and shortcuts are the same.
+**Is the interface in English?** Yes. The desktop app, the phone app, the menus and the notifications are in
+English and Portuguese (Brazil). Kabul follows the system language; to pick one, go to Settings › General ›
+Language (System, English or Português).
 
 **Which platforms?** macOS (Apple Silicon and Intel) is the main platform. Windows is in
 [beta](./windows.md). Linux is not packaged. The phone app runs on iOS and Android.

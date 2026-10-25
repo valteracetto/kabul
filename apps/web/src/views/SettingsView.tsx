@@ -8,20 +8,23 @@ import { api, HARNESS_LABEL, type AuthStatus, type HarnessKind, type Layer, type
 import type { Route } from "../App";
 import { AccountsPanel } from "../components/Accounts";
 import { GitSettings } from "./SettingsGit";
-import { CATEGORIES, lang, SHORTCUTS, t, type Key } from "../i18n";
+import { CATEGORIES, shortcutLabel, SHORTCUTS, t, type Key } from "../i18n";
+import { tNode } from "../i18n/react";
+import { trError } from "../i18n/errors";
 import { ActionsPage, AdvancedPage, AppearancePage, EnvironmentPage, GeneralPage, MiscPage, ModelsPage } from "./SettingsPages";
 import { activeMachine, machines, normalizeUrl, saveMachines, switchMachine, type Machine } from "../components/machines";
 
 /** Navegação das configurações, por grupo (pessoal, ambiente, repositório, mais). */
-const GROUPS: [string, [string, string][]][] = [
-  [t("settings.group.personal"), [["geral", "Geral"], ["contas", "Contas"], ["aparencia", "Aparência"], ["modelos", "Modelos"], ["git", "Git"], ["integracoes", "Integrações"]]],
-  [t("settings.group.env"), [["ambiente", "Ambiente"]]],
-  [t("settings.group.repo"), [["repo", "Scripts"], ["acoes", "Ações"], ["diversos", "Diversos"]]],
-  [t("settings.group.more"), [["remoto", "Máquinas"], ["celular", "Celular e remoto"], ["avancado", "Avançado"], ["atalhos", "Atalhos"]]],
+const GROUPS: [Key, string[]][] = [
+  ["settings.group.personal", ["geral", "contas", "aparencia", "modelos", "git", "integracoes"]],
+  ["settings.group.env", ["ambiente"]],
+  ["settings.group.repo", ["repo", "acoes", "diversos"]],
+  ["settings.group.more", ["remoto", "celular", "avancado", "atalhos"]],
 ];
+const tabLabel = (k: string) => t(`settings.tab.${k}` as Key);
 
 export function SettingsView({ tab, repoId, repos, onError, onRoute }: { tab: string; repoId?: string; repos: Repo[]; onError: (e: string) => void; onRoute: (r: Route) => void }) {
-  const title = GROUPS.flatMap(([, t]) => t).find(([k]) => k === tab)?.[1] ?? "Configurações";
+  const title = GROUPS.some(([, tabs]) => tabs.includes(tab)) ? tabLabel(tab) : t("settings.title");
   return (
     <section className="page settings-page" data-testid="settings-page">
       <header className="page-head" data-tauri-drag-region><h2>{t("settings.title")}</h2></header>
@@ -29,8 +32,8 @@ export function SettingsView({ tab, repoId, repos, onError, onRoute }: { tab: st
         <nav className="settings-nav" data-testid="settings-nav">
           {GROUPS.map(([g, tabs]) => (
             <div key={g} className="settings-nav-group">
-              <div className="settings-nav-title">{g}</div>
-              {tabs.map(([k, v]) => <button key={k} className={"settings-nav-item" + (tab === k ? " on" : "")} onClick={() => onRoute({ kind: "settings", tab: k, repoId })} data-testid={`set-tab-${k}`}>{v}</button>)}
+              <div className="settings-nav-title">{t(g)}</div>
+              {tabs.map((k) => <button key={k} className={"settings-nav-item" + (tab === k ? " on" : "")} onClick={() => onRoute({ kind: "settings", tab: k, repoId })} data-testid={`set-tab-${k}`}>{tabLabel(k)}</button>)}
             </div>
           ))}
         </nav>
@@ -43,7 +46,7 @@ export function SettingsView({ tab, repoId, repos, onError, onRoute }: { tab: st
           {tab === "acoes" && <ActionsPage repos={repos} repoId={repoId} onError={onError} onRoute={onRoute} />}
           {tab === "diversos" && <MiscPage repos={repos} repoId={repoId} onError={onError} onRoute={onRoute} onChange={() => window.dispatchEvent(new Event("kabul:reload"))} />}
           {tab === "avancado" && <AdvancedPage onError={onError} />}
-          {tab === "contas" && <><GitHub onError={onError} /><Accounts onError={onError} /><h3>Várias contas por provedor</h3><AccountsPanel onError={onError} /></>}
+          {tab === "contas" && <><GitHub onError={onError} /><Accounts onError={onError} /><h3>{t("settings.accounts.multi")}</h3><AccountsPanel onError={onError} /></>}
           {tab === "git" && <GitSettings repos={repos} onError={onError} />}
           {tab === "integracoes" && <Integrations onError={onError} />}
           {tab === "repo" && <RepoSettings repos={repos} repoId={repoId ?? repos[0]?.id} onError={onError} onRoute={onRoute} />}
@@ -73,7 +76,7 @@ function Accounts({ onError }: { onError: (e: string) => void }) {
   }, []);
   return (
     <>
-      <p className="dim lead">O login usa o fluxo do próprio CLI. O Kabul só mostra a URL e repassa o código; tokens nunca são lidos.</p>
+      <p className="dim lead">{t("settings.accounts.lead")}</p>
       <div className="accounts">
         {st.map((a) => {
           const f = flows[a.kind];
@@ -81,11 +84,11 @@ function Accounts({ onError }: { onError: (e: string) => void }) {
             <div key={a.kind} className="account" data-testid="account">
               <div className="acc-head">
                 <b>{HARNESS_LABEL[a.kind]}</b>
-                <span className={"badge " + (a.error ? "bad" : a.logged_in ? "ok" : "")}>{a.error ? "erro" : !a.installed ? "não instalado" : a.logged_in ? "logado" : "não logado"}</span>
+                <span className={"badge " + (a.error ? "bad" : a.logged_in ? "ok" : "")}>{a.error ? t("common.error") : !a.installed ? t("settings.accounts.notInstalled") : a.logged_in ? t("settings.accounts.loggedIn") : t("settings.accounts.notLoggedIn")}</span>
               </div>
-              <div className="dim small">{a.error ?? [a.method, a.source].filter(Boolean).join(" · ")}</div>
-              {!a.installed ? <button className="btn" onClick={() => confirmDialog(`Instalar ${HARNESS_LABEL[a.kind]}? O comando roda numa sessão tmux visível no Painel.`).then((ok) => void (ok && api.installHarness(a.kind).then(() => onError(`Instalação de ${HARNESS_LABEL[a.kind]} iniciada (veja no Painel).`), (e) => onError(String(e)))))}>Instalar</button>
-                : !f && <button className="btn" onClick={() => ((restarts.current[a.kind] = 0), setFlows((x) => ({ ...x, [a.kind]: {} })), start(a.kind))} data-testid={`auth-login-${a.kind}`}>{a.logged_in ? "Entrar de novo" : "Entrar"}</button>}
+              <div className="dim small">{(a.error && trError(a.error)) ?? [a.method, a.source].filter(Boolean).join(" · ")}</div>
+              {!a.installed ? <button className="btn" onClick={() => confirmDialog(t("settings.accounts.installConfirm", { name: HARNESS_LABEL[a.kind] })).then((ok) => void (ok && api.installHarness(a.kind).then(() => onError(t("settings.accounts.installStarted", { name: HARNESS_LABEL[a.kind] })), (e) => onError(String(e)))))}>{t("settings.accounts.install")}</button>
+                : !f && <button className="btn" onClick={() => ((restarts.current[a.kind] = 0), setFlows((x) => ({ ...x, [a.kind]: {} })), start(a.kind))} data-testid={`auth-login-${a.kind}`}>{a.logged_in ? t("settings.accounts.signInAgain") : t("settings.accounts.signIn")}</button>}
               {f && (
                 <LoginFlow f={f} codeNow={a.kind === "antigravity"} timeout={a.kind === "antigravity" ? 60 : undefined}
                   onInput={(v) => setFlows((x) => ({ ...x, [a.kind]: { ...x[a.kind], input: v } }))}
@@ -109,36 +112,36 @@ function RepoSettings({ repos, repoId, onError, onRoute }: { repos: Repo[]; repo
   useEffect(() => {
     if (repoId) api.repoSettings(repoId).then((r) => (setS(r.settings), setLayers(r.layers)), (e) => onError(String(e)));
   }, [repoId, onError]);
-  if (!repos.length) return <p className="dim">Adicione um repositório primeiro.</p>;
+  if (!repos.length) return <p className="dim">{t("settings.repo.addFirst")}</p>;
   const repo = repos.find((r) => r.id === repoId);
   return (
     <div className="set-group" data-testid="repo-settings">
-      <div className="set-row"><div>Repositório</div><select value={repoId} onChange={(e) => onRoute({ kind: "settings", tab: "repo", repoId: e.target.value })}>{repos.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
-      {repo && <div className="dim small">{repo.path} · branch padrão {repo.default_branch}</div>}
-      <h3>Camadas de configuração</h3>
-      {layers.map((l) => <div key={l.path} className="layer"><span className={"dot " + (l.found ? "st-done" : "")} /> <b>{l.name}</b> <code>{l.path}</code> <span className="dim">{l.found ? "encontrado" : "—"}</span></div>)}
+      <div className="set-row"><div>{t("settings.repo.label")}</div><select value={repoId} onChange={(e) => onRoute({ kind: "settings", tab: "repo", repoId: e.target.value })}>{repos.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
+      {repo && <div className="dim small">{t("settings.repo.defaultBranch", { path: repo.path, branch: repo.default_branch })}</div>}
+      <h3>{t("settings.repo.layers")}</h3>
+      {layers.map((l) => <div key={l.path} className="layer"><span className={"dot " + (l.found ? "st-done" : "")} /> <b>{l.name}</b> <code>{l.path}</code> <span className="dim">{l.found ? t("settings.repo.found") : "—"}</span></div>)}
       {s && (
         <>
-          <h3>Scripts (salvos em settings.local.toml)</h3>
-          <label className="field">Setup <span className="dim small">roda ao criar o workspace, com as variáveis KABUL_* (KABUL_PORT, KABUL_WORKSPACE_PATH…)</span><input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={s.scripts.setup ?? ""} onChange={(e) => setS({ ...s, scripts: { ...s.scripts, setup: e.target.value || null } })} placeholder="ex.: npm install && cp ../.env ." /></label>
-          <label className="field">Archive <span className="dim small">roda antes de arquivar</span><input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={s.scripts.archive ?? ""} onChange={(e) => setS({ ...s, scripts: { ...s.scripts, archive: e.target.value || null } })} placeholder="ex.: docker compose down" /></label>
-          <label className="field">Modo dos run scripts<select value={s.scripts.run_mode ?? "concurrent"} onChange={(e) => setS({ ...s, scripts: { ...s.scripts, run_mode: e.target.value } })}><option value="concurrent">concorrente</option><option value="nonconcurrent">um por vez</option></select></label>
-          <div className="field">Run scripts</div>
+          <h3>{t("settings.repo.scripts")}</h3>
+          <label className="field">{t("settings.repo.setup")} <span className="dim small">{t("settings.repo.setup.hint")}</span><input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={s.scripts.setup ?? ""} onChange={(e) => setS({ ...s, scripts: { ...s.scripts, setup: e.target.value || null } })} placeholder={t("settings.repo.setup.placeholder")} /></label>
+          <label className="field">{t("settings.repo.archive")} <span className="dim small">{t("settings.repo.archive.hint")}</span><input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={s.scripts.archive ?? ""} onChange={(e) => setS({ ...s, scripts: { ...s.scripts, archive: e.target.value || null } })} placeholder={t("settings.repo.archive.placeholder")} /></label>
+          <label className="field">{t("settings.repo.runMode")}<select value={s.scripts.run_mode ?? "concurrent"} onChange={(e) => setS({ ...s, scripts: { ...s.scripts, run_mode: e.target.value } })}><option value="concurrent">{t("settings.repo.runMode.concurrent")}</option><option value="nonconcurrent">{t("settings.repo.runMode.nonconcurrent")}</option></select></label>
+          <div className="field">{t("settings.repo.runScripts")}</div>
           {Object.entries(s.scripts.run).map(([id, r]) => (
             <div key={id} className="row env-row">
               <code>{id}</code><input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={r.command} onChange={(e) => setS({ ...s, scripts: { ...s.scripts, run: { ...s.scripts.run, [id]: { ...r, command: e.target.value } } } })} />
-              <label className="check-row"><input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} type="radio" checked={r.default} onChange={() => setS({ ...s, scripts: { ...s.scripts, run: Object.fromEntries(Object.entries(s.scripts.run).map(([k, v]) => [k, { ...v, default: k === id }])) } })} /> padrão</label>
-              <button className="btn" onClick={() => { const run = { ...s.scripts.run }; delete run[id]; setS({ ...s, scripts: { ...s.scripts, run } }); }}>Remover</button>
+              <label className="check-row"><input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} type="radio" checked={r.default} onChange={() => setS({ ...s, scripts: { ...s.scripts, run: Object.fromEntries(Object.entries(s.scripts.run).map(([k, v]) => [k, { ...v, default: k === id }])) } })} /> {t("settings.repo.runDefault")}</label>
+              <button className="btn" onClick={() => { const run = { ...s.scripts.run }; delete run[id]; setS({ ...s, scripts: { ...s.scripts, run } }); }}>{t("common.remove")}</button>
             </div>
           ))}
           <div className="row env-row">
-            <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} placeholder="id (ex.: web)" value={newRun.id} onChange={(e) => setNewRun({ ...newRun, id: e.target.value })} />
-            <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} placeholder="comando (ex.: npm run dev -- --port $KABUL_PORT)" value={newRun.command} onChange={(e) => setNewRun({ ...newRun, command: e.target.value })} />
-            <button className="btn" disabled={!newRun.id || !newRun.command} onClick={() => { setS({ ...s, scripts: { ...s.scripts, run: { ...s.scripts.run, [newRun.id]: { command: newRun.command, default: !Object.keys(s.scripts.run).length, icon: null, available_in: null } } } }); setNewRun({ id: "", command: "" }); }}>Adicionar</button>
+            <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} placeholder={t("settings.repo.runId")} value={newRun.id} onChange={(e) => setNewRun({ ...newRun, id: e.target.value })} />
+            <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} placeholder={t("settings.repo.runCommand")} value={newRun.command} onChange={(e) => setNewRun({ ...newRun, command: e.target.value })} />
+            <button className="btn" disabled={!newRun.id || !newRun.command} onClick={() => { setS({ ...s, scripts: { ...s.scripts, run: { ...s.scripts.run, [newRun.id]: { command: newRun.command, default: !Object.keys(s.scripts.run).length, icon: null, available_in: null } } } }); setNewRun({ id: "", command: "" }); }}>{t("common.add")}</button>
           </div>
-          <label className="field">Arquivos ignorados a copiar para cada worktree <span className="dim small">além de .worktreeinclude e .env*</span><input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={s.file_include_globs.join(", ")} onChange={(e) => setS({ ...s, file_include_globs: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} placeholder="ex.: config/*.local.json" /></label>
-          <label className="field">Branch alvo (PR e diff)<input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={s.target_branch ?? ""} onChange={(e) => setS({ ...s, target_branch: e.target.value || null })} placeholder={repo?.default_branch} /></label>
-          <div className="row"><button className="btn primary" onClick={() => api.saveRepoSettings(repoId!, s).then(setSaved, (e) => onError(String(e)))} data-testid="save-repo-settings">Salvar</button>{saved && <span className="ok small">salvo em {saved}</span>}</div>
+          <label className="field">{t("settings.repo.include")} <span className="dim small">{t("settings.repo.include.hint")}</span><input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={s.file_include_globs.join(", ")} onChange={(e) => setS({ ...s, file_include_globs: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} placeholder={t("settings.repo.include.placeholder")} /></label>
+          <label className="field">{t("settings.repo.target")}<input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} value={s.target_branch ?? ""} onChange={(e) => setS({ ...s, target_branch: e.target.value || null })} placeholder={repo?.default_branch} /></label>
+          <div className="row"><button className="btn primary" onClick={() => api.saveRepoSettings(repoId!, s).then(setSaved, (e) => onError(String(e)))} data-testid="save-repo-settings">{t("common.save")}</button>{saved && <span className="ok small">{t("settings.repo.savedIn", { path: saved })}</span>}</div>
         </>
       )}
     </div>
@@ -153,7 +156,7 @@ function Shortcuts() {
   const [msg, setMsg] = useState<{ id: string; text: string } | null>(null);
   const [, bump] = useState(0);
   const n = q.toLowerCase();
-  const rows = SHORTCUTS.filter((x) => !n || `${effectiveKeys(x)} ${x[lang()]}`.toLowerCase().includes(n));
+  const rows = SHORTCUTS.filter((x) => !n || `${effectiveKeys(x)} ${shortcutLabel(x)}`.toLowerCase().includes(n));
   const ov = overrides();
   useEffect(() => {
     if (!rec) return;
@@ -163,9 +166,9 @@ function Shortcuts() {
       if (e.key === "Escape" && !e.metaKey && !e.ctrlKey) return setRec(null);
       const c = comboFromEvent(e);
       if (!c) return;
-      if (!c.meta && !c.ctrl && !c.alt) return setMsg({ id: rec, text: "Use ⌘, ⌃ ou ⌥ junto com a tecla." });
+      if (!c.meta && !c.ctrl && !c.alt) return setMsg({ id: rec, text: t("settings.shortcuts.needModifier") });
       const other = conflict(c, rec);
-      if (other) return setMsg({ id: rec, text: `Já usado por “${other[lang()]}”.` });
+      if (other) return setMsg({ id: rec, text: t("settings.shortcuts.usedBy", { name: shortcutLabel(other) }) });
       const s = SHORTCUTS.find((x) => x.id === rec)!;
       setOverride(rec, formatCombo(c) === s.keys ? null : formatCombo(c));
       setMsg(null);
@@ -177,29 +180,29 @@ function Shortcuts() {
   }, [rec]);
   return (
     <div data-testid="shortcuts">
-      <input {...noSuggest} autoComplete="off" autoFocus placeholder={t("shortcuts.search")} value={q} onChange={(e) => setQ(e.target.value)} data-testid="shortcuts-search" style={{ width: "100%", marginBottom: 10 }} />
+      <input {...noSuggest} autoComplete="off" autoFocus placeholder={t("settings.shortcuts.search")} value={q} onChange={(e) => setQ(e.target.value)} data-testid="shortcuts-search" style={{ width: "100%", marginBottom: 10 }} />
       {CATEGORIES.map((c) => {
         const list = rows.filter((x) => x.cat === c);
         return list.length ? (
           <div key={c}>
-            <h3>{t(`cat.${c}` as Key)}</h3>
+            <h3>{t(`settings.cat.${c}` as Key)}</h3>
             <table className="shortcuts"><tbody>{list.map((x) => (
               <tr key={x.id} data-testid={`sc-${x.id}`}>
                 <td>
                   {editable(x) ? (
-                    <button className={"kbd-btn" + (rec === x.id ? " rec" : "")} title="Clique e digite o novo atalho (Esc cancela)" onClick={() => (setRec(rec === x.id ? null : x.id), setMsg(null))} data-testid="sc-record">
-                      <kbd>{rec === x.id ? "Digite o atalho…" : effectiveKeys(x)}</kbd>
+                    <button className={"kbd-btn" + (rec === x.id ? " rec" : "")} title={t("settings.shortcuts.recordTitle")} onClick={() => (setRec(rec === x.id ? null : x.id), setMsg(null))} data-testid="sc-record">
+                      <kbd>{rec === x.id ? t("settings.shortcuts.recording") : effectiveKeys(x)}</kbd>
                     </button>
-                  ) : <kbd title="Atalho fixo">{x.keys}</kbd>}
+                  ) : <kbd title={t("settings.shortcuts.fixedTitle")}>{x.keys}</kbd>}
                 </td>
-                <td>{x[lang()]}{msg?.id === x.id && <div className="error small" data-testid="sc-conflict">{msg.text}</div>}</td>
-                <td className="sc-actions">{ov[x.id] && <button className="text-btn small" onClick={() => (setOverride(x.id, null), bump((v) => v + 1))} data-testid="sc-reset">Restaurar ({x.keys})</button>}{!editable(x) && <span className="dim small">fixo</span>}</td>
+                <td>{shortcutLabel(x)}{msg?.id === x.id && <div className="error small" data-testid="sc-conflict">{msg.text}</div>}</td>
+                <td className="sc-actions">{ov[x.id] && <button className="text-btn small" onClick={() => (setOverride(x.id, null), bump((v) => v + 1))} data-testid="sc-reset">{t("settings.shortcuts.reset", { keys: x.keys })}</button>}{!editable(x) && <span className="dim small">{t("settings.shortcuts.fixed")}</span>}</td>
               </tr>
             ))}</tbody></table>
           </div>
         ) : null;
       })}
-      {rows.length === 0 && <div className="dim">Nenhum atalho para “{q}”.</div>}
+      {rows.length === 0 && <div className="dim">{t("settings.shortcuts.none", { q })}</div>}
     </div>
   );
 }
@@ -225,19 +228,19 @@ function Integrations({ onError }: { onError: (e: string) => void }) {
   return (
     <div className="set-group" data-testid="integrations">
       <div className="account">
-        <div className="acc-head"><b>Linear</b><span className={"badge " + (st?.connected && !st.error ? "ok" : "")}>{st?.connected ? (st.error ? "erro" : "conectado") : "não conectado"}</span></div>
-        <div className="dim small">{st?.who ?? st?.error ?? "Crie workspaces a partir de issues, @mencione issues no chat e ligue o PR à issue. A chave fica no Keychain do macOS."}</div>
+        <div className="acc-head"><b>Linear</b><span className={"badge " + (st?.connected && !st.error ? "ok" : "")}>{st?.connected ? (st.error ? t("common.error") : t("settings.linear.connected")) : t("settings.linear.notConnected")}</span></div>
+        <div className="dim small">{st?.who ?? (st?.error && trError(st.error)) ?? t("settings.linear.lead")}</div>
         {st?.connected ? (
-          <button className="btn" onClick={() => api.linearDisconnect().then(load)}>Desconectar</button>
+          <button className="btn" onClick={() => api.linearDisconnect().then(load)}>{t("settings.linear.disconnect")}</button>
         ) : (
           <div className="row" style={{ width: "100%" }}>
-            <input type="password" placeholder="Chave de API pessoal (lin_api_…)" value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && connect()} style={{ flex: 1 }} />
-            <button className="btn primary" disabled={!key.trim() || busy} onClick={connect}>{busy ? "Conectando…" : "Conectar"}</button>
+            <input type="password" placeholder={t("settings.linear.keyPlaceholder")} value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && connect()} style={{ flex: 1 }} />
+            <button className="btn primary" disabled={!key.trim() || busy} onClick={connect}>{busy ? t("settings.linear.connecting") : t("settings.linear.connect")}</button>
           </div>
         )}
-        {!st?.connected && <a className="small" onClick={() => api.openExternal("https://linear.app/settings/account/security")}>Gerar uma chave em Linear › Configurações › Segurança ↗</a>}
+        {!st?.connected && <a className="small" onClick={() => api.openExternal("https://linear.app/settings/account/security")}>{t("settings.linear.generate")}</a>}
       </div>
-      <div className="dim small">OAuth do Linear: pendente (exige registrar o app Kabul no Linear); a chave pessoal dá o mesmo acesso de leitura de issues.</div>
+      <div className="dim small">{t("settings.linear.oauth")}</div>
     </div>
   );
 }
@@ -258,7 +261,7 @@ function GitHub({ onError }: { onError: (e: string) => void }) {
         else if (ev === "PedeCodigo") return n;
         else if ("Codigo" in ev) n.code = ev.Codigo;
         else if ("Url" in ev) n.url = ev.Url;
-        else if ("Erro" in ev) n.done = ev.Erro;
+        else if ("Erro" in ev) n.done = ev.Erro; // i18n-ignore: nome do evento do backend
         return n;
       });
       if (ev === "Ok") load();
@@ -267,37 +270,37 @@ function GitHub({ onError }: { onError: (e: string) => void }) {
   const active = acc?.find((a) => a.active);
   return (
     <div className="account gh-card" data-testid="github">
-      <div className="acc-head"><b>GitHub</b><span className={"badge " + (active?.ok ? "ok" : "")}>{acc === null ? "…" : active ? (active.ok ? `@${active.login}` : "token inválido") : "não conectado"}</span></div>
-      {active && <div className="dim small">Escopos: {active.scopes.join(", ") || "—"} · origem: {active.source}{tokenSet ? " · token pessoal ativo (GH_TOKEN)" : ""}</div>}
+      <div className="acc-head"><b>GitHub</b><span className={"badge " + (active?.ok ? "ok" : "")}>{acc === null ? "…" : active ? (active.ok ? `@${active.login}` : t("settings.github.invalidToken")) : t("settings.linear.notConnected")}</span></div>
+      {active && <div className="dim small">{t("settings.github.scopes", { scopes: active.scopes.join(", ") || "—", source: active.source })}{tokenSet ? t("settings.github.patActive") : ""}</div>}
       {acc && acc.length > 1 && (
         <div className="gh-accounts">
           {acc.map((a) => (
-            <div key={a.login} className="row"><span className={a.active ? "" : "dim"}>@{a.login}</span><span className="grow" />{a.active ? <span className="badge ok">ativa</span> : <button className="btn" onClick={() => api.githubSwitch(a.login).then(load, (e) => onError(String(e)))} data-testid="gh-switch">Usar esta conta</button>}</div>
+            <div key={a.login} className="row"><span className={a.active ? "" : "dim"}>@{a.login}</span><span className="grow" />{a.active ? <span className="badge ok">{t("settings.github.active")}</span> : <button className="btn" onClick={() => api.githubSwitch(a.login).then(load, (e) => onError(String(e)))} data-testid="gh-switch">{t("settings.github.useAccount")}</button>}</div>
           ))}
         </div>
       )}
       {!flow && (
         <div className="row">
-          <button className="btn" onClick={() => (setFlow({}), api.githubLogin().catch((e) => onError(String(e))))} data-testid="gh-login">{active ? "Trocar conta / adicionar conta" : "Entrar com gh"}</button>
+          <button className="btn" onClick={() => (setFlow({}), api.githubLogin().catch((e) => onError(String(e))))} data-testid="gh-login">{active ? t("settings.github.switch") : t("settings.github.login")}</button>
         </div>
       )}
       {flow && (
         <div className="flow">
-          {!flow.code && !flow.done && <div className="dim">iniciando gh auth login…</div>}
+          {!flow.code && !flow.done && <div className="dim">{t("settings.github.starting")}</div>}
           {flow.code && !flow.done && (
             <div className="gh-code">
-              <div className="dim small">1. Copie o código</div>
-              <div className="row"><code className="big-code" data-testid="gh-code">{flow.code}</code><button className="btn" onClick={() => navigator.clipboard.writeText(flow.code!)}>Copiar</button></div>
-              {flow.url && <div className="dim small">2. Abra <a onClick={() => api.openExternal(flow.url!)}>{flow.url}</a> e cole o código</div>}
+              <div className="dim small">{t("settings.github.step1")}</div>
+              <div className="row"><code className="big-code" data-testid="gh-code">{flow.code}</code><button className="btn" onClick={() => navigator.clipboard.writeText(flow.code!)}>{t("common.copy")}</button></div>
+              {flow.url && <div className="dim small">{tNode("settings.github.step2", { url: <a onClick={() => api.openExternal(flow.url!)}>{flow.url}</a> })}</div>}
             </div>
           )}
-          {flow.done && <div className={flow.done === "ok" ? "ok" : "error"}>{flow.done === "ok" ? "Conta conectada." : flow.done}</div>}
-          <button className="btn" onClick={() => (api.githubCancel().catch(() => {}), setFlow(null))}>{flow.done ? "Fechar" : "Cancelar"}</button>
+          {flow.done && <div className={flow.done === "ok" ? "ok" : "error"}>{flow.done === "ok" ? t("settings.github.connected") : trError(flow.done)}</div>}
+          <button className="btn" onClick={() => (api.githubCancel().catch(() => {}), setFlow(null))}>{flow.done ? t("common.close") : t("common.cancel")}</button>
         </div>
       )}
       <div className="row" style={{ width: "100%" }}>
-        <input type="password" placeholder={tokenSet ? "Token pessoal salvo no Keychain" : "Personal access token (opcional)"} value={token} onChange={(e) => setToken(e.target.value)} style={{ flex: 1 }} />
-        {token ? <button className="btn primary" onClick={() => api.githubToken(token).then(() => (setToken(""), load()), (e) => onError(String(e)))} data-testid="gh-token-save">Salvar token</button> : tokenSet && <button className="btn" onClick={() => api.githubToken(null).then(load)}>Remover token</button>}
+        <input type="password" placeholder={tokenSet ? t("settings.github.tokenSaved") : t("settings.github.tokenPlaceholder")} value={token} onChange={(e) => setToken(e.target.value)} style={{ flex: 1 }} />
+        {token ? <button className="btn primary" onClick={() => api.githubToken(token).then(() => (setToken(""), load()), (e) => onError(String(e)))} data-testid="gh-token-save">{t("settings.github.saveToken")}</button> : tokenSet && <button className="btn" onClick={() => api.githubToken(null).then(load)}>{t("settings.github.removeToken")}</button>}
       </div>
     </div>
   );
@@ -311,20 +314,20 @@ function Machines() {
   const save = (l: Machine[]) => (saveMachines(l), setList(l));
   return (
     <div className="set-group" data-testid="machines">
-      <p className="dim small">Cada máquina roda o <code>kabuld</code> e aparece no seletor do topo da barra lateral (⌃1…⌃9). Use o endereço do Tailscale, por exemplo <code>mac-de-dev.tailnet.ts.net:7777</code>. Trocar de máquina troca a fonte de repositórios e workspaces.</p>
-      <div className="set-row"><div><div>Este Mac</div><div className="dim small">backend local</div></div>{activeMachine() === "local" ? <span className="badge ok">ativa</span> : <button className="btn" onClick={() => switchMachine("local")}>Usar</button>}</div>
+      <p className="dim small">{tNode("settings.machines.lead", { kabuld: <code>kabuld</code>, example: <code>mac-de-dev.tailnet.ts.net:7777</code> })}</p>
+      <div className="set-row"><div><div>{t("settings.machines.thisMac")}</div><div className="dim small">{t("settings.machines.local")}</div></div>{activeMachine() === "local" ? <span className="badge ok">{t("settings.github.active")}</span> : <button className="btn" onClick={() => switchMachine("local")}>{t("common.use")}</button>}</div>
       {list.map((m) => (
         <div key={m.id} className="set-row" data-testid="machine-item">
           <div><div>{m.name}</div><div className="dim small"><code>{m.url}</code></div></div>
-          <div className="row">{activeMachine() === m.id ? <span className="badge ok">ativa</span> : <button className="btn" onClick={() => switchMachine(m.id)}>Usar</button>}<button className="btn" onClick={() => save(list.filter((x) => x.id !== m.id))}>Remover</button></div>
+          <div className="row">{activeMachine() === m.id ? <span className="badge ok">{t("settings.github.active")}</span> : <button className="btn" onClick={() => switchMachine(m.id)}>{t("common.use")}</button>}<button className="btn" onClick={() => save(list.filter((x) => x.id !== m.id))}>{t("common.remove")}</button></div>
         </div>
       ))}
-      {list.length === 0 && <div className="dim small" data-testid="machines-empty">Nenhuma outra máquina ainda.</div>}
-      <h3>Adicionar máquina</h3>
+      {list.length === 0 && <div className="dim small" data-testid="machines-empty">{t("settings.machines.empty")}</div>}
+      <h3>{t("settings.machines.add")}</h3>
       <div className="row env-row">
-        <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} placeholder="Nome (ex.: Mac do escritório)" value={name} onChange={(e) => setName(e.target.value)} data-testid="machine-name" />
-        <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} placeholder="Endereço (host:porta ou ws://…)" value={url} onChange={(e) => setUrl(e.target.value)} data-testid="machine-url" />
-        <button className="btn primary" disabled={!name.trim() || !url.trim()} onClick={() => (save([...list, { id: `m${Date.now().toString(36)}`, name: name.trim(), url: normalizeUrl(url) }]), setName(""), setUrl(""))} data-testid="machine-save">Adicionar</button>
+        <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} placeholder={t("settings.machines.name")} value={name} onChange={(e) => setName(e.target.value)} data-testid="machine-name" />
+        <input autoComplete="off" autoCorrect="off" spellCheck={false} {...noSuggest} placeholder={t("settings.machines.url")} value={url} onChange={(e) => setUrl(e.target.value)} data-testid="machine-url" />
+        <button className="btn primary" disabled={!name.trim() || !url.trim()} onClick={() => (save([...list, { id: `m${Date.now().toString(36)}`, name: name.trim(), url: normalizeUrl(url) }]), setName(""), setUrl(""))} data-testid="machine-save">{t("common.add")}</button>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n";
 import { api, type GrepHit, type Workspace } from "../api";
 import { noSuggest } from "../noSuggest";
 import { FileIcon, ISearch } from "../icons";
@@ -41,7 +42,7 @@ export function QuickOpen({ ws, onOpen, onClose }: { ws: Workspace; onOpen: (pat
   return (
     <Overlay onClose={onClose} testid="quick-open">
       <label className="pop-search"><ISearch />
-        <input ref={input} {...noSuggest} autoComplete="off" placeholder="Abrir arquivo…" value={q} onChange={(e) => (setQ(e.target.value), setSel(0))} data-testid="quick-open-input"
+        <input ref={input} {...noSuggest} autoComplete="off" placeholder={t("code.search.openFile")} value={q} onChange={(e) => (setQ(e.target.value), setSel(0))} data-testid="quick-open-input"
           onKeyDown={(e) => {
             if (e.key === "Escape") (e.stopPropagation(), onClose());
             if (e.key === "ArrowDown") (e.preventDefault(), setSel((s) => Math.min(s + 1, hits.length - 1)));
@@ -55,7 +56,7 @@ export function QuickOpen({ ws, onOpen, onClose }: { ws: Workspace; onOpen: (pat
           const dir = f.includes("/") ? f.slice(0, f.lastIndexOf("/")) : "";
           return <div key={f} className={"pop-row" + (k === sel ? " on" : "")} onMouseEnter={() => setSel(k)} onClick={() => pick(f)} data-testid="quick-open-row"><FileIcon name={f.split("/").pop()!} /><span className="label">{f.split("/").pop()}</span><span className="dim small">{dir}</span></div>;
         })}
-        {hits.length === 0 && <div className="pop-row dim">Nenhum arquivo para “{q}”</div>}
+        {hits.length === 0 && <div className="pop-row dim">{t("code.search.noFile", { q })}</div>}
       </div>
     </Overlay>
   );
@@ -70,20 +71,20 @@ export function SearchFiles({ ws, onOpen, onClose }: { ws: Workspace; onOpen: (p
   useEffect(() => input.current?.focus(), []);
   useEffect(() => {
     if (!q.trim()) return setHits(null);
-    const t = setTimeout(() => api.grep(ws.id, q).then((h) => (setHits(h), setSel(0)), () => setHits([])), 180);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => api.grep(ws.id, q).then((h) => (setHits(h), setSel(0)), () => setHits([])), 180);
+    return () => clearTimeout(timer);
   }, [q, ws.id]);
   const files = useMemo(() => [...new Set((hits ?? []).map((h) => h.path))], [hits]);
   const flat = hits ?? [];
   const pick = (h: GrepHit) => (onOpen(h.path, h.line), onClose());
-  const mark = (t: string) => {
-    const i = t.toLowerCase().indexOf(q.toLowerCase());
-    return i < 0 ? t : <>{t.slice(0, i)}<mark>{t.slice(i, i + q.length)}</mark>{t.slice(i + q.length)}</>;
+  const mark = (s: string) => {
+    const i = s.toLowerCase().indexOf(q.toLowerCase());
+    return i < 0 ? s : <>{s.slice(0, i)}<mark>{s.slice(i, i + q.length)}</mark>{s.slice(i + q.length)}</>;
   };
   return (
     <Overlay onClose={onClose} testid="search-files">
       <label className="pop-search"><ISearch />
-        <input ref={input} {...noSuggest} autoComplete="off" placeholder="Buscar nos arquivos…" value={q} onChange={(e) => setQ(e.target.value)} data-testid="search-files-input"
+        <input ref={input} {...noSuggest} autoComplete="off" placeholder={t("code.search.inFiles")} value={q} onChange={(e) => setQ(e.target.value)} data-testid="search-files-input"
           onKeyDown={(e) => {
             if (e.key === "Escape") (e.stopPropagation(), onClose());
             if (e.key === "ArrowDown") (e.preventDefault(), setSel((s) => Math.min(s + 1, flat.length - 1)));
@@ -93,7 +94,7 @@ export function SearchFiles({ ws, onOpen, onClose }: { ws: Workspace; onOpen: (p
       </label>
       <div className="pop-sep" />
       <div className="pop-list grep-list">
-        {hits && <div className="pop-title">{flat.length} resultado{flat.length === 1 ? "" : "s"} em {files.length} arquivo{files.length === 1 ? "" : "s"}</div>}
+        {hits && <div className="pop-title">{t("code.search.results", { count: flat.length, files: t("code.search.files", { count: files.length }) })}</div>}
         {files.map((f) => (
           <div key={f}>
             <div className="grep-file"><FileIcon name={f.split("/").pop()!} /> {f}</div>
@@ -104,7 +105,7 @@ export function SearchFiles({ ws, onOpen, onClose }: { ws: Workspace; onOpen: (p
             ))}
           </div>
         ))}
-        {hits && flat.length === 0 && <div className="pop-row dim">Nada encontrado para “{q}”</div>}
+        {hits && flat.length === 0 && <div className="pop-row dim">{t("code.search.nothing", { q })}</div>}
       </div>
     </Overlay>
   );

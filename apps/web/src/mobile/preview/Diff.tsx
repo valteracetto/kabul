@@ -3,8 +3,10 @@ import { highlight } from "../../components/Markdown";
 import { parseDiff } from "../../views/FileDiff";
 import { base, dir, files, type Change, type Scope } from "./api";
 import type { AskTarget, Selection } from "./Viewer";
+import { t } from "../../i18n";
+import { trError } from "../../i18n/errors";
 
-const SCOPES: [Scope, string][] = [["all", "Tudo"], ["uncommitted", "Não commitado"], ["branch", "Commits"]];
+const scopes = (): [Scope, string][] => [["all", t("mobile.pv.scope.all")], ["uncommitted", t("mobile.pv.scope.uncommitted")], ["branch", t("mobile.pv.scope.branch")]];
 
 /** "Alterações": arquivos mudados no workspace com +/−, por escopo. */
 export function ChangesList({ ws, scope, onScope, onOpen }: { ws: string; scope: Scope; onScope: (s: Scope) => void; onOpen: (c: Change) => void }) {
@@ -18,19 +20,19 @@ export function ChangesList({ ws, scope, onScope, onOpen }: { ws: string; scope:
   const total = (list ?? []).reduce((a, c) => [a[0] + (c.added ?? 0), a[1] + (c.removed ?? 0)], [0, 0]);
   return (
     <div className="pv-changes">
-      <div className="m-seg">{SCOPES.map(([s, l]) => <button key={s} className={scope === s ? "on" : ""} onClick={() => onScope(s)} data-testid={`pv-scope-${s}`}>{l}</button>)}</div>
-      {err && <div className="m-error">{err}</div>}
-      {!list && !err && <div className="pv-loading dim">Carregando…</div>}
-      {list && list.length === 0 && <div className="m-empty dim" data-testid="pv-no-changes">Nenhuma alteração neste escopo.</div>}
-      {list && list.length > 0 && <div className="dim small m-pad">{list.length} arquivo{list.length > 1 ? "s" : ""} · <span className="pv-add">+{total[0]}</span> <span className="pv-del">−{total[1]}</span></div>}
+      <div className="m-seg">{scopes().map(([s, l]) => <button key={s} className={scope === s ? "on" : ""} onClick={() => onScope(s)} data-testid={`pv-scope-${s}`}>{l}</button>)}</div>
+      {err && <div className="m-error">{trError(err)}</div>}
+      {!list && !err && <div className="pv-loading dim">{t("mobile.pv.loading")}</div>}
+      {list && list.length === 0 && <div className="m-empty dim" data-testid="pv-no-changes">{t("mobile.pv.noChanges")}</div>}
+      {list && list.length > 0 && <div className="dim small m-pad">{t("mobile.pv.filesCount", { count: list.length })} · <span className="pv-add">+{total[0]}</span> <span className="pv-del">−{total[1]}</span></div>}
       {list?.map((c) => (
         <button key={c.path} className="pv-row" onClick={() => onOpen(c)} data-testid="pv-change" data-path={c.path}>
-          <span className={"pv-badge" + (c.untracked ? " new" : "")}>{c.untracked ? "novo" : "M"}</span>
+          <span className={"pv-badge" + (c.untracked ? " new" : "")}>{c.untracked ? t("mobile.pv.new") : "M"}</span>
           <span className="pv-row-main">
             <b className="m-ellipsis">{base(c.path)}</b>
             {dir(c.path) && <span className="dim small m-ellipsis">{dir(c.path)}</span>}
           </span>
-          <span className="pv-nums small">{c.added === null ? <span className="dim">bin</span> : <><span className="pv-add">+{c.added}</span> <span className="pv-del">−{c.removed ?? 0}</span></>}</span>
+          <span className="pv-nums small">{c.added === null ? <span className="dim">{t("mobile.pv.bin")}</span> : <><span className="pv-add">+{c.added}</span> <span className="pv-del">−{c.removed ?? 0}</span></>}</span>
         </button>
       ))}
     </div>
@@ -53,8 +55,8 @@ export function DiffView({ ws, path, scope, onAsk, onOpenFile }: { ws: string; p
   }, [ws, path, scope]);
   const lines = useMemo(() => (d ? parseDiff(d) : []), [d]);
   const binary = !!d && /^Binary files /m.test(d);
-  if (err) return <div className="m-error">{err}</div>;
-  if (d === null) return <div className="pv-loading dim">Carregando…</div>;
+  if (err) return <div className="m-error">{trError(err)}</div>;
+  if (d === null) return <div className="pv-loading dim">{t("mobile.pv.loading")}</div>;
   const add = lines.filter((l) => l.kind === "a").length;
   const del = lines.filter((l) => l.kind === "d").length;
   const tap = (i: number) => setSel((s) => (!s ? { a: i, b: i } : s.a === s.b && i !== s.a ? { a: Math.min(s.a, i), b: Math.max(s.a, i) } : s.a === i && s.b === i ? null : { a: i, b: i }));
@@ -67,11 +69,11 @@ export function DiffView({ ws, path, scope, onAsk, onOpenFile }: { ws: string; p
       <div className="pv-bar">
         <span className="small"><span className="pv-add">+{add}</span> <span className="pv-del">−{del}</span></span>
         <span className="grow" />
-        <button className="m-btn small" onClick={() => setWrap((w) => !w)}>{wrap ? "Sem quebra" : "Quebrar linhas"}</button>
-        <button className="m-btn small" onClick={() => onOpenFile(sel ? firstNew : null)} data-testid="pv-diff-file">Ver arquivo</button>
+        <button className="m-btn small" onClick={() => setWrap((w) => !w)}>{wrap ? t("mobile.pv.noWrap") : t("mobile.pv.wrap")}</button>
+        <button className="m-btn small" onClick={() => onOpenFile(sel ? firstNew : null)} data-testid="pv-diff-file">{t("mobile.pv.viewFile")}</button>
       </div>
-      {binary && <div className="pv-note dim">Arquivo binário: sem diff de texto.</div>}
-      {!binary && lines.length === 0 && <div className="pv-note dim">Sem diferenças neste escopo.</div>}
+      {binary && <div className="pv-note dim">{t("mobile.pv.binary")}</div>}
+      {!binary && lines.length === 0 && <div className="pv-note dim">{t("mobile.pv.noDiff")}</div>}
       <div className="pv-diff" data-testid="pv-diff">
         {lines.map((l, i) =>
           l.kind === "h" ? (
@@ -87,9 +89,9 @@ export function DiffView({ ws, path, scope, onAsk, onOpenFile }: { ws: string; p
       </div>
       {sel && (
         <div className="pv-selbar" data-testid="pv-selbar">
-          <span className="grow">{chosen.length} linha{chosen.length === 1 ? "" : "s"} do diff</span>
-          {onAsk && <button className="m-btn small primary" onClick={() => onAsk({ path, a: firstNew, b: lastNew, text: asText })} data-testid="pv-ask">Perguntar no chat</button>}
-          <button className="m-btn small ghost" onClick={() => setSel(null)} aria-label="Limpar seleção">×</button>
+          <span className="grow">{t("mobile.pv.diffLines", { count: chosen.length })}</span>
+          {onAsk && <button className="m-btn small primary" onClick={() => onAsk({ path, a: firstNew, b: lastNew, text: asText })} data-testid="pv-ask">{t("mobile.pv.ask.title")}</button>}
+          <button className="m-btn small ghost" onClick={() => setSel(null)} aria-label={t("mobile.pv.clearSel")}>×</button>
         </div>
       )}
     </div>

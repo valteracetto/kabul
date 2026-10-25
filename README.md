@@ -237,9 +237,9 @@ you keep their behavior, their updates and your existing logins, settings and MC
 commands as your user (terminal and approvals), so only invite as editor someone you would let use your
 computer.
 
-**Is the interface in English?** Not yet. The app's interface is in Portuguese (Brazil) today; the
-English translation is in progress and the text is already centralized for it. These docs use the English
-names of menus and buttons, and the shortcuts are the same.
+**Is the interface in English?** Yes. The desktop app, the phone app, the menus and the notifications are in
+English and Portuguese (Brazil). Kabul follows the system language; to pick one, go to Settings › General ›
+Language (System, English or Português).
 
 **Is there a phone app in the stores?** Not yet. The phone app is a PWA you install from the browser; store
 builds are on the roadmap.

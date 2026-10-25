@@ -25,7 +25,10 @@ export function useModelPrefs(models: Model[]) {
     }
   }, [models]);
   const selected = models.find((m) => m.key === prefs.selected) ?? models[0] ?? null;
-  // Esforço válido para o modelo atual.
-  const effort = selected && selected.efforts.length ? (selected.efforts.includes(prefs.effort) ? prefs.effort : selected.efforts[0]) : null;
-  return { prefs, setPrefs, selected, effort };
+  return { prefs, setPrefs, selected, effort: selected ? effortFor(selected, prefs.effort) : null };
+}
+
+/** Esforço válido para o modelo (o preferido, se o modelo o aceita; senão o primeiro dele). */
+export function effortFor(m: Model, preferred: string): string | null {
+  return m.efforts.length ? (m.efforts.includes(preferred) ? preferred : m.efforts[0]) : null;
 }

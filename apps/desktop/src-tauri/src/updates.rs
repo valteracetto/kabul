@@ -53,9 +53,9 @@ fn friendly(e: impl std::fmt::Display) -> String {
     let s = e.to_string();
     let l = s.to_lowercase();
     if ["dns", "connect", "timed out", "timeout", "network", "offline", "resolve"].iter().any(|k| l.contains(k)) {
-        "Sem conexão com o servidor de atualizações; tente mais tarde.".into()
+        crate::i18n::tr("Sem conexão com o servidor de atualizações; tente mais tarde.", "Can't reach the update server; try again later.").into()
     } else {
-        format!("Não deu para procurar atualizações: {s}")
+        format!("{}: {s}", crate::i18n::tr("Não deu para procurar atualizações", "Couldn't check for updates"))
     }
 }
 
@@ -83,7 +83,7 @@ pub async fn update_check(handle: AppHandle, channel: Option<String>) -> Result<
 /// Baixa, confere a assinatura, instala e reinicia o app.
 #[tauri::command]
 pub async fn update_install(handle: AppHandle) -> Result<(), String> {
-    let update = handle.state::<Pending>().0.lock().unwrap().take().ok_or("Nenhuma atualização pendente; procure de novo.")?;
+    let update = handle.state::<Pending>().0.lock().unwrap().take().ok_or(crate::i18n::tr("Nenhuma atualização pendente; procure de novo.", "No pending update; check again."))?;
     update.download_and_install(|_, _| {}, || {}).await.map_err(friendly)?;
     handle.restart();
 }

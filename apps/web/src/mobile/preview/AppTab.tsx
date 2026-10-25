@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { canWrite } from "../kabuld";
 import { files, type PortState, type ProxyOpened } from "./api";
+import { t } from "../../i18n";
+import { tNode } from "../../i18n/react";
+import { trError } from "../../i18n/errors";
 
 /** Link do proxy com o host por onde este aparelho chegou (IP ou localhost); senão o IP da tailnet. */
 export function proxyLink(o: ProxyOpened, loc: { hostname: string } = location): string {
@@ -22,8 +25,8 @@ export function AppTab({ ws }: { ws: string }) {
   const load = useCallback(() => files.ports(ws).then(setSt, (e) => setErr(String(e?.message ?? e))), [ws]);
   useEffect(() => {
     load();
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
+    const iv = setInterval(load, 5000);
+    return () => clearInterval(iv);
   }, [load]);
   const open = async (port: number) => {
     setBusy(port);
@@ -44,23 +47,23 @@ export function AppTab({ ws }: { ws: string }) {
     }
   };
   const write = canWrite();
-  if (err && !st) return <div className="m-error">{err}</div>;
-  if (!st) return <div className="pv-loading dim">Carregando…</div>;
-  if (!st.base) return <div className="m-empty dim" data-testid="pv-app-noport">Este workspace não tem portas reservadas.</div>;
+  if (err && !st) return <div className="m-error">{trError(err)}</div>;
+  if (!st) return <div className="pv-loading dim">{t("mobile.pv.loading")}</div>;
+  if (!st.base) return <div className="m-empty dim" data-testid="pv-app-noport">{t("mobile.pv.app.noPorts")}</div>;
   const up = st.ports.filter((p) => p.listening);
   return (
     <div className="pv-app" data-testid="pv-app">
-      <p className="dim small m-pad">Portas do workspace: {st.base}–{st.base + st.ports.length - 1} (<code>$KABUL_PORT</code>). Rode o app pelo Run no computador e abra aqui. Ele abre em outro endereço, só para você.</p>
-      {up.length === 0 && <div className="m-empty dim" data-testid="pv-app-none">Nada rodando nas portas do workspace agora.</div>}
+      <p className="dim small m-pad">{tNode("mobile.pv.app.lead", { from: st.base, to: st.base + st.ports.length - 1, var: <code>$KABUL_PORT</code> })}</p>
+      {up.length === 0 && <div className="m-empty dim" data-testid="pv-app-none">{t("mobile.pv.app.none")}</div>}
       {st.ports.map((p) => (
         <div key={p.port} className={"pv-row" + (p.listening ? "" : " off")} data-testid="pv-port" data-port={p.port} data-listening={p.listening}>
-          <span className={"pv-badge" + (p.listening ? " new" : "")}>{p.listening ? "no ar" : "livre"}</span>
+          <span className={"pv-badge" + (p.listening ? " new" : "")}>{p.listening ? t("mobile.pv.app.up") : t("mobile.pv.app.free")}</span>
           <span className="pv-row-main"><b>:{p.port}</b>{links[p.port] && <a className="dim small m-ellipsis" href={links[p.port]} target="_blank" rel="noreferrer" data-testid="pv-port-link">{links[p.port]}</a>}</span>
-          {p.listening && write && <button className="m-btn small primary" disabled={busy === p.port} onClick={() => void open(p.port)} data-testid="pv-port-open">{busy === p.port ? "Abrindo…" : "Abrir"}</button>}
+          {p.listening && write && <button className="m-btn small primary" disabled={busy === p.port} onClick={() => void open(p.port)} data-testid="pv-port-open">{busy === p.port ? t("mobile.pv.app.opening") : t("common.open")}</button>}
         </div>
       ))}
-      {!write && <div className="dim small m-pad">Abrir o app é de quem edita: observadores só acompanham.</div>}
-      {err && <div className="m-error">{err}</div>}
+      {!write && <div className="dim small m-pad">{t("mobile.pv.app.observer")}</div>}
+      {err && <div className="m-error">{trError(err)}</div>}
     </div>
   );
 }

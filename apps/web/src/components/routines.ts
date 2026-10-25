@@ -3,6 +3,8 @@
  * 15 min) ou por evento do PR do workspace (checks falharam, PR com merge, comentário novo). Ficam no
  * aparelho e rodam enquanto o Kabul está aberto; cada execução abre uma conversa nova no workspace.
  */
+import { t, lazyRecord } from "../i18n";
+
 export type Trigger = { kind: "cron"; cron: string } | { kind: "pr"; event: "checks_failed" | "merged" | "comment" };
 export interface RoutineRun { at: number; why: string }
 export interface Routine { id: string; name: string; workspace: string; prompt: string; trigger: Trigger; enabled: boolean; runs: RoutineRun[]; seen?: { failing?: number; state?: string; comments?: number } }
@@ -17,7 +19,7 @@ export const loadRoutines = (): Routine[] => {
 };
 export const saveRoutines = (r: Routine[]) => (localStorage.setItem(KEY, JSON.stringify(r)), window.dispatchEvent(new Event("kabul:routines")));
 
-export const PR_EVENTS: Record<string, string> = { checks_failed: "Checks do PR falharam", merged: "PR com merge", comment: "Comentário novo no PR" };
+export const PR_EVENTS: Record<string, string> = lazyRecord(() => ({ checks_failed: t("app.routine.event.checks_failed"), merged: t("app.routine.event.merged"), comment: t("app.routine.event.comment") }));
 
 // Um campo do cron: asterisco, asterisco/n, a-b, a-b/n e listas com vírgula.
 function field(spec: string, min: number, max: number): Set<number> | null {
@@ -64,11 +66,11 @@ export function nextRuns(c: Cron, from: Date, n = 3): Date[] {
 /** Erro de validação do cron (formato ou intervalo menor que 15 min), ou null. */
 export function cronError(s: string): string | null {
   const c = parseCron(s);
-  if (!c) return "Cron inválido: use 5 campos (minuto hora dia mês dia-da-semana), ex. 0 9 * * 1-5";
+  if (!c) return t("app.routine.cronInvalid");
   const next = nextRuns(c, new Date(), 6);
-  if (!next.length) return "Esse cron não roda nos próximos dias";
-  for (let i = 1; i < next.length; i++) if (next[i].getTime() - next[i - 1].getTime() < 15 * 60_000) return "Intervalo mínimo de 15 minutos";
+  if (!next.length) return t("app.routine.cronNever");
+  for (let i = 1; i < next.length; i++) if (next[i].getTime() - next[i - 1].getTime() < 15 * 60_000) return t("app.routine.cronMin");
   return null;
 }
 
-export const describe = (t: Trigger) => (t.kind === "cron" ? `cron ${t.cron}` : PR_EVENTS[t.event]);
+export const describe = (tr: Trigger) => (tr.kind === "cron" ? `cron ${tr.cron}` : PR_EVENTS[tr.event]);

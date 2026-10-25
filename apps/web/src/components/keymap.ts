@@ -10,6 +10,7 @@ const KEY = "kabul.keybindings.v1";
 export interface Combo { meta: boolean; ctrl: boolean; alt: boolean; shift: boolean; key: string }
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+// i18n-ignore-next: "Espaço" é a notação guardada dos atalhos (localStorage), não texto traduzível.
 const NAMES: Record<string, string> = { Slash: "/", Comma: ",", Period: ".", BracketLeft: "[", BracketRight: "]", Semicolon: ";", Quote: "'", Backquote: "`", Minus: "−", Equal: "+", Backslash: "\\", Enter: "↵", Backspace: "⌫", Tab: "⇥", Escape: "Esc", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Space: "Espaço" };
 const CODES: Record<string, { code: string; key: string }> = Object.fromEntries(Object.entries(NAMES).map(([code, n]) => [n, { code, key: ({ "↵": "Enter", "⌫": "Backspace", "⇥": "Tab", Esc: "Escape", "↑": "ArrowUp", "↓": "ArrowDown", "←": "ArrowLeft", "→": "ArrowRight", "Espaço": " ", "−": "-", "+": "=" } as Record<string, string>)[n] ?? n }]));
 

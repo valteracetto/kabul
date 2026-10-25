@@ -1,5 +1,6 @@
 import type { Transport } from "./types";
 import { compat as compatOf, helloInfo, type Compat, type PeerInfo } from "../version";
+import { t } from "../i18n";
 
 /** Credencial de um aparelho pareado com um kabuld. */
 export interface Credential { device: string; key: string }
@@ -92,7 +93,7 @@ export function websocketTransport(url: string, cred?: Credential | (() => Crede
       }
       if (msg.channel === "revoked") {
         closed = true;
-        setState("revoked", "Acesso revogado pelo dono da máquina.");
+        setState("revoked", t("app.ws.revoked"));
         return;
       }
       if (msg.channel) subs.get(msg.channel)?.forEach((h) => h(msg.payload));
@@ -103,7 +104,7 @@ export function websocketTransport(url: string, cred?: Credential | (() => Crede
       }
     });
     sock.addEventListener("close", () => {
-      pending.forEach((p) => p.err("conexão com o kabuld caiu"));
+      pending.forEach((p) => p.err(t("app.ws.dropped")));
       pending.clear();
       if (closed) {
         if (st === "open" || st === "connecting") setState("closed");
@@ -131,7 +132,7 @@ export function websocketTransport(url: string, cred?: Credential | (() => Crede
         pending.set(id, { ok: ok as (v: unknown) => void, err });
         if (!send({ id, command, args })) {
           pending.delete(id);
-          err("sem conexão com o kabuld");
+          err(t("app.ws.offline"));
         }
       });
     },
@@ -154,7 +155,7 @@ export function websocketTransport(url: string, cred?: Credential | (() => Crede
     principal: () => who,
     machine: () => machine,
     server: () => server,
-    compat: () => (server ? compatOf(server, machine ? `O kabuld de ${machine}` : "O kabuld") : { kind: "ok" }),
+    compat: () => (server ? compatOf(server, machine ? t("app.compat.kabuldOf", { machine }) : t("app.compat.kabuld")) : { kind: "ok" }),
     state: () => st,
     lastError: () => lastErr,
     onState(h) {

@@ -1,3 +1,4 @@
+/* i18n-ignore-file: backend de mentira; os textos imitam dados e erros do backend (pt-BR). */
 import type { Transport } from "./types";
 
 /**
@@ -421,6 +422,7 @@ const handlers: Record<string, (a: any) => unknown> = {
   term_resize: () => undefined,
   term_close: () => undefined,
   // `__mock.holdModels`: a lista de modelos só chega quando o primeiro envio pede o checkpoint (corrida do envio).
+  // Com `"manual"`, só chega quando o teste chamar `__mock.releaseModels()` (ex.: depois da mensagem já estar na tela).
   models_list: () => {
     const m = (window as any).__mock;
     if (!m?.holdModels) return models;
@@ -683,7 +685,7 @@ if (typeof window !== "undefined" && (window as any).__kabulSeed) seedScale((win
 export const mockTransport: Transport = {
   async call<T>(command: string, args?: Record<string, unknown>) {
     ((window as any).__calls ??= []).push(command);
-    if (command === "checkpoint_create" && (window as any).__mock?.holdModels) ((window as any).__mock.holdModels = false, (window as any).__mock.releaseModels?.());
+    if (command === "checkpoint_create" && (window as any).__mock?.holdModels === true) ((window as any).__mock.holdModels = false, (window as any).__mock.releaseModels?.());
     const h = handlers[command];
     if (!h) throw new Error(`mock: comando desconhecido ${command}`);
     await new Promise((r) => setTimeout(r, 15));

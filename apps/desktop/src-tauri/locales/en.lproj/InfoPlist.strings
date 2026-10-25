@@ -1,0 +1,3 @@
+/* Info.plist strings in English (macOS picks them by the system language). */
+NSMicrophoneUsageDescription = "Kabul uses the microphone for dictation in the message field.";
+NSSpeechRecognitionUsageDescription = "Kabul transcribes dictation into the message field.";

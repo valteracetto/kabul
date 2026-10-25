@@ -3,6 +3,8 @@ import { highlight, Markdown } from "../../components/Markdown";
 import { base, fmtSize, joinRel, kindOf, looksBinary, PAGE, WHOLE_MAX, type FileInfo } from "./api";
 import { resolveCited, useFileInfo } from "./hooks";
 import { Zoomable } from "./Zoomable";
+import { t } from "../../i18n";
+import { trError } from "../../i18n/errors";
 
 export interface Selection { a: number; b: number }
 export interface AskTarget { path: string; a: number; b: number; text: string }
@@ -16,15 +18,15 @@ export interface AskTarget { path: string; a: number; b: number; text: string }
 export function Viewer({ ws, path, line, known, onOpen, onAsk }: { ws: string; path: string; line: number | null; known: Set<string> | null; onOpen: (p: string, line?: number | null) => void; onAsk?: (t: AskTarget) => void }) {
   const f = useFileInfo(ws, path);
   const [source, setSource] = useState(false);
-  if (f.err) return <div className="m-error" data-testid="pv-error">{f.err}</div>;
-  if (!f.info) return <div className="pv-loading dim" data-testid="pv-loading">Carregando…</div>;
+  if (f.err) return <div className="m-error" data-testid="pv-error">{trError(f.err)}</div>;
+  if (!f.info) return <div className="pv-loading dim" data-testid="pv-loading">{t("mobile.pv.loading")}</div>;
   const info = f.info;
   const kind = kindOf(path, info.mime);
   const big = info.size > WHOLE_MAX;
   const toggle = (label: string) => (
     <div className="pv-modes">
       <button className={!source ? "on" : ""} onClick={() => setSource(false)} data-testid="pv-mode-render">{label}</button>
-      <button className={source ? "on" : ""} onClick={() => setSource(true)} data-testid="pv-mode-source">Fonte</button>
+      <button className={source ? "on" : ""} onClick={() => setSource(true)} data-testid="pv-mode-source">{t("mobile.pv.source")}</button>
     </div>
   );
   const code = <CodeView key={path} f={f} path={path} line={line} onAsk={onAsk} />;
@@ -32,26 +34,26 @@ export function Viewer({ ws, path, line, known, onOpen, onAsk }: { ws: string; p
     case "image":
       return <ImageView info={info} path={path} />;
     case "svg":
-      return <>{toggle("Imagem")}{source ? code : <ImageView info={info} path={path} />}</>;
+      return <>{toggle(t("mobile.pv.image"))}{source ? code : <ImageView info={info} path={path} />}</>;
     case "pdf":
       return <FileCard info={info} path={path} what="PDF" open />;
     case "video":
     case "audio":
       return <MediaView f={f} kind={kind} path={path} />;
     case "binary":
-      return <FileCard info={info} path={path} what="Arquivo binário" />;
+      return <FileCard info={info} path={path} what={t("mobile.pv.binaryFile")} />;
     case "markdown":
-      return big ? code : <>{toggle("Renderizado")}{source ? code : <MarkdownView f={f} path={path} known={known} onOpen={onOpen} />}</>;
+      return big ? code : <>{toggle(t("mobile.pv.rendered"))}{source ? code : <MarkdownView f={f} path={path} known={known} onOpen={onOpen} />}</>;
     case "csv":
-      return big ? <>{tooBig("CSV")}{code}</> : <>{toggle("Tabela")}{source ? code : <CsvView f={f} path={path} />}</>;
+      return big ? <>{tooBig("CSV")}{code}</> : <>{toggle(t("mobile.pv.table"))}{source ? code : <CsvView f={f} path={path} />}</>;
     case "json":
-      return big ? <>{tooBig("JSON")}{code}</> : <>{toggle("Árvore")}{source ? code : <JsonView f={f} path={path} />}</>;
+      return big ? <>{tooBig("JSON")}{code}</> : <>{toggle(t("mobile.pv.tree"))}{source ? code : <JsonView f={f} path={path} />}</>;
     default:
       return code;
   }
 }
 
-const tooBig = (what: string) => <div className="pv-note dim small">{what} grande demais para formatar no celular: mostrando o texto em páginas.</div>;
+const tooBig = (what: string) => <div className="pv-note dim small">{t("mobile.pv.tooBig", { what })}</div>;
 
 type F = ReturnType<typeof useFileInfo>;
 
@@ -97,8 +99,8 @@ function CodeView({ f, path, line, onAsk }: { f: F; path: string; line: number |
       if (at === 0 && looksBinary(b)) return setBinary(true);
       // Arquivo encolheu no meio da leitura: para aqui.
       const end = at + b.length >= size || b.length === 0;
-      const t = carry.current + dec.current.decode(b, { stream: !end });
-      const parts = t.split("\n");
+      const chunk = carry.current + dec.current.decode(b, { stream: !end });
+      const parts = chunk.split("\n");
       carry.current = end ? "" : parts.pop() ?? "";
       if (end && parts.length > 1 && parts[parts.length - 1] === "") parts.pop();
       pos.current = end ? size : at + b.length;
@@ -133,42 +135,42 @@ function CodeView({ f, path, line, onAsk }: { f: F; path: string; line: number |
     io.observe(el);
     return () => io.disconnect();
   }, [more, loaded, size]);
-  if (f.info && binary) return <FileCard info={f.info} path={path} what="Arquivo binário" />;
+  if (f.info && binary) return <FileCard info={f.info} path={path} what={t("mobile.pv.binaryFile")} />;
   const tap = (n: number) => setSel((s) => (!s ? { a: n, b: n } : s.a === s.b && n !== s.a ? { a: Math.min(s.a, n), b: Math.max(s.a, n) } : s.a === n && s.b === n ? null : { a: n, b: n }));
   const shown = lines.length + (carry.current && loaded >= size ? 1 : 0);
   return (
     <div className={"pv-code-wrap" + (wrap ? " wrap" : "")}>
       <div className="pv-bar">
-        <span className="dim small" data-testid="pv-size">{fmtSize(size)} · {shown} linhas{loaded < size ? ` (de ${fmtSize(loaded)} lidos)` : ""}</span>
+        <span className="dim small" data-testid="pv-size">{fmtSize(size)} · {t("mobile.pv.linesCount", { count: shown })}{loaded < size ? t("mobile.pv.readOf", { size: fmtSize(loaded) }) : ""}</span>
         <span className="grow" />
-        <button className="m-btn small" onClick={() => setWrap((w) => !w)} data-testid="pv-wrap">{wrap ? "Sem quebra" : "Quebrar linhas"}</button>
+        <button className="m-btn small" onClick={() => setWrap((w) => !w)} data-testid="pv-wrap">{wrap ? t("mobile.pv.noWrap") : t("mobile.pv.wrap")}</button>
       </div>
-      {size === 0 && <div className="pv-note dim">Arquivo vazio.</div>}
+      {size === 0 && <div className="pv-note dim">{t("mobile.pv.empty")}</div>}
       <div className="pv-code" data-testid="pv-code">
         {lines.map((l, i) => {
           const n = i + 1;
           const on = sel && n >= sel.a && n <= sel.b;
           return (
             <div key={i} className={"pv-line" + (on ? " sel" : "")} data-line={n}>
-              <button className="pv-ln" onClick={() => tap(n)} aria-label={`Linha ${n}`}>{n}</button>
+              <button className="pv-ln" onClick={() => tap(n)} aria-label={t("mobile.pv.lineN", { n })}>{n}</button>
               <span className="pv-text">{l ? highlight(l.length > 4000 ? l.slice(0, 4000) + " …" : l) : " "}</span>
             </div>
           );
         })}
       </div>
       <div ref={sentinel} />
-      {err && <div className="m-error">{err}</div>}
+      {err && <div className="m-error">{trError(err)}</div>}
       {loaded < size && (
         <button className="m-btn pv-more" disabled={busy} onClick={() => void more()} data-testid="pv-more">
-          {busy ? "Carregando…" : `Carregar mais (faltam ${fmtSize(size - loaded)})`}
+          {busy ? t("mobile.pv.loading") : t("mobile.pv.loadMore", { size: fmtSize(size - loaded) })}
         </button>
       )}
       {sel && (
         <div className="pv-selbar" data-testid="pv-selbar">
-          <span className="grow">{sel.a === sel.b ? `Linha ${sel.a}` : `Linhas ${sel.a}–${sel.b}`}</span>
-          <button className="m-btn small" onClick={() => navigator.clipboard?.writeText(lines.slice(sel.a - 1, sel.b).join("\n")).catch(() => {})}>Copiar</button>
-          {onAsk && <button className="m-btn small primary" onClick={() => onAsk({ path, a: sel.a, b: sel.b, text: lines.slice(sel.a - 1, sel.b).join("\n") })} data-testid="pv-ask">Perguntar no chat</button>}
-          <button className="m-btn small ghost" onClick={() => setSel(null)} aria-label="Limpar seleção">×</button>
+          <span className="grow">{sel.a === sel.b ? t("mobile.pv.lineN", { n: sel.a }) : t("mobile.pv.linesAB", { a: sel.a, b: sel.b })}</span>
+          <button className="m-btn small" onClick={() => navigator.clipboard?.writeText(lines.slice(sel.a - 1, sel.b).join("\n")).catch(() => {})}>{t("common.copy")}</button>
+          {onAsk && <button className="m-btn small primary" onClick={() => onAsk({ path, a: sel.a, b: sel.b, text: lines.slice(sel.a - 1, sel.b).join("\n") })} data-testid="pv-ask">{t("mobile.pv.ask.title")}</button>}
+          <button className="m-btn small ghost" onClick={() => setSel(null)} aria-label={t("mobile.pv.clearSel")}>×</button>
         </div>
       )}
     </div>
@@ -179,8 +181,8 @@ function CodeView({ f, path, line, onAsk }: { f: F; path: string; line: number |
 
 function MarkdownView({ f, path, known, onOpen }: { f: F; path: string; known: Set<string> | null; onOpen: (p: string, line?: number | null) => void }) {
   const { text, err } = useWholeText(f);
-  if (err) return <div className="m-error">{err}</div>;
-  if (text === null) return <div className="pv-loading dim">Carregando…</div>;
+  if (err) return <div className="m-error">{trError(err)}</div>;
+  if (text === null) return <div className="pv-loading dim">{t("mobile.pv.loading")}</div>;
   const open = (href: string) => {
     const rel = joinRel(path, href);
     const hit = (rel && known?.has(rel) ? rel : null) ?? resolveCited(href, known) ?? rel;
@@ -199,9 +201,9 @@ function ImageView({ info, path }: { info: FileInfo; path: string }) {
         <img src={info.url} alt={base(path)} draggable={false} data-testid="pv-image" onLoad={(e) => setDims(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)} />
       </Zoomable>
       <div className="pv-bar">
-        <span className="dim small">{dims && `${dims} · `}{fmtSize(info.size)} · pinça para ampliar, dois toques para alternar</span>
+        <span className="dim small">{dims && `${dims} · `}{fmtSize(info.size)} · {t("mobile.pv.pinch")}</span>
         <span className="grow" />
-        <a className="m-btn small" href={info.url} download={base(path)}>Baixar</a>
+        <a className="m-btn small" href={info.url} download={base(path)}>{t("mobile.pv.download")}</a>
       </div>
     </div>
   );
@@ -224,7 +226,7 @@ function MediaView({ f, kind, path }: { f: F; kind: "video" | "audio"; path: str
   return (
     <div className="pv-media">
       {kind === "video" ? <video {...props} playsInline /> : <audio {...props} />}
-      <div className="pv-bar"><span className="dim small">{fmtSize(f.info!.size)}</span><span className="grow" /><a className="m-btn small" href={src} download={base(path)}>Baixar</a></div>
+      <div className="pv-bar"><span className="dim small">{fmtSize(f.info!.size)}</span><span className="grow" /><a className="m-btn small" href={src} download={base(path)}>{t("mobile.pv.download")}</a></div>
     </div>
   );
 }
@@ -238,10 +240,10 @@ function FileCard({ info, path, what, open }: { info: FileInfo; path: string; wh
       <b className="pv-card-name">{base(path)}</b>
       <div className="dim small" data-testid="pv-card-size">{what} · {fmtSize(info.size)} · <code>{info.mime}</code></div>
       <div className="row">
-        {open && <a className="m-btn primary" href={info.url} target="_blank" rel="noreferrer" data-testid="pv-open">Abrir</a>}
-        <a className="m-btn" href={info.url} download={base(path)} data-testid="pv-download">Baixar</a>
+        {open && <a className="m-btn primary" href={info.url} target="_blank" rel="noreferrer" data-testid="pv-open">{t("common.open")}</a>}
+        <a className="m-btn" href={info.url} download={base(path)} data-testid="pv-download">{t("mobile.pv.download")}</a>
       </div>
-      {open && <div className="dim small">Abre no visualizador do sistema (com zoom e busca).</div>}
+      {open && <div className="dim small">{t("mobile.pv.opensSystem")}</div>}
     </div>
   );
 }
@@ -275,19 +277,19 @@ function CsvView({ f, path }: { f: F; path: string }) {
   const { text, err } = useWholeText(f);
   const [limit, setLimit] = useState(300);
   const rows = useMemo(() => (text === null ? [] : parseCsv(text, sepFor(path, text.slice(0, text.indexOf("\n") >>> 0)))), [text, path]);
-  if (err) return <div className="m-error">{err}</div>;
-  if (text === null) return <div className="pv-loading dim">Carregando…</div>;
+  if (err) return <div className="m-error">{trError(err)}</div>;
+  if (text === null) return <div className="pv-loading dim">{t("mobile.pv.loading")}</div>;
   const [head, ...body] = rows;
   return (
     <div className="pv-csv">
-      <div className="pv-bar"><span className="dim small" data-testid="pv-csv-count">{body.length} linhas · {head?.length ?? 0} colunas</span></div>
+      <div className="pv-bar"><span className="dim small" data-testid="pv-csv-count">{t("mobile.pv.linesCount", { count: body.length })} · {t("mobile.pv.columnsCount", { count: head?.length ?? 0 })}</span></div>
       <div className="pv-table-wrap">
         <table className="pv-table" data-testid="pv-csv">
           <thead><tr><th className="pv-rn">#</th>{head?.map((h, i) => <th key={i}>{h}</th>)}</tr></thead>
           <tbody>{body.slice(0, limit).map((r, i) => <tr key={i}><td className="pv-rn">{i + 1}</td>{r.map((c, j) => <td key={j}>{c}</td>)}</tr>)}</tbody>
         </table>
       </div>
-      {body.length > limit && <button className="m-btn pv-more" onClick={() => setLimit((l) => l + 500)}>Mostrar mais ({body.length - limit} restantes)</button>}
+      {body.length > limit && <button className="m-btn pv-more" onClick={() => setLimit((l) => l + 500)}>{t("mobile.pv.showMore", { n: body.length - limit })}</button>}
     </div>
   );
 }
@@ -304,9 +306,9 @@ function JsonView({ f }: { f: F; path: string }) {
       return { ok: false as const, e: String((e as Error).message) };
     }
   }, [text]);
-  if (err) return <div className="m-error">{err}</div>;
-  if (!parsed) return <div className="pv-loading dim">Carregando…</div>;
-  if (!parsed.ok) return <><div className="pv-note dim small">JSON inválido ({parsed.e}): mostrando o texto.</div><pre className="pv-pre">{text}</pre></>;
+  if (err) return <div className="m-error">{trError(err)}</div>;
+  if (!parsed) return <div className="pv-loading dim">{t("mobile.pv.loading")}</div>;
+  if (!parsed.ok) return <><div className="pv-note dim small">{t("mobile.pv.badJson", { error: parsed.e })}</div><pre className="pv-pre">{text}</pre></>;
   return <div className="pv-json" data-testid="pv-json"><JsonNode k={null} v={parsed.v} depth={0} /></div>;
 }
 
@@ -325,7 +327,7 @@ function JsonNode({ k, v, depth }: { k: string | null; v: unknown; depth: number
       <summary>{summary}</summary>
       <div className="pv-jkids">
         {entries.slice(0, limit).map(([kk, vv]) => <JsonNode key={kk} k={kk} v={vv} depth={depth + 1} />)}
-        {entries.length > limit && <button className="m-btn small" onClick={() => setLimit((l) => l + 500)}>mais {entries.length - limit}</button>}
+        {entries.length > limit && <button className="m-btn small" onClick={() => setLimit((l) => l + 500)}>{t("mobile.pv.more", { n: entries.length - limit })}</button>}
       </div>
     </details>
   );

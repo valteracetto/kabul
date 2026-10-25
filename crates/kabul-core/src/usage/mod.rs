@@ -494,6 +494,22 @@ pub struct Alert {
     pub text: String,
     pub provider: Option<String>,
     pub account: Option<String>,
+    /// Campos para a interface montar o texto no idioma dela (`text` fica em português).
+    /// Limite: janela (`5h`, `semana`, `seven_day_opus`…), título, conta, % usado e segundos até reiniciar.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_label: Option<String>,
+    pub pct: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resets_in_secs: Option<u64>,
+    /// Orçamento: gasto e teto em US$.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spent_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_usd: Option<f64>,
 }
 
 pub fn alerts(lims: &[Limit], today_usd: f64, month_usd: f64, cfg: &AlertConfig, now: u64) -> Vec<Alert> {
@@ -508,6 +524,13 @@ pub fn alerts(lims: &[Limit], today_usd: f64, month_usd: f64, cfg: &AlertConfig,
             text: format!("{}{who}: {} em {:.0}%{}", limits::provider_label(&l.provider), l.title, l.used_pct, l.resets_at.map(|r| format!(", reinicia em {}", countdown(r.saturating_sub(now)))).unwrap_or_default()),
             provider: Some(l.provider.clone()),
             account: l.account.clone(),
+            window: Some(l.window.clone()),
+            title: Some(l.title.clone()),
+            account_label: l.account_label.clone(),
+            pct: l.used_pct,
+            resets_in_secs: l.resets_at.map(|r| r.saturating_sub(now)),
+            spent_usd: None,
+            budget_usd: None,
         });
     }
     let budget = |kind: &str, spent: f64, b: Option<f64>, what: &str, period: &str| {
@@ -520,6 +543,13 @@ pub fn alerts(lims: &[Limit], today_usd: f64, month_usd: f64, cfg: &AlertConfig,
             text: format!("Gasto {what}: US$ {spent:.2} de US$ {b:.2} ({pct:.0}%)"),
             provider: None,
             account: None,
+            window: None,
+            title: None,
+            account_label: None,
+            pct,
+            resets_in_secs: None,
+            spent_usd: Some(spent),
+            budget_usd: Some(b),
         })
     };
     let (d, mo) = (day_of(now, local_offset()), day_of(now, local_offset())[..7].to_string());

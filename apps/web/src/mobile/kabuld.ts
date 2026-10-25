@@ -2,6 +2,7 @@ import { transport } from "../transport";
 import type { Principal, WsTransport } from "../transport/websocket";
 import type { RunsOn } from "../components/RunsOn";
 import type { Model, Repo, Section, Workspace } from "../api";
+import { t, lazyRecord } from "../i18n";
 
 /** Opções de início/troca de modelo (mesmas do app desktop). */
 export interface StartOpts { effort?: string | null; fast?: boolean; account?: string | null; plan?: boolean }
@@ -10,7 +11,8 @@ export interface Account { id: string; provider: string; nickname: string; email
 /** Conta de cada harness (`accounts::provider_of` no core). */
 export const ACCOUNT_PROVIDER: Record<string, string> = { claude: "claude", codex: "codex", antigravity: "agy", gemini: "gemini", opencode: "opencode", qwen: "qwen" };
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"];
-export const EFFORT_PT: Record<string, string> = { low: "Baixo", medium: "Médio", high: "Alto", xhigh: "Muito alto", max: "Máximo", ultra: "Ultra" };
+/** Nome do esforço no idioma da tela (o nome ficou EFFORT_PT por histórico). */
+export const EFFORT_PT: Record<string, string> = lazyRecord(() => ({ low: t("mobile.effort.low"), medium: t("mobile.effort.medium"), high: t("mobile.effort.high"), xhigh: t("mobile.effort.xhigh"), max: t("mobile.effort.max"), ultra: t("mobile.effort.ultra") }));
 
 /** Versão e nome do kabuld (rota HTTP pública `/api/health`). */
 export const health = (): Promise<{ kabuld: boolean; name: string; version: string } | null> => fetch("/api/health").then((r) => r.json(), () => null).catch(() => null);
@@ -91,5 +93,5 @@ export const k = {
   pushTest: () => kcall<number>("push_test"),
 };
 
-export const STATUS_LABEL: Record<Status, string> = { working: "Trabalhando", waiting: "Esperando você", idle: "Ocioso" };
-export const AGENT_LABEL: Record<string, string> = { claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", agy: "Antigravity", opencode: "OpenCode", qwen: "Qwen Code", gemini: "Gemini CLI", shell: "Terminal", outro: "Processo" };
+export const STATUS_LABEL: Record<Status, string> = lazyRecord(() => ({ working: t("mobile.status.working"), waiting: t("mobile.status.waiting"), idle: t("mobile.status.idle") }));
+export const AGENT_LABEL: Record<string, string> = lazyRecord(() => ({ claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", agy: "Antigravity", opencode: "OpenCode", qwen: "Qwen Code", gemini: "Gemini CLI", shell: "Terminal", outro: t("mobile.agent.process") }));

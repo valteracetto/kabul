@@ -135,7 +135,7 @@ pub fn open_apps() -> Vec<AppSpec> {
     let pf = env("ProgramFiles").unwrap_or_else(|| PathBuf::from("C:\\Program Files"));
     let win = env("WINDIR").unwrap_or_else(|| PathBuf::from("C:\\Windows"));
     vec![
-        AppSpec::new("finder", "Explorador de Arquivos", "finder", vec![win.join("explorer.exe")]),
+        AppSpec::new("finder", crate::i18n::tr("Explorador de Arquivos", "File Explorer"), "finder", vec![win.join("explorer.exe")]),
         AppSpec::new("vscode", "VS Code", "editor", vec![local.join("Programs\\Microsoft VS Code\\Code.exe"), pf.join("Microsoft VS Code\\Code.exe")]),
         AppSpec::new("cursor", "Cursor", "editor", vec![local.join("Programs\\cursor\\Cursor.exe"), pf.join("Cursor\\Cursor.exe")]),
         AppSpec::new("windsurf", "Windsurf", "editor", vec![local.join("Programs\\Windsurf\\Windsurf.exe")]),
@@ -234,8 +234,12 @@ pub fn ensure_icons(_dir: &Path, _apps: &[(String, String)]) {}
 
 #[cfg(target_os = "macos")]
 pub fn pick(_app: &AppHandle, folder: bool) -> R<Option<String>> {
-    let script = if folder { "POSIX path of (choose folder with prompt \"Repositório git\")" } else { "POSIX path of (choose file with prompt \"Anexar ao chat\")" };
-    let o = Command::new("osascript").args(["-e", script]).output().map_err(e)?;
+    let script = if folder {
+        format!("POSIX path of (choose folder with prompt \"{}\")", crate::i18n::tr("Repositório git", "Git repository"))
+    } else {
+        format!("POSIX path of (choose file with prompt \"{}\")", crate::i18n::tr("Anexar ao chat", "Attach to chat"))
+    };
+    let o = Command::new("osascript").args(["-e", script.as_str()]).output().map_err(e)?;
     let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
     Ok((o.status.success() && !s.is_empty()).then_some(s))
 }
@@ -244,7 +248,7 @@ pub fn pick(_app: &AppHandle, folder: bool) -> R<Option<String>> {
 pub fn pick(app: &AppHandle, folder: bool) -> R<Option<String>> {
     use tauri_plugin_dialog::DialogExt;
     let d = app.dialog().file();
-    let chosen = if folder { d.set_title("Repositório git").blocking_pick_folder() } else { d.set_title("Anexar ao chat").blocking_pick_file() };
+    let chosen = if folder { d.set_title(crate::i18n::tr("Repositório git", "Git repository")).blocking_pick_folder() } else { d.set_title(crate::i18n::tr("Anexar ao chat", "Attach to chat")).blocking_pick_file() };
     Ok(chosen.and_then(|p| p.into_path().ok()).map(|p| p.display().to_string()))
 }
 

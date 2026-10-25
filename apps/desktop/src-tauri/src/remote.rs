@@ -100,7 +100,7 @@ pub async fn kabuld_stop(app: State<'_, crate::App>, remote: State<'_, Remote>) 
 /// O painel do desktop fala com o kabuld embutido como dono local.
 #[tauri::command]
 pub async fn kabuld_call(remote: State<'_, Remote>, command: String, args: Option<Value>) -> Result<Value, String> {
-    let hub = remote.server.lock().unwrap().as_ref().map(|s| s.hub.clone()).ok_or("o servidor está desligado")?;
+    let hub = remote.server.lock().unwrap().as_ref().map(|s| s.hub.clone()).ok_or(crate::i18n::tr("o servidor está desligado", "the server is off"))?;
     let owner = kabuld::auth::Principal::local_owner(&std::env::var("USER").unwrap_or_else(|_| "Você".into()));
     let args = args.unwrap_or(Value::Null);
     tauri::async_runtime::spawn_blocking(move || hub.call(&owner, 0, &command, &args)).await.map_err(|e| e.to_string())?.map_err(|e| format!("{e:#}"))

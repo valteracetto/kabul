@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { tNode } from "../i18n/react";
+import { t } from "../i18n";
 import { api, type AppSettings, type GitIdentity, type Repo, type RepoSettingsT } from "../api";
 import { noSuggest } from "../noSuggest";
 import { Row, Toggle, useAppSettings } from "./settingsUi";
@@ -9,7 +11,7 @@ export function GitSettings({ repos, onError }: { repos: Repo[]; onError: (e: st
   return (
     <div className="set-group" data-testid="git-settings">
       <div className="scope-seg" data-testid="git-scope">
-        <button className={"rtab" + (scope === "user" ? " on" : "")} onClick={() => setScope("user")}>Usuário</button>
+        <button className={"rtab" + (scope === "user" ? " on" : "")} onClick={() => setScope("user")}>{t("code.gs.user")}</button>
         {repos.map((r) => <button key={r.id} className={"rtab" + (scope === r.id ? " on" : "")} onClick={() => setScope(r.id)}>{r.name}</button>)}
       </div>
       {scope === "user" ? <UserGit onError={onError} /> : <RepoGit key={scope} repo={repos.find((r) => r.id === scope)!} onError={onError} />}
@@ -23,30 +25,30 @@ function UserGit({ onError }: { onError: (e: string) => void }) {
   const set = (p: Partial<AppSettings>) => save({ ...s, ...p });
   return (
     <>
-      <Row label="Prefixo da branch" hint={s.branch_prefix_type === "none" ? "Branches novas sem prefixo (só o nome)" : "Workspaces nascem em <prefixo>/<nome>"}>
+      <Row label={t("code.gs.prefix")} hint={s.branch_prefix_type === "none" ? t("code.gs.prefix.hintNone") : t("code.gs.prefix.hint")}>
         <div className="row">
           <select value={s.branch_prefix_type} onChange={(e) => set({ branch_prefix_type: e.target.value })} data-testid="git-prefix">
-            <option value="github">Usuário do GitHub (padrão)</option><option value="user">Usuário deste computador</option><option value="custom">Personalizado</option><option value="none">Nenhum</option>
+            <option value="github">{t("code.gs.prefix.github")}</option><option value="user">{t("code.gs.prefix.user")}</option><option value="custom">{t("code.gs.prefix.custom")}</option><option value="none">{t("common.none")}</option>
           </select>
           {s.branch_prefix_type === "custom" && <input {...noSuggest} autoComplete="off" defaultValue={s.branch_prefix_custom} onBlur={(e) => set({ branch_prefix_custom: e.target.value })} placeholder="feature/" data-testid="git-prefix-custom" />}
         </div>
       </Row>
-      <Toggle s={s} save={save} k="auto_rename_branch" label="Renomear branches novas automaticamente" hint="Pela primeira mensagem, enquanto a branch tiver o nome gerado" />
-      <Toggle s={s} save={save} k="rename_ws_on_branch" label="Renomear o workspace quando a branch ganhar nome" hint="O título do workspace acompanha a branch (se você não deu um título)" />
-      <Toggle s={s} save={save} k="delete_branch_on_archive" label="Apagar a branch ao arquivar" hint="A branch local é apagada. Sem push, os commits só voltam ao desarquivar (pelo checkpoint); depois de limpar os checkpoints, não há como recuperar." danger />
-      <Toggle s={s} save={save} k="archive_on_merge" label="Arquivar ao fazer merge" hint="Depois do merge do PR pelo Kabul, o workspace é arquivado" />
-      <Row label="Método de merge" hint="Usado pelo botão Merge e pelo auto-merge">
-        <select value={s.merge_method ?? "squash"} onChange={(e) => set({ merge_method: e.target.value })} data-testid="git-merge-method"><option value="squash">Squash</option><option value="merge">Merge commit</option><option value="rebase">Rebase</option></select>
+      <Toggle s={s} save={save} k="auto_rename_branch" label={t("code.gs.autoRename")} hint={t("code.gs.autoRename.hint")} />
+      <Toggle s={s} save={save} k="rename_ws_on_branch" label={t("code.gs.renameWs")} hint={t("code.gs.renameWs.hint")} />
+      <Toggle s={s} save={save} k="delete_branch_on_archive" label={t("code.gs.deleteBranch")} hint={t("code.gs.deleteBranch.hint")} danger />
+      <Toggle s={s} save={save} k="archive_on_merge" label={t("code.gs.archiveOnMerge")} hint={t("code.gs.archiveOnMerge.hint")} />
+      <Row label={t("code.gs.mergeMethod")} hint={t("code.gs.mergeMethod.hint")}>
+        <select value={s.merge_method ?? "squash"} onChange={(e) => set({ merge_method: e.target.value })} data-testid="git-merge-method"><option value="squash">{t("code.gs.merge.squash")}</option><option value="merge">{t("code.gs.merge.merge")}</option><option value="rebase">{t("code.gs.merge.rebase")}</option></select>
       </Row>
-      <Toggle s={s} save={save} k="automerge" label="Automerge" hint="Liga o auto-merge do GitHub ao criar o PR (gh pr merge --auto)" />
-      <Toggle s={s} save={save} k="optional_checks_blocking" label="Tratar checks opcionais como bloqueantes" hint="Sem isso, só checks obrigatórios que falham pedem “Corrigir erros” antes do merge" />
-      <Toggle s={s} save={save} k="push_set_upstream" label="Gravar o upstream no push" hint="git push -u <remote> HEAD" />
-      <Toggle s={s} save={save} k="stacked_prs" label="Usar PRs empilhados" hint="O formulário de PR aceita empilhar sobre outro PR (a base vira a branch dele)" />
-      <Row label="Abrir PRs em" hint="Destino de “Abrir PR” (⌘⇧G)">
-        <select value={s.open_prs_in ?? "github"} onChange={(e) => set({ open_prs_in: e.target.value })} data-testid="git-open-in"><option value="github">GitHub</option><option value="linear">Linear (issue ligada)</option><option value="graphite">Graphite</option></select>
+      <Toggle s={s} save={save} k="automerge" label={t("code.gs.automerge")} hint={t("code.gs.automerge.hint")} />
+      <Toggle s={s} save={save} k="optional_checks_blocking" label={t("code.gs.optionalBlocking")} hint={t("code.gs.optionalBlocking.hint")} />
+      <Toggle s={s} save={save} k="push_set_upstream" label={t("code.gs.setUpstream")} hint={t("code.gs.setUpstream.hint")} />
+      <Toggle s={s} save={save} k="stacked_prs" label={t("code.gs.stacked")} hint={t("code.gs.stacked.hint")} />
+      <Row label={t("code.gs.openPrsIn")} hint={t("code.gs.openPrsIn.hint")}>
+        <select value={s.open_prs_in ?? "github"} onChange={(e) => set({ open_prs_in: e.target.value })} data-testid="git-open-in"><option value="github">GitHub</option><option value="linear">{t("code.gs.openPrsIn.linear")}</option><option value="graphite">{"Graphite" /* i18n-ignore: marca */}</option></select>
       </Row>
-      <Toggle s={s} save={save} k="pr_include_workspace_link" label="Incluir o link do workspace na descrição do PR" hint="Acrescenta “Criado no Kabul” com o link kabul://" />
-      <Toggle s={s} save={save} k="github_dry_run" label="Simular ações do GitHub" hint="Push, merge, ready e re-run só mostram os comandos (para testar sem enviar nada)" />
+      <Toggle s={s} save={save} k="pr_include_workspace_link" label={t("code.gs.wsLink")} hint={t("code.gs.wsLink.hint")} />
+      <Toggle s={s} save={save} k="github_dry_run" label={t("code.gs.dryRun")} hint={t("code.gs.dryRun.hint")} />
     </>
   );
 }
@@ -75,40 +77,40 @@ function RepoGit({ repo, onError }: { repo: Repo; onError: (e: string) => void }
   const local = branches.filter((b) => !b.includes("/") || !remotes.some((r) => b.startsWith(r + "/")));
   return (
     <>
-      <div className="dim small">Salvo em <code>.kabul/settings.local.toml</code> deste repositório; vale só para ele. {saved && <span className="ok">salvo</span>}</div>
-      <Row label="Branch base dos workspaces novos" hint={`Padrão: ${repo.default_branch}`}>
+      <div className="dim small">{tNode("code.gs.savedIn", { file: <code>.kabul/settings.local.toml</code> })} {saved && <span className="ok">{t("code.gs.saved")}</span>}</div>
+      <Row label={t("code.gs.base")} hint={t("code.gs.defaultIs", { branch: repo.default_branch })}>
         <select value={s.base_branch ?? ""} onChange={(e) => save({ base_branch: e.target.value || null })} data-testid="git-base">
-          <option value="">{repo.default_branch} (padrão)</option>
+          <option value="">{t("code.gs.defaultOpt", { name: repo.default_branch })}</option>
           {local.filter((b) => b !== repo.default_branch).map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
       </Row>
-      <Row label="Remote" hint="Base, alvo, push e PR usam este remote">
+      <Row label={t("code.gs.remote")} hint={t("code.gs.remote.hint")}>
         <select value={s.remote ?? ""} onChange={(e) => save({ remote: e.target.value || null })} data-testid="git-remote">
-          <option value="">origin (padrão)</option>
+          <option value="">{t("code.gs.defaultOpt", { name: "origin" })}</option>
           {remotes.filter((r) => r !== "origin").map((r) => <option key={r} value={r}>{r}</option>)}
-          {remotes.length === 0 && <option disabled>Nenhum remote encontrado</option>}
+          {remotes.length === 0 && <option disabled>{t("code.gs.noRemote")}</option>}
         </select>
       </Row>
-      <Row label="Branch alvo (PR e diff)" hint={`Padrão: ${repo.default_branch}`}>
+      <Row label={t("code.gs.target")} hint={t("code.gs.defaultIs", { branch: repo.default_branch })}>
         <select value={s.target_branch ?? ""} onChange={(e) => save({ target_branch: e.target.value || null })} data-testid="git-target">
-          <option value="">{repo.default_branch} (padrão)</option>
+          <option value="">{t("code.gs.defaultOpt", { name: repo.default_branch })}</option>
           {local.filter((b) => b !== repo.default_branch).map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
       </Row>
-      <Row label="Apagar a branch ao arquivar" hint="Sobrescreve a opção do usuário neste repositório">
-        <select value={tri(s.delete_branch_on_archive)} onChange={(e) => save({ delete_branch_on_archive: fromTri(e.target.value) })} data-testid="git-repo-delete"><option value="">Herdar do usuário</option><option value="1">Sim</option><option value="0">Não</option></select>
+      <Row label={t("code.gs.deleteBranch")} hint={t("code.gs.overrides")}>
+        <select value={tri(s.delete_branch_on_archive)} onChange={(e) => save({ delete_branch_on_archive: fromTri(e.target.value) })} data-testid="git-repo-delete"><option value="">{t("code.gs.inherit")}</option><option value="1">{t("common.yes")}</option><option value="0">{t("common.no")}</option></select>
       </Row>
-      <Row label="Arquivar ao fazer merge" hint="Sobrescreve a opção do usuário neste repositório">
-        <select value={tri(s.archive_on_merge)} onChange={(e) => save({ archive_on_merge: fromTri(e.target.value) })} data-testid="git-repo-archive"><option value="">Herdar do usuário</option><option value="1">Sim</option><option value="0">Não</option></select>
+      <Row label={t("code.gs.archiveOnMerge")} hint={t("code.gs.overrides")}>
+        <select value={tri(s.archive_on_merge)} onChange={(e) => save({ archive_on_merge: fromTri(e.target.value) })} data-testid="git-repo-archive"><option value="">{t("code.gs.inherit")}</option><option value="1">{t("common.yes")}</option><option value="0">{t("common.no")}</option></select>
       </Row>
-      <h3>Identidade do git</h3>
+      <h3>{t("code.gs.identity")}</h3>
       {id && (
         <div className="git-identity" data-testid="git-identity">
-          <div className="dim small">{id.scope === "repo" ? "Definida neste repositório (vale para todos os workspaces dele)." : `Usando a identidade global${id.global_name ? ` (${id.global_name} <${id.global_email}>)` : ""}.`}</div>
+          <div className="dim small">{id.scope === "repo" ? t("code.gs.identity.repo") : id.global_name ? t("code.gs.identity.globalNamed", { who: `${id.global_name} <${id.global_email}>` }) : t("code.gs.identity.global")}</div>
           <div className="row env-row">
-            <input {...noSuggest} autoComplete="off" defaultValue={id.scope === "repo" ? id.name : ""} placeholder={id.global_name || "Nome"} id="git-id-name" data-testid="git-id-name" />
-            <input {...noSuggest} autoComplete="off" defaultValue={id.scope === "repo" ? id.email : ""} placeholder={id.global_email || "e-mail"} id="git-id-email" data-testid="git-id-email" />
-            <button className="btn" onClick={() => api.gitIdentitySet(repo.id, (document.getElementById("git-id-name") as HTMLInputElement).value, (document.getElementById("git-id-email") as HTMLInputElement).value).then(setId, (e) => onError(String(e)))} data-testid="git-id-save">Salvar</button>
+            <input {...noSuggest} autoComplete="off" defaultValue={id.scope === "repo" ? id.name : ""} placeholder={id.global_name || t("code.gs.identity.name")} id="git-id-name" data-testid="git-id-name" />
+            <input {...noSuggest} autoComplete="off" defaultValue={id.scope === "repo" ? id.email : ""} placeholder={id.global_email || t("code.gs.identity.email")} id="git-id-email" data-testid="git-id-email" />
+            <button className="btn" onClick={() => api.gitIdentitySet(repo.id, (document.getElementById("git-id-name") as HTMLInputElement).value, (document.getElementById("git-id-email") as HTMLInputElement).value).then(setId, (e) => onError(String(e)))} data-testid="git-id-save">{t("common.save")}</button>
           </div>
         </div>
       )}

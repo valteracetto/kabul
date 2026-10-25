@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n";
 import { Floating } from "../components/Floating";
 import { api, type DiffComment, type DiffScope, type Workspace } from "../api";
 import { IChevronDown, IComment } from "../icons";
@@ -123,23 +124,23 @@ export function FileDiff({ ws, path, scope = "all", files = [], active = true, o
   // Blocos sempre desenhados: os que têm comentário ou a caixa de comentar aberta (⌥⌘J/K e foco funcionam).
   const marked = new Set([...comments.map((c) => c.line), ...(composing != null ? [composing] : [])]);
   const pinOf = (list: (number | null | undefined)[]) => [...new Set(list.flatMap((n, i) => (n != null && marked.has(n) ? [Math.floor(i / CHUNK)] : [])))];
-  const sendToAgent = () => window.dispatchEvent(new CustomEvent("kabul:compose", { detail: { ws: ws.id, text: "Revise estes comentários no diff:\n" + open.map((c) => `- ${c.path}:${c.line} — ${c.body}`).join("\n") } }));
+  const sendToAgent = () => window.dispatchEvent(new CustomEvent("kabul:compose", { detail: { ws: ws.id, text: t("code.diff.reviewComments") + "\n" + open.map((c) => `- ${c.path}:${c.line} — ${c.body}`).join("\n") } }));
   const setPref = (k: string, v: string, f: (x: never) => void) => (localStorage.setItem(k, v), f(v as never));
-  const code = (t: string) => (t ? highlight(t) : " ");
-  const lnCell = (n: number | null, cls = "") => <span className={"ln" + (n ? " can" : "") + cls} title={n ? "Comentar nesta linha" : undefined} onClick={() => n && (setComposing(n), setBody(""))}>{n ?? ""}</span>;
+  const code = (s: string) => (s ? highlight(s) : " ");
+  const lnCell = (n: number | null, cls = "") => <span className={"ln" + (n ? " can" : "") + cls} title={n ? t("code.diff.commentLine") : undefined} onClick={() => n && (setComposing(n), setBody(""))}>{n ?? ""}</span>;
   const extras = (n: number | null) => n == null ? null : (
     <>
       {comments.filter((c) => c.line === n).map((c) => (
         <div key={c.id} className={"comment" + (c.resolved ? " resolved" : "")} data-testid="diff-comment">
           <IComment size={12} /> <span>{c.body}</span><span className="grow" />
-          <button className="text-btn small" onClick={() => api.updateComment(c.id, !c.resolved).then(load)}>{c.resolved ? "reabrir" : "resolver"}</button>
-          <button className="text-btn small" onClick={() => api.updateComment(c.id, null, true).then(load)}>apagar</button>
+          <button className="text-btn small" onClick={() => api.updateComment(c.id, !c.resolved).then(load)}>{c.resolved ? t("code.diff.reopen") : t("code.diff.resolve")}</button>
+          <button className="text-btn small" onClick={() => api.updateComment(c.id, null, true).then(load)}>{t("code.diff.delete")}</button>
         </div>
       ))}
       {composing === n && (
         <div className="comment-box">
-          <textarea autoFocus rows={2} value={body} onChange={(e) => setBody(e.target.value)} placeholder={`Comentário para o agente na linha ${n}`} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || !e.shiftKey)) { e.preventDefault(); add(); } if (e.key === "Escape") (e.stopPropagation(), setComposing(null)); }} />
-          <div className="row end"><button className="btn" onClick={() => setComposing(null)}>Cancelar</button><button className="btn primary" onClick={add}>Comentar</button></div>
+          <textarea autoFocus rows={2} value={body} onChange={(e) => setBody(e.target.value)} placeholder={t("code.diff.commentPlaceholder", { line: n })} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || !e.shiftKey)) { e.preventDefault(); add(); } if (e.key === "Escape") (e.stopPropagation(), setComposing(null)); }} />
+          <div className="row end"><button className="btn" onClick={() => setComposing(null)}>{t("common.cancel")}</button><button className="btn primary" onClick={add}>{t("code.diff.comment")}</button></div>
         </div>
       )}
     </>
@@ -148,29 +149,29 @@ export function FileDiff({ ws, path, scope = "all", files = [], active = true, o
   return (
     <div className={"filediff" + (wrap ? " wrap" : "") + (isViewed ? " viewed" : "")} ref={root} tabIndex={-1} data-testid="filediff">
       <div className="fd-head">
-        <button className="icon-btn" title="Arquivo anterior (↑)" disabled={idx <= 0} onClick={() => go(-1)} data-testid="diff-prev">↑</button>
-        <button className="icon-btn" title="Próximo arquivo (↓)" disabled={idx < 0 || idx >= files.length - 1} onClick={() => go(1)} data-testid="diff-next">↓</button>
+        <button className="icon-btn" title={t("code.diff.prevFile")} disabled={idx <= 0} onClick={() => go(-1)} data-testid="diff-prev">↑</button>
+        <button className="icon-btn" title={t("code.diff.nextFile")} disabled={idx < 0 || idx >= files.length - 1} onClick={() => go(1)} data-testid="diff-next">↓</button>
         <code>{path}</code>{files.length > 1 && idx >= 0 && <span className="dim small">{idx + 1}/{files.length}</span>}
         <span className="grow" />
-        {open.length > 0 && <button className="btn" onClick={sendToAgent}><IComment size={13} /> Enviar {open.length} comentário{open.length > 1 ? "s" : ""} ao agente</button>}
+        {open.length > 0 && <button className="btn" onClick={sendToAgent}><IComment size={13} /> {t("code.diff.sendComments", { count: open.length })}</button>}
         <div className="seg-mini" data-testid="diff-mode">
-          <button className={mode === "unified" ? "on" : ""} onClick={() => setPref("kabul.diff.mode", "unified", setMode)}>Unificado</button>
-          <button className={mode === "split" ? "on" : ""} onClick={() => setPref("kabul.diff.mode", "split", setMode)} data-testid="diff-split">Lado a lado</button>
+          <button className={mode === "unified" ? "on" : ""} onClick={() => setPref("kabul.diff.mode", "unified", setMode)}>{t("code.diff.unified")}</button>
+          <button className={mode === "split" ? "on" : ""} onClick={() => setPref("kabul.diff.mode", "split", setMode)} data-testid="diff-split">{t("code.diff.split")}</button>
         </div>
         <div className="picker" ref={opts.ref}>
-          <button className={"btn" + (opts.open ? " on" : "")} onClick={opts.toggle} data-testid="diff-options">Opções <IChevronDown size={11} /></button>
+          <button className={"btn" + (opts.open ? " on" : "")} onClick={opts.toggle} data-testid="diff-options">{t("code.diff.options")} <IChevronDown size={11} /></button>
           {opts.open && (
             <Floating className="status-pop diff-opts" placement="bottom-end">
-              <label className="pop-row"><input type="checkbox" checked={ignoreWs} onChange={(e) => setPref("kabul.diff.ignoreWs", e.target.checked ? "1" : "0", () => setIgnoreWs(e.target.checked))} data-testid="diff-ignore-ws" /> Ocultar mudanças de espaço</label>
-              <label className="pop-row"><input type="checkbox" checked={wrap} onChange={(e) => setPref("kabul.diff.wrap", e.target.checked ? "1" : "0", () => setWrap(e.target.checked))} data-testid="diff-wrap" /> Quebrar linhas</label>
+              <label className="pop-row"><input type="checkbox" checked={ignoreWs} onChange={(e) => setPref("kabul.diff.ignoreWs", e.target.checked ? "1" : "0", () => setIgnoreWs(e.target.checked))} data-testid="diff-ignore-ws" /> {t("code.diff.ignoreWs")}</label>
+              <label className="pop-row"><input type="checkbox" checked={wrap} onChange={(e) => setPref("kabul.diff.wrap", e.target.checked ? "1" : "0", () => setWrap(e.target.checked))} data-testid="diff-wrap" /> {t("code.diff.wrap")}</label>
             </Floating>
           )}
         </div>
-        <label className={"viewed-box" + (isViewed ? " on" : "")} title="Marcar como visto (⌃V)"><input type="checkbox" checked={isViewed} onChange={toggleViewed} data-testid="diff-viewed" /> Visto</label>
+        <label className={"viewed-box" + (isViewed ? " on" : "")} title={t("code.diff.markViewed")}><input type="checkbox" checked={isViewed} onChange={toggleViewed} data-testid="diff-viewed" /> {t("code.diff.viewed")}</label>
       </div>
-      {d === null && <div className="empty-state">Carregando o diff…</div>}
-      {d !== null && d.trim() === "" && <div className="empty-state">Sem diferenças neste arquivo{ignoreWs ? " (ignorando espaços)" : ""}.</div>}
-      {isViewed ? <div className="empty-state dim small">Visto. <button className="text-btn small" onClick={toggleViewed}>Mostrar de novo</button></div> : mode === "split" ? (
+      {d === null && <div className="empty-state">{t("code.diff.loading")}</div>}
+      {d !== null && d.trim() === "" && <div className="empty-state">{ignoreWs ? t("code.diff.noChangesWs") : t("code.diff.noChanges")}</div>}
+      {isViewed ? <div className="empty-state dim small">{t("code.diff.viewedDot")} <button className="text-btn small" onClick={toggleViewed}>{t("code.diff.showAgain")}</button></div> : mode === "split" ? (
         <div className="patch split" hidden={!d} data-testid="patch">
           <LazyChunks count={srows.length} chunk={CHUNK} rowPx={20} pin={pinOf(srows.map(([, r]) => r?.neu))} render={(a, b) => srows.slice(a, b).map(([l, r], k) => { const i = a + k; return (
             <Fragment key={i}>
@@ -202,14 +203,14 @@ export function FileDiff({ ws, path, scope = "all", files = [], active = true, o
 
 /** Arquivo só leitura, com realce; `line` rola até a linha (busca nos arquivos). */
 export function FileView({ ws, path, line, onError }: { ws: Workspace; path: string; line?: number; onError: (e: string) => void }) {
-  const [t, setT] = useState<string | null>(null);
+  const [txt, setTxt] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
-  useEffect(() => void api.readFile(ws.id, path).then(setT, (e) => onError(String(e))), [ws.id, path, onError]);
-  const rows = useMemo(() => (t ?? "").split("\n"), [t]);
-  useEffect(() => void (t !== null && line && root.current?.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ block: "center" })), [t, line]);
+  useEffect(() => void api.readFile(ws.id, path).then(setTxt, (e) => onError(String(e))), [ws.id, path, onError]);
+  const rows = useMemo(() => (txt ?? "").split("\n"), [txt]);
+  useEffect(() => void (txt !== null && line && root.current?.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ block: "center" })), [txt, line]);
   return (
     <div className="filediff" ref={root} data-testid="fileview">
-      <div className="fd-head"><code>{path}</code>{line ? <span className="dim small">linha {line}</span> : null}</div>
+      <div className="fd-head"><code>{path}</code>{line ? <span className="dim small">{t("code.diff.line", { line })}</span> : null}</div>
       <div className="patch"><LazyChunks count={rows.length} chunk={CHUNK} rowPx={20} pin={line ? [Math.floor((line - 1) / CHUNK)] : []} render={(a, b) => rows.slice(a, b).map((l, k) => { const i = a + k; return <div key={i} data-line={i + 1} className={"pl" + (line === i + 1 ? " hit" : "")}><span className="ln">{i + 1}</span><span className="code">{l ? highlight(l) : " "}</span></div>; })} /></div>
     </div>
   );

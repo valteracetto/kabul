@@ -6,7 +6,7 @@ import { noSuggest } from "../noSuggest";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, HARNESS_LABEL, type AgentEvent, type Model, type Workspace } from "../api";
 import { ModelPicker } from "../components/ModelPicker";
-import { useModelPrefs } from "../components/prefs";
+import { effortFor, useModelPrefs } from "../components/prefs";
 import { useDictation } from "../components/useDictation";
 import { Markdown } from "../components/Markdown";
 import { McpPanel, repoDisabled, saveSessionDisabled, sessionDisabled, type McpLive } from "../components/McpPanel";
@@ -21,19 +21,27 @@ import { stripAbsolutelyRight, useSettings } from "../components/useSettings";
 import { IApps, IArrowUp, ICopy, IMic, IPlan, IPlus, IRestore, IStop } from "../icons";
 import { apply, interrupted, type ChatMemory, type Item, type Live, type Usage } from "../components/chatModel";
 import { chatStore, mcpFrom, useChatSelect } from "../components/chatStore";
-import { markUsageSwitch, takeUsageSwitches, type UsageSwitch } from "../components/usageSwitch";
+import { markUsageSwitch, pendingUsageSwitches } from "../components/usageSwitch";
 import { SubagentTree } from "../components/SubagentTree";
+import { t } from "../i18n";
+import { tNode } from "../i18n/react";
+import { locale } from "../i18n/lang";
+import { fmtDate, fmtNum } from "../i18n/format";
 
 export type { Item } from "../components/chatModel";
 
 /** Texto de handoff (replay) para um agente novo continuar a conversa (espelha `transcript::handoff_prompt`). */
 export function handoffText(items: Item[], changes: string[], branch: string, lastN = 12): string {
+  // i18n-ignore: prompt de handoff enviado ao agente (espelha transcript::handoff_prompt do core), não é texto da tela.
   const msgs = items.flatMap((i) => (i.k === "user" && !i.queued ? [`**Usuário:** ${i.text}`] : i.k === "assistant" ? [`**Agente:** ${i.text}`] : i.k === "tool" ? [`_(ferramenta ${i.name}${i.error ? ", falhou" : ""})_`] : []));
   const tail = msgs.slice(-lastN);
+  // i18n-ignore (mesmo prompt)
   return `Você está continuando uma conversa que começou com outro agente, no mesmo repositório e na mesma branch. Leia o contexto e continue de onde parou; não refaça o que já foi feito.\n\n## Últimas mensagens (${tail.length} de ${msgs.length})\n\n${tail.join("\n\n")}\n\n## Estado do código\n\nBranch \`${branch}\`. Arquivos alterados: ${changes.join(", ") || "nenhum"}. Arquivos de contexto em \`.context/\`.\n`;
 }
 
 const PROVIDER_OF: Partial<Record<string, string>> = { claude: "claude", codex: "codex", antigravity: "agy" };
+/** Modelo e conta com que o próximo envio sai. */
+type Choice = { sel: Model; acc: { id: string; nickname: string } | null };
 /** Mensagens desenhadas de início (as mais recentes); rolar até o topo traz mais, em blocos. */
 const WINDOW = 120, WINDOW_STEP = 150;
 interface Props { ws: Workspace; sessionId: string; active: boolean; onTitle: (t: string) => void; onError: (e: string) => void; onWorkspaceChange: () => void }
@@ -44,7 +52,7 @@ function ContextRing({ used, total, onClick, on, quiet }: { used: number; total:
   const r = 7, c = 2 * Math.PI * r;
   // Abaixo de 70% o anel fica discreto (aparece ao passar o mouse no composer), a menos que "sempre mostrar" esteja ligado.
   return (
-    <button className={"ctx-ring icon-btn" + (on ? " on" : "") + (quiet && pct < 0.7 && !on ? " ctx-quiet" : "")} data-pct={Math.round(pct * 100)} onClick={onClick} title={total ? `Contexto: ${used.toLocaleString("pt-BR")} de ${total.toLocaleString("pt-BR")} tokens (${Math.round(pct * 100)}%)` : "Contexto: janela desconhecida"} data-testid="context-ring">
+    <button className={"ctx-ring icon-btn" + (on ? " on" : "") + (quiet && pct < 0.7 && !on ? " ctx-quiet" : "")} data-pct={Math.round(pct * 100)} onClick={onClick} title={total ? t("chat.ctxRing", { used: fmtNum(used), total: fmtNum(total), pct: Math.round(pct * 100) }) : t("chat.ctxRingUnknown")} data-testid="context-ring">
       <svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r={r} stroke="var(--track)" strokeWidth="2" fill="none" /><circle cx="9" cy="9" r={r} stroke={pct > 0.85 ? "var(--del)" : "var(--muted)"} strokeWidth="2" fill="none" strokeDasharray={`${c * pct} ${c}`} transform="rotate(-90 9 9)" strokeLinecap="round" /></svg>
     </button>
   );
@@ -196,7 +204,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
     const pf = m0 ? null : pendingFork[sessionId];
     if (pf) {
       delete pendingFork[sessionId];
-      setItems([...(pf.items as Item[]), { k: "notice", text: "Fork desta conversa" }]);
+      setItems([...(pf.items as Item[]), { k: "notice", text: t("chat.forkNotice") }]);
       setAgentSession(pf.resume);
       forkRef.current = pf.forkSession;
       replayRef.current = pf.replay;
@@ -221,7 +229,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
   const persist = useCallback(
     (its: Item[], agent: string | null) => {
       const firstUser = its.find((i) => i.k === "user") as { text: string } | undefined;
-      const title = firstUser ? firstUser.text.slice(0, 40) : "Nova conversa";
+      const title = firstUser ? firstUser.text.slice(0, 40) : t("common.newChat");
       parent.current.onTitle(title);
       chatStore.setTitle(sessionId, title);
       api.historySave({ id: sessionId, workspace_id: ws.id, title, model_key: prefs.selected, agent_session: agent, updated_at: Math.floor(Date.now() / 1000), items: its.map((i) => (i.k === "assistant" ? { ...i, streaming: false } : i)) }).catch(() => {});
@@ -244,10 +252,10 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
         if (event.input_tokens) (setCtxUsed(event.input_tokens), setCtxBase((b) => b || event.input_tokens!));
         if (!activeRef.current || !document.hasFocus()) {
           if (!activeRef.current) chatStore.markUnread(sessionId, true);
-          api.notify(`Kabul · ${ws.name}`, "O agente terminou o turno", { ws: ws.id, session: sessionId }).catch(() => {});
+          api.notify(`Kabul · ${ws.name}`, t("chat.notify.turnDone"), { ws: ws.id, session: sessionId }).catch(() => {});
         }
       }
-      if (event.type === "approval_request" && (!activeRef.current || !document.hasFocus())) api.notify(`Kabul · ${ws.name}`, `Pedido de permissão: ${event.tool}`, { ws: ws.id, session: sessionId }).catch(() => {});
+      if (event.type === "approval_request" && (!activeRef.current || !document.hasFocus())) api.notify(`Kabul · ${ws.name}`, t("chat.notify.permission", { tool: event.tool }), { ws: ws.id, session: sessionId }).catch(() => {});
       if (event.type === "turn_completed" || event.type === "exited" || event.type === "approval_request") setBusy(false);
       if (event.type === "exited") setLive(null);
       evs.push(event);
@@ -364,8 +372,9 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
 
   const dictation = useDictation(useCallback((t: string) => setText((x) => (x && !x.endsWith(" ") ? x + " " : x) + t), []), onError);
 
-  const ensure = async (): Promise<Live | null> => {
-    if (!selected) return null;
+  /** Agente para o envio, com o modelo e a conta efetivos (`resolveSwitches`), não os do último render. */
+  const ensure = async ({ sel: selected, acc: account }: Choice): Promise<Live | null> => {
+    const effort = effortFor(selected, prefs.effort);
     const cur = liveRef.current;
     const mcpOff = [...new Set([...sessionOff, ...repoDisabled(ws.repo_id)])].sort();
     const acc = account?.id ?? null;
@@ -376,7 +385,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
       if (ok) {
         const l = { ...cur, plan };
         setLive(l, selected.label);
-        setItems((it) => [...it, { k: "notice", text: plan ? "Plan mode ligado" : "Saiu do plan mode" }]);
+        setItems((it) => [...it, { k: "notice", text: plan ? t("chat.planOn") : t("chat.planOff") }]);
         return l;
       }
     }
@@ -386,7 +395,7 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
       liveRef.current = null;
       replayRef.current = true;
       setAgentSession(null);
-      setItems((it) => [...it, { k: "handoff", text: `Trocou para a conta ${account?.nickname ?? "padrão"}` }]);
+      setItems((it) => [...it, { k: "handoff", text: t("chat.switchedAccount", { name: account?.nickname ?? t("chat.account.defaultShort") }) }]);
       try {
         const r = await api.chatStart(ws.id, selected, effort, prefs.fast, null, plan, mcpOff, false, acc);
         const l = { id: r.chat_id, harness: r.harness, key: selected.key, effort, fast: prefs.fast, plan, approvals: r.approvals, mcpOff: mcpOff.join(), account: acc, planKind: r.plan };
@@ -405,12 +414,12 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
         // Troca de harness na mesma conversa: o agente novo recebe o handoff (mesma branch e worktree).
         resume = null;
         replayRef.current = true;
-        setItems((it) => [...it, { k: "handoff", text: `Trocou para ${selected.label} · ${HARNESS_LABEL[selected.harness]}` }]);
+        setItems((it) => [...it, { k: "handoff", text: t("chat.switchedTo", { model: selected.label, harness: HARNESS_LABEL[selected.harness] }) }]);
       } else {
-        setItems((it) => [...it, { k: "notice", text: `Continuando com ${selected.label}${effort ? " · " + effort : ""}${plan ? " · plan mode" : ""}` }]);
+        setItems((it) => [...it, { k: "notice", text: t("chat.continuingWith", { model: `${selected.label}${effort ? " · " + effort : ""}${plan ? " · plan mode" : ""}` }) }]);
       }
     } else if (resume && items.length) {
-      setItems((it) => [...it, { k: "notice", text: `Retomando a conversa com ${selected.label}` }]);
+      setItems((it) => [...it, { k: "notice", text: t("chat.resuming", { model: selected.label }) }]);
     }
     try {
       const r = await api.chatStart(ws.id, selected, effort, prefs.fast, resume, plan, mcpOff, forkRef.current, account?.id ?? null);
@@ -426,60 +435,86 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
     }
   };
 
-  const dispatch = async (t: string) => {
+  const dispatch = async (txt: string) => {
     setBusy(true);
     started.current = Date.now();
     toBottom();
-    const ck = await api.createCheckpoint(ws.id, `antes: ${t.slice(0, 60)}`).catch(() => null);
+    const ck = await api.createCheckpoint(ws.id, t("chat.checkpointBefore", { text: txt.slice(0, 60) })).catch(() => null);
     const firstMessage = !itemsRef.current.some((i) => i.k === "user" && !i.queued);
     setItems((it) => {
-      const qi = it.findIndex((i) => i.k === "user" && i.queued && i.text === t);
-      const u: Item = { k: "user", text: t, checkpoint: ck?.id };
+      const qi = it.findIndex((i) => i.k === "user" && i.queued && i.text === txt);
+      const u: Item = { k: "user", text: txt, checkpoint: ck?.id };
       return qi >= 0 ? [...it.slice(0, qi), ...it.slice(qi + 1), u] : [...it, u];
     });
-    if (firstMessage) api.autoBranch(ws.id, t).then((w) => w && onWorkspaceChange(), () => {});
-    // A lista de modelos ainda não chegou (aba recém-aberta): envia assim que chegar, sem perder a mensagem.
-    // Lê o modelo e o envio do último render: depois dos awaits acima, `selected` desta closure pode estar velho
-    // (a lista chegou no meio) e o efeito abaixo já teria rodado sem nada pendente, deixando a mensagem parada.
-    if (!selectedRef.current) return void (pendingSendRef.current = t);
-    await sendNowRef.current(t);
+    if (firstMessage) api.autoBranch(ws.id, txt).then((w) => w && onWorkspaceChange(), () => {});
+    // A lista de modelos ainda não chegou (aba recém-aberta) ou há troca da aba Uso que ainda não dá para
+    // aplicar: envia assim que der, sem perder a mensagem. Lê pelo ref e pelo `sendNowRef`: depois dos awaits
+    // acima, `selected` desta closure pode estar velho (a lista chegou no meio).
+    if (!resolveSwitches()) return void (pendingSendRef.current = txt);
+    await sendNowRef.current(txt);
   };
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
-  // Aba Uso / barra do Kabul: perto do limite, troca a conta ou o LLM desta conversa (vale no próximo
-  // envio, pelo mesmo caminho da troca manual: handoff na mesma conversa e branch).
-  // Fora da tela a aba não está montada: o pedido fica guardado e é aplicado aqui ao montar.
-  useEffect(() => {
-    const applySwitch = (d: UsageSwitch) => {
-      const cur = selectedRef.current;
-      if (!cur || PROVIDER_OF[cur.harness] !== d.provider || cur.local) return;
-      if (d.account) setAccount(d.account);
-      if (d.toProvider) {
-        const m = models.find((x) => !x.local && PROVIDER_OF[x.harness] === d.toProvider);
-        if (m) (setPrefs((p) => ({ ...p, selected: m.key })), setAccount(null));
-      }
-    };
-    if (selectedRef.current && models.length) takeUsageSwitches(sessionId).forEach(applySwitch);
-    const h = (e: Event) => {
-      const d = (e as CustomEvent).detail as UsageSwitch;
+  const accountRef = useRef(account);
+  accountRef.current = account;
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
+  // Modelo/conta já decididos por uma troca, mas que o render ainda pode não mostrar (setPrefs/setAccount
+  // são assíncronos): o envio usa este valor, não o `selected` velho. Some quando o render alcança.
+  const choiceRef = useRef<Choice | null>(null);
+  useEffect(() => void (choiceRef.current = null), [prefs.selected, account]);
+  /**
+   * Aba Uso / barra do Kabul: perto do limite, troca a conta ou o LLM desta conversa (pelo mesmo caminho da
+   * troca manual: handoff na mesma conversa e branch). Fora da tela a aba não está montada: o pedido fica
+   * guardado (usageSwitch.ts) e é aplicado aqui. Devolve o modelo e a conta efetivos para o envio, já com as
+   * trocas pendentes aplicadas de forma síncrona; `null` enquanto não dá para aplicar (lista de modelos ou
+   * histórico ainda chegando): aí nenhum envio sai, para não ir pelo provedor que estava no limite.
+   */
+  const resolveSwitches = (): Choice | null => {
+    const base = choiceRef.current ?? (selectedRef.current ? { sel: selectedRef.current, acc: accountRef.current } : null);
+    const list = pendingUsageSwitches(sessionId);
+    if (!list.length) return base;
+    if (!base || !modelsRef.current.length || !loadedRef.current) return null;
+    let { sel, acc } = base;
+    for (const d of list) {
+      // Avaliado com o modelo e a conta reais: aplicado, ou não vale para esta conversa (outro provedor, local).
       markUsageSwitch(sessionId, d);
-      applySwitch(d);
-    };
+      if (PROVIDER_OF[sel.harness] !== d.provider || sel.local) continue;
+      if (d.account) acc = d.account;
+      const m = d.toProvider ? modelsRef.current.find((x) => !x.local && PROVIDER_OF[x.harness] === d.toProvider) : undefined;
+      if (m) (sel = m), (acc = null);
+    }
+    if (sel === base.sel && acc === base.acc) return base;
+    const key = sel.key;
+    choiceRef.current = { sel, acc };
+    setPrefs((p) => ({ ...p, selected: key }));
+    setAccount(acc);
+    return choiceRef.current;
+  };
+  const resolveRef = useRef(resolveSwitches);
+  resolveRef.current = resolveSwitches;
+  useEffect(() => {
+    resolveRef.current();
+    const h = () => resolveRef.current();
     window.addEventListener("kabul:usage-switch", h);
     return () => window.removeEventListener("kabul:usage-switch", h);
-  }, [models, setPrefs, sessionId, !!selected]);
+  }, [models, sessionId, !!selected, loaded]);
   const pendingSendRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!selected || !pendingSendRef.current) return;
+    if (!pendingSendRef.current || !resolveSwitches()) return;
     const t = pendingSendRef.current;
     pendingSendRef.current = null;
     void sendNow(t);
-  }, [selected]);
+  }, [selected, loaded]);
   const sendNowRef = useRef<(t: string) => Promise<void>>(async () => {});
   sendNowRef.current = (t: string) => sendNow(t);
   const sendNow = async (t: string) => {
+    const c = resolveSwitches();
+    if (!c) return void (pendingSendRef.current = t);
     stoppedRef.current = null;
-    const l = await ensure();
+    const l = await ensure(c);
     if (!l) return setBusy(false);
     let payload = t;
     if (replayRef.current) {
@@ -518,11 +553,11 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
     dispatch(t);
   };
   /** Redirecionar: manda já, no meio do turno (o Claude incorpora a mensagem no turno em andamento). */
-  const steer = (t: string) => {
-    if (!live) return dispatch(t);
-    setItems((it) => [...it.filter((i) => !(i.k === "user" && i.queued && i.text === t)), { k: "user", text: t }, { k: "notice", text: "Redirecionando o agente" }]);
-    setQueue((q) => q.filter((x) => x !== t));
-    api.chatSend(live.id, t).catch((e) => onError(String(e)));
+  const steer = (txt: string) => {
+    if (!live) return dispatch(txt);
+    setItems((it) => [...it.filter((i) => !(i.k === "user" && i.queued && i.text === txt)), { k: "user", text: txt }, { k: "notice", text: t("chat.steering") }]);
+    setQueue((q) => q.filter((x) => x !== txt));
+    api.chatSend(live.id, txt).catch((e) => onError(String(e)));
   };
   const editQueued = (t: string) => {
     setQueue((q) => q.filter((x) => x !== t));
@@ -615,21 +650,21 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
   const resetChat = async (n: number) => {
     const { isLast, nextCk } = turnBounds(n);
     if (isLast) return;
-    if (!(await confirmDialog("Reset chat? As mensagens depois deste turno serão apagadas.", { ok: "Resetar", danger: true, checkbox: { label: "Também restaurar os arquivos", key: "kabul.resetFiles" } }))) return;
+    if (!(await confirmDialog(t("chat.reset.confirm"), { ok: t("chat.reset.ok"), danger: true, checkbox: { label: t("chat.reset.files"), key: "kabul.resetFiles" } }))) return;
     if (live) await api.chatStop(live.id).catch(() => {});
     setLive(null);
     setBusy(false);
     if (localStorage.getItem("kabul.resetFiles") === "1" && nextCk) await api.restoreCheckpoint(ws.id, nextCk).then(onWorkspaceChange, (e) => onError(String(e)));
-    setItems((it) => [...it.slice(0, n + 1), { k: "notice", text: "Conversa resetada a partir daqui" }]);
+    setItems((it) => [...it.slice(0, n + 1), { k: "notice", text: t("chat.reset.done") }]);
     setAgentSession(null);
     replayRef.current = true;
   };
 
   const restore = async (ck: string) => {
-    if (!(await confirmDialog("Restaurar os arquivos do workspace para antes desta mensagem? Mudanças posteriores serão descartadas.", { ok: "Restaurar", danger: true }))) return;
+    if (!(await confirmDialog(t("chat.restore.confirm"), { ok: t("chat.restore.ok"), danger: true }))) return;
     try {
       await api.restoreCheckpoint(ws.id, ck);
-      setItems((it) => [...it, { k: "notice", text: "Checkpoint restaurado" }]);
+      setItems((it) => [...it, { k: "notice", text: t("chat.restore.done") }]);
       onWorkspaceChange();
     } catch (e) {
       onError(String(e));
@@ -784,30 +819,30 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
       {finding && <ChatFind root={threadRef} scroller={scroller} version={items.length} onClose={() => setFinding(false)} />}
       {quoteBtn && createPortal(
         <button className="btn small quote-btn" style={{ left: quoteBtn.x, top: quoteBtn.y }} onMouseDown={(e) => e.preventDefault()}
-          onClick={() => (setText((x) => `${x}${x ? "\n" : ""}> ${quoteBtn.text.split("\n").join("\n> ")}\n\n`), setQuoteBtn(null), window.getSelection()?.removeAllRanges(), setTimeout(() => input.current?.focus(), 0))} data-testid="quote-selection">Citar</button>,
+          onClick={() => (setText((x) => `${x}${x ? "\n" : ""}> ${quoteBtn.text.split("\n").join("\n> ")}\n\n`), setQuoteBtn(null), window.getSelection()?.removeAllRanges(), setTimeout(() => input.current?.focus(), 0))} data-testid="quote-selection">{t("chat.quote")}</button>,
         document.body,
       )}
       <div className="messages" ref={scroller} onScroll={onScroll} onMouseUp={() => {
         // Citar: texto selecionado numa resposta vira citação na próxima mensagem.
         const sel = window.getSelection();
-        const t = sel?.toString().trim();
+        const picked = sel?.toString().trim();
         const node = sel?.anchorNode instanceof Element ? sel.anchorNode : sel?.anchorNode?.parentElement;
-        if (!t || !sel?.rangeCount || !node?.closest(".msg-assistant")) return setQuoteBtn(null);
+        if (!picked || !sel?.rangeCount || !node?.closest(".msg-assistant")) return setQuoteBtn(null);
         const r = sel.getRangeAt(0).getBoundingClientRect();
-        setQuoteBtn({ x: Math.round(r.left), y: Math.round(r.top - 34), text: t });
+        setQuoteBtn({ x: Math.round(r.left), y: Math.round(r.top - 34), text: picked });
       }}>
         <div className="thread" ref={threadRef}>
           {items.length === 0 && (
             <div className="chat-empty">
               <div className="ce-title">{ws.title || ws.name}</div>
-              <div className="dim">Branch <code>{ws.branch}</code> · portas {ws.port}–{ws.port + 9}</div>
-              <div className="ce-hints dim">Use <kbd>@</kbd> para mencionar arquivos, <kbd>/</kbd> para comandos, <kbd>⇧⇥</kbd> para plan mode e <kbd>⌘U</kbd> para anexar.</div>
+              <div className="dim">{tNode("chat.empty.branch", { branch: <code>{ws.branch}</code>, from: ws.port, to: ws.port + 9 })}</div>
+              <div className="ce-hints dim">{tNode("chat.empty.hints", { at: <kbd>@</kbd>, slash: <kbd>/</kbd>, plan: <kbd>⇧⇥</kbd>, attach: <kbd>⌘U</kbd> })}</div>
             </div>
           )}
-          {startIdx > 0 && <button className="text-btn small older-btn" onClick={() => { const s = scroller.current; if (s) anchor.current = { h: s.scrollHeight, top: s.scrollTop }; setWin((w) => w + WINDOW_STEP); }} data-testid="load-older">Mostrar mensagens anteriores ({startIdx})</button>}
+          {startIdx > 0 && <button className="text-btn small older-btn" onClick={() => { const s = scroller.current; if (s) anchor.current = { h: s.scrollHeight, top: s.scrollTop }; setWin((w) => w + WINDOW_STEP); }} data-testid="load-older">{t("chat.loadOlder", { n: startIdx })}</button>}
           <Thread items={items} start={startIdx} layout={layout} busy={busy} noAbs={!!appSet?.not_absolutely_right} ctx={ctx} />
-          {!busy && bgTasks > 0 && <WorkingLine testid="bg-tasks" since={started.current} text={`Aguardando ${bgTasks} tarefa${bgTasks === 1 ? "" : "s"} em segundo plano`} />}
-          {busy && !waiting && slot && <WorkingLine testid="slot-wait" since={started.current} text={`Aguardando vaga · ${slot.position}º na fila${slot.limit ? ` (limite de ${slot.limit} agentes ao mesmo tempo)` : ""}`} />}
+          {!busy && bgTasks > 0 && <WorkingLine testid="bg-tasks" since={started.current} text={t("chat.bgTasks", { count: bgTasks })} />}
+          {busy && !waiting && slot && <WorkingLine testid="slot-wait" since={started.current} text={t("chat.slotWait", { pos: slot.position }) + (slot.limit ? t("chat.slotLimit", { n: slot.limit }) : "")} />}
           {busy && !waiting && !slot && <WorkingLine since={started.current} text={activity(items.slice(items.map((x) => x.k).lastIndexOf("user") + 1) as never)} />}
         </div>
       </div>
@@ -815,9 +850,9 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
       <div className="composer-wrap">
         {(queue.length > 0 || note || (live && !live.approvals)) && (
           <div className="composer-notes">
-            {queue.length > 0 && <span><IQueueIcon /> {queue.length} na fila <button className="text-btn" onClick={() => setQueuePaused((p) => !p)}>{queuePaused ? "retomar" : "pausar"}</button> <button className="text-btn" onClick={() => { setQueue([]); setItems((it) => it.filter((i) => !(i.k === "user" && i.queued))); }}>limpar</button></span>}
-            {note && <span title="Registro de harness por família">{note}</span>}
-            {live && !live.approvals && <span>{HARNESS_LABEL[live.harness]} aplica as permissões dele; aprovações pelo app não estão disponíveis neste harness.</span>}
+            {queue.length > 0 && <span><IQueueIcon /> {t("chat.queue.count", { n: queue.length })} <button className="text-btn" onClick={() => setQueuePaused((p) => !p)}>{queuePaused ? t("chat.queue.resume") : t("chat.queue.pause")}</button> <button className="text-btn" onClick={() => { setQueue([]); setItems((it) => it.filter((i) => !(i.k === "user" && i.queued))); }}>{t("chat.queue.clear")}</button></span>}
+            {note && <span title={t("chat.noteTitle")}>{note}</span>}
+            {live && !live.approvals && <span>{t("chat.noApprovals", { harness: HARNESS_LABEL[live.harness] })}</span>}
           </div>
         )}
         <SubagentBar session={sessionId} />
@@ -831,9 +866,9 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
               ))}
             </Floating>
           )}
-          {!text && <span className="focus-hint">⌘L para focar</span>}
-          {plan && <div className="plan-chip" data-testid="plan-chip"><IPlan size={13} /> {live?.planKind === "emulated" ? "Plan mode (emulado)" : "Plan mode"} <span className="dim">· {live?.planKind === "emulated" ? `${HARNESS_LABEL[live.harness]} não tem plan mode: o Kabul pede só leitura e nega edições e comandos (⇧⇥)` : "o agente planeja sem editar (⇧⇥)"}</span></div>}
-          <textarea ref={input} rows={3} autoCorrect="off" {...noSuggest} placeholder="Peça mudanças, @mencione arquivos, rode /comandos" value={text} data-testid="composer"
+          {!text && <span className="focus-hint">{t("chat.focusHint")}</span>}
+          {plan && <div className="plan-chip" data-testid="plan-chip"><IPlan size={13} /> {live?.planKind === "emulated" ? t("chat.plan.emulated") : t("chat.plan.mode")} <span className="dim">· {live?.planKind === "emulated" ? t("chat.plan.emulatedHint", { harness: HARNESS_LABEL[live.harness] }) : t("chat.plan.hint")}</span></div>}
+          <textarea ref={input} rows={3} autoCorrect="off" {...noSuggest} placeholder={t("chat.composer.placeholder")} value={text} data-testid="composer"
             onChange={(e) => onChangeText(e.target.value, e.target.selectionStart)} onPaste={onPaste}
             onKeyDown={(e) => {
               if (suggest && options.length) {
@@ -862,27 +897,27 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
             <ModelPicker models={models} prefs={prefs} setPrefs={setPrefs} selected={selected} effort={effort} activeHarness={live?.harness ?? null} listen={active} />
             {selected && PROVIDER_OF[selected.harness] && !selected.local && (
               <div className="picker" ref={accRef}>
-                <button className="account-chip" title="Conta usada nesta conversa" onClick={() => (setAccOpen(!accOpen), api.accountsList(PROVIDER_OF[selected.harness]!).then(setAccounts, () => {}))} data-testid="account-chip">
-                  {account?.nickname ?? "Conta padrão"} <span className="dim">˅</span>
+                <button className="account-chip" title={t("chat.account.title")} onClick={() => (setAccOpen(!accOpen), api.accountsList(PROVIDER_OF[selected.harness]!).then(setAccounts, () => {}))} data-testid="account-chip">
+                  {account?.nickname ?? t("chat.account.default")} <span className="dim">˅</span>
                 </button>
                 {accOpen && (
                   <Floating className="status-pop account-pop" placement="top-start" testid="account-menu">
-                    <div className="pop-title">Conta desta conversa</div>
+                    <div className="pop-title">{t("chat.account.thisChat")}</div>
                     {accounts.map((a) => (
                       <div key={a.id} className={"pop-row" + ((account?.id ?? accounts.find((x) => x.default)?.id) === a.id ? " on" : "")} onClick={() => (setAccount({ id: a.id, nickname: a.nickname }), setAccOpen(false))} data-testid="account-option">
-                        {a.nickname}{a.default && <span className="dim small"> · padrão</span>}<span className="grow" /><span className={"badge " + (a.logged_in ? "ok" : "")}>{a.logged_in ? "logado" : "sem login"}</span>
+                        {a.nickname}{a.default && <span className="dim small"> · {t("chat.account.defaultShort")}</span>}<span className="grow" /><span className={"badge " + (a.logged_in ? "ok" : "")}>{a.logged_in ? t("chat.account.loggedIn") : t("chat.account.noLogin")}</span>
                       </div>
                     ))}
                     <div className="pop-sep" />
-                    <div className="pop-row" onClick={() => (setAccOpen(false), window.dispatchEvent(new CustomEvent("kabul:route", { detail: { kind: "settings", tab: "contas" } })))}>Gerenciar contas…</div>
+                    <div className="pop-row" onClick={() => (setAccOpen(false), window.dispatchEvent(new CustomEvent("kabul:route", { detail: { kind: "settings", tab: "contas" } })))}>{t("chat.account.manage")}</div>
                   </Floating>
                 )}
               </div>
             )}
-            {plan && <span className="dim small">plan</span>}
+            {plan && <span className="dim small">{t("chat.plan.short")}</span>}
             <div className="grow" />
             <div className="picker" ref={appsRef}>
-              <button className={"icon-btn" + (appsOpen ? " on" : "")} title="MCP e integrações da sessão" onClick={() => (setAppsOpen(!appsOpen), setCtxOpen(false))} data-testid="apps"><IApps /></button>
+              <button className={"icon-btn" + (appsOpen ? " on" : "")} title={t("chat.apps")} onClick={() => (setAppsOpen(!appsOpen), setCtxOpen(false))} data-testid="apps"><IApps /></button>
               {appsOpen && harnessNow && <McpPanel workspaceId={ws.id} repoId={ws.repo_id} harness={harnessNow} live={mcpLive} sessionOff={sessionOff} setSessionOff={setSessionOff} onError={onError} />}
             </div>
             <div className="picker" ref={ctxRef}>
@@ -899,13 +934,13 @@ export function ChatTab({ ws, sessionId, active, onTitle, onError, onWorkspaceCh
                 return <ContextPanel used={ctxUsed} total={selected?.context ?? null} parts={parts} canCompact={harnessNow === "claude" || harnessNow === "qwen" || harnessNow === "opencode"} onCompact={() => (setCtxOpen(false), dispatch("/compact"))} />;
               })()}
             </div>
-            <button className="icon-btn" title="Anexar arquivo (⌘U)" onClick={attach} data-testid="attach"><IPlus /></button>
-            <button className={"icon-btn mic " + dictation.state} title="Ditado em português (⌃⇧D)" onClick={dictation.toggle} data-testid="mic">
+            <button className="icon-btn" title={t("chat.attach")} onClick={attach} data-testid="attach"><IPlus /></button>
+            <button className={"icon-btn mic " + dictation.state} title={t("chat.dictation.title")} onClick={dictation.toggle} data-testid="mic">
               {dictation.state === "transcribing" ? <span className="spinner" /> : <IMic />}
             </button>
             {/* Trabalhando: Parar e Enviar lado a lado (enviar enfileira ou redireciona). */}
-            {busy && <button className="send stop" title="Parar (⌘⇧⌫)" onClick={stop} data-testid="stop"><IStop size={12} /></button>}
-            <button className="send" title={busy ? (chatPrefs.followUp() === "steer" ? "Redirecionar agora" : "Enfileirar") : "Enviar"} disabled={!text.trim()} onClick={send} data-testid="send"><IArrowUp size={15} /></button>
+            {busy && <button className="send stop" title={t("chat.stop")} onClick={stop} data-testid="stop"><IStop size={12} /></button>}
+            <button className="send" title={busy ? (chatPrefs.followUp() === "steer" ? t("chat.steerNow") : t("chat.enqueue")) : t("common.send")} disabled={!text.trim()} onClick={send} data-testid="send"><IArrowUp size={15} /></button>
           </div>
         </div>
       </div>
@@ -925,10 +960,10 @@ const Thread = memo(function Thread({ items, start, layout, busy, noAbs, ctx }: 
   const out: React.ReactNode[] = [];
   for (let n = start; n < items.length; n++) {
     const i = items[n];
-    const t = i.k === "turn" ? layout.turn.get(n) : undefined;
+    const tu = i.k === "turn" ? layout.turn.get(n) : undefined;
     const er = i.k === "error" ? layout.err.get(n) : undefined;
     out.push(<Row key={n} item={i} n={n} toggle={layout.toggles.get(n)} hidden={!!layout.hidden[n]} busy={i.k === "user" || i.k === "error" ? busy : false} noAbs={i.k === "assistant" && noAbs}
-      isLast={t?.isLast} checkpoint={t?.checkpoint} files={t?.files} tail={er ? er.tail && !busy : undefined} lastUser={er?.lastUser} ctx={ctx} />);
+      isLast={tu?.isLast} checkpoint={tu?.checkpoint} files={tu?.files} tail={er ? er.tail && !busy : undefined} lastUser={er?.lastUser} ctx={ctx} />);
   }
   return <>{out}</>;
 });
@@ -941,10 +976,10 @@ const Row = memo(function Row({ item: i, n, toggle, hidden, busy, noAbs, isLast,
   if (toggle) {
     const [user, tools, msgs, shell] = toggle.split("|").map(Number);
     tg = (
-      <button className="steps-toggle" onClick={() => c().expand(user)} data-testid="expand-steps" title="Mostrar os passos (⌃O mostra sempre)">
+      <button className="steps-toggle" onClick={() => c().expand(user)} data-testid="expand-steps" title={t("chat.steps.show")}>
         <span className="st-chev">›</span>
-        {[tools && `${tools} ferramenta${tools === 1 ? "" : "s"}`, msgs && `${msgs} mensage${msgs === 1 ? "m" : "ns"}`].filter(Boolean).join(", ")}
-        {shell ? <span className="st-shell mono" data-testid="steps-shell">&gt;_</span> : null}
+        {[tools && t("chat.steps.tools", { count: tools }), msgs && t("chat.steps.msgs", { count: msgs })].filter(Boolean).join(", ")}
+        {shell ? <span className="st-shell mono" data-testid="steps-shell">{">_"}</span> : null}
       </button>
     );
   }
@@ -954,15 +989,15 @@ const Row = memo(function Row({ item: i, n, toggle, hidden, busy, noAbs, isLast,
     case "user": body = (
       <div data-msg={n} className={"msg-user" + (i.queued ? " queued" : "")} data-testid={i.queued ? "queued-msg" : undefined}>
         {i.text}
-        {i.queued && <span className="badge">na fila</span>}
+        {i.queued && <span className="badge">{t("chat.queue.badge")}</span>}
         {i.queued && (
           <span className="q-actions">
-            <button className="text-btn small" onClick={() => c().editQueued(i.text)} data-testid="queue-edit">Editar <kbd>e</kbd></button>
-            <button className="text-btn small" onClick={() => c().deleteQueued(i.text)} data-testid="queue-delete">Apagar <kbd>⌫</kbd></button>
-            <button className="text-btn small" onClick={() => c().steer(i.text)} data-testid="queue-steer">Enviar agora <kbd>↵</kbd></button>
+            <button className="text-btn small" onClick={() => c().editQueued(i.text)} data-testid="queue-edit">{t("common.edit")} <kbd>e</kbd></button>
+            <button className="text-btn small" onClick={() => c().deleteQueued(i.text)} data-testid="queue-delete">{t("common.delete")} <kbd>⌫</kbd></button>
+            <button className="text-btn small" onClick={() => c().steer(i.text)} data-testid="queue-steer">{t("chat.queue.sendNow")} <kbd>↵</kbd></button>
           </span>
         )}
-        {i.checkpoint && !busy && <button className="icon-btn restore" title="Restaurar checkpoint (arquivos como antes desta mensagem)" onClick={() => c().restore(i.checkpoint!)}><IRestore size={13} /></button>}
+        {i.checkpoint && !busy && <button className="icon-btn restore" title={t("chat.restore.title")} onClick={() => c().restore(i.checkpoint!)}><IRestore size={13} /></button>}
       </div>
     ); break;
     case "assistant": body = <div data-msg={n} className="msg-assistant"><MdMemo text={noAbs ? stripAbsolutelyRight(i.text) : i.text} ctx={ctx} />{i.streaming && <span className="caret" />}</div>; break;
@@ -972,13 +1007,13 @@ const Row = memo(function Row({ item: i, n, toggle, hidden, busy, noAbs, isLast,
     case "approval":
       if (i.tool === "ExitPlanMode") body = <PlanCard plan={String((i.input as { plan?: string })?.plan ?? "")} decided={i.decided} allow={i.allow}
         onApprove={() => (c().decide(i.id, true), c().setPlan(false))}
-        onAdjust={(t) => (c().decide(i.id, false), setTimeout(() => c().send(t), 300))}
-        onHandOff={() => (c().decide(i.id, false), c().newChatWith(`Implemente este plano:\n\n${(i.input as { plan?: string })?.plan ?? ""}`))} />;
+        onAdjust={(adj) => (c().decide(i.id, false), setTimeout(() => c().send(adj), 300))}
+        onHandOff={() => (c().decide(i.id, false), c().newChatWith(t("chat.plan.implement", { plan: (i.input as { plan?: string })?.plan ?? "" })))} />;
       else if (i.tool === "AskUserQuestion") body = <QuestionCard input={i.input} decided={i.decided} onSubmit={(answers) => c().decide(i.id, true, false, { ...(i.input as object), answers })} onSkip={() => c().decide(i.id, false)} />;
       else body = <ApprovalCard tool={i.tool} input={i.input} decided={i.decided} allow={i.allow} always={i.always} onDecide={(a, al) => c().decide(i.id, a, al)} />;
       break;
     case "turn": body = <TurnMeta item={i} files={JSON.parse(files ?? "[]")} onOpenFile={(p) => c().openFile(p)} checkpoint={checkpoint}
-      isLast={!!isLast} onRestore={(ck) => c().restore(ck)} onQuote={(t) => c().quote(t)}
+      isLast={!!isLast} onRestore={(ck) => c().restore(ck)} onQuote={(q) => c().quote(q)}
       onForkTab={() => c().forkTab(n)} onForkWorkspace={() => c().forkWorkspace(n)} onReset={() => c().resetChat(n)} />; break;
     case "handoff": body = <div className="handoff-divider" data-testid="handoff"><span>{i.text}</span></div>; break;
     case "notice": body = <div className="notice">{i.text}</div>; break;
@@ -988,9 +1023,9 @@ const Row = memo(function Row({ item: i, n, toggle, hidden, busy, noAbs, isLast,
         <div>{i.text}</div>
         {tail && (
           <div className="row err-actions">
-            {lastUser && <button className="btn small" onClick={() => c().send(lastUser)} data-testid="retry">Tentar de novo</button>}
-            {lastUser && <button className="btn small" onClick={() => c().newChatWith(lastUser)} data-testid="retry-new">Tentar em nova conversa</button>}
-            <button className="text-btn small" onClick={() => navigator.clipboard.writeText(i.text)} data-testid="copy-error">Copiar detalhes</button>
+            {lastUser && <button className="btn small" onClick={() => c().send(lastUser)} data-testid="retry">{t("common.retry")}</button>}
+            {lastUser && <button className="btn small" onClick={() => c().newChatWith(lastUser)} data-testid="retry-new">{t("chat.retryNew")}</button>}
+            <button className="text-btn small" onClick={() => navigator.clipboard.writeText(i.text)} data-testid="copy-error">{t("chat.copyDetails")}</button>
           </div>
         )}
       </div>
@@ -1017,9 +1052,9 @@ function SubagentBar({ session }: { session: string }) {
   return (
     <div className="subagent-bar picker" ref={ref}>
       <button className={"text-btn small" + (open ? " on" : "")} onClick={() => setOpen(!open)} data-testid="subagents-btn">
-        {running > 0 && <span className="spinner tiny" />} {list.length} subagente{list.length === 1 ? "" : "s"}{running ? ` · ${running} rodando` : ""}
+        {running > 0 && <span className="spinner tiny" />} {t("chat.subagents", { count: list.length })}{running ? ` · ${t("chat.subagentsRunning", { n: running })}` : ""}
       </button>
-      {open && <Floating className="status-pop subagent-pop" placement="top-start" testid="subagents-pop"><div className="pop-title">Subagentes desta conversa</div><SubagentTree subs={subs!} /></Floating>}
+      {open && <Floating className="status-pop subagent-pop" placement="top-start" testid="subagents-pop"><div className="pop-title">{t("chat.subagentsTitle")}</div><SubagentTree subs={subs!} /></Floating>}
     </div>
   );
 }
@@ -1049,15 +1084,15 @@ const Minimap = memo(function Minimap({ items, onJump }: { items: Item[]; onJump
 
 /** Rodapé do turno: tempo (popover com início→fim e tokens), copiar e "···" (fork, reset, citar, restaurar). */
 function TurnMeta({ item, files, onOpenFile, isLast, onForkTab, onForkWorkspace, onReset }: {
-  item: Extract<Item, { k: "turn" }>; files: { path: string; add: number; del: number }[]; onOpenFile: (p: string) => void; checkpoint?: string; isLast: boolean; onRestore: (c: string) => void; onQuote: (t: string) => void;
+  item: Extract<Item, { k: "turn" }>; files: { path: string; add: number; del: number }[]; onOpenFile: (p: string) => void; checkpoint?: string; isLast: boolean; onRestore: (c: string) => void; onQuote: (q: string) => void;
   onForkTab: () => void; onForkWorkspace: () => void; onReset: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
   useDismiss(ref, open, useCallback(() => setOpen(false), []));
-  const t = (ms?: number) => (ms ? new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—");
-  const f = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleString("pt-BR"));
+  const tm = (ms?: number) => (ms ? fmtDate(ms, "timeSec") : "—");
+  const f = (n: number | null | undefined) => (n == null ? "—" : fmtNum(n));
   const u = item.usage;
   return (
     <div className="turn-meta">
@@ -1065,30 +1100,30 @@ function TurnMeta({ item, files, onOpenFile, isLast, onForkTab, onForkWorkspace,
         {item.meta}
         {timeOpen && (
           <Floating className="status-pop time-pop" placement="top-start" testid="time-pop">
-            <div className="row"><span className="dim">Início → fim</span><span className="grow" />{t(item.started)} → {t(item.ended)}</div>
-            <div className="row"><span className="dim">Entrada</span><span className="grow" />{f(u?.input)}</div>
-            <div className="row"><span className="dim">Saída</span><span className="grow" />{f(u?.output)}</div>
-            <div className="row"><span className="dim">Cache lido</span><span className="grow" />{f(u?.cache_read)}</div>
-            <div className="row"><span className="dim">Cache gravado</span><span className="grow" />{f(u?.cache_write)}</div>
+            <div className="row"><span className="dim">{t("chat.time.range")}</span><span className="grow" />{tm(item.started)} → {tm(item.ended)}</div>
+            <div className="row"><span className="dim">{t("chat.time.input")}</span><span className="grow" />{f(u?.input)}</div>
+            <div className="row"><span className="dim">{t("chat.time.output")}</span><span className="grow" />{f(u?.output)}</div>
+            <div className="row"><span className="dim">{t("chat.time.cacheRead")}</span><span className="grow" />{f(u?.cache_read)}</div>
+            <div className="row"><span className="dim">{t("chat.time.cacheWrite")}</span><span className="grow" />{f(u?.cache_write)}</div>
           </Floating>
         )}
       </span>
-      <button className="icon-btn" title="Copiar resposta final" onClick={() => navigator.clipboard.writeText(item.copy)}><ICopy size={13} /></button>
+      <button className="icon-btn" title={t("chat.copyFinal")} onClick={() => navigator.clipboard.writeText(item.copy)}><ICopy size={13} /></button>
       <ReadAloud text={item.copy} />
 
       <span className="picker" ref={ref}>
-        <button className={"icon-btn" + (open ? " on" : "")} title="Ações da mensagem" onClick={() => setOpen(!open)} data-testid="turn-more"><IMoreDots /></button>
+        <button className={"icon-btn" + (open ? " on" : "")} title={t("chat.msgActions")} onClick={() => setOpen(!open)} data-testid="turn-more"><IMoreDots /></button>
         {open && (
           <Floating className="status-pop turn-pop" placement="bottom-start">
-            <div className="pop-row" onClick={() => (setOpen(false), onForkTab())} data-testid="fork-tab"><IForkTab size={16} /> Fork para nova aba</div>
-            <div className="pop-row" onClick={() => (setOpen(false), onForkWorkspace())} data-testid="fork-ws"><IFork size={16} /> Fork para novo workspace</div>
-            {!isLast && <div className="pop-row" onClick={() => (setOpen(false), onReset())} data-testid="reset-chat"><IRestore size={16} /> Reset chat a partir daqui…</div>}
+            <div className="pop-row" onClick={() => (setOpen(false), onForkTab())} data-testid="fork-tab"><IForkTab size={16} /> {t("chat.fork.tab")}</div>
+            <div className="pop-row" onClick={() => (setOpen(false), onForkWorkspace())} data-testid="fork-ws"><IFork size={16} /> {t("chat.fork.ws")}</div>
+            {!isLast && <div className="pop-row" onClick={() => (setOpen(false), onReset())} data-testid="reset-chat"><IRestore size={16} /> {t("chat.reset.menu")}</div>}
           </Floating>
         )}
       </span>
       {files.length > 0 && (
         <span className="turn-files" data-testid="turn-files">
-          {files.slice(0, 6).map((f) => <button key={f.path} className="file-chip" title={`Abrir o diff de ${f.path}`} onClick={() => onOpenFile(f.path)} data-testid="file-chip"><FileIcon name={f.path} size={14} /> {f.path.split("/").pop()} <span className="add">+{f.add}</span> <span className="del">−{f.del}</span></button>)}
+          {files.slice(0, 6).map((f) => <button key={f.path} className="file-chip" title={t("chat.openDiffOf", { path: f.path })} onClick={() => onOpenFile(f.path)} data-testid="file-chip"><FileIcon name={f.path} size={14} /> {f.path.split("/").pop()} <span className="add">+{f.add}</span> <span className="del">−{f.del}</span></button>)}
           {files.length > 6 && <span className="dim small">+{files.length - 6}</span>}
         </span>
       )}
@@ -1108,11 +1143,11 @@ function ReadAloud({ text }: { text: string }) {
     if (on) return void (speechSynthesis.cancel(), setOn(false));
     const plain = text.replace(/```[\s\S]*?```/g, " ").replace(/`([^`]*)`/g, "$1").replace(/[*_#>\[\]()]/g, "").replace(/\s+/g, " ").trim();
     const u = new SpeechSynthesisUtterance(plain);
-    u.lang = "pt-BR";
+    u.lang = locale();
     u.onend = u.onerror = () => setOn(false);
     speechSynthesis.cancel();
     speechSynthesis.speak(u);
     setOn(true);
   };
-  return <button className={"icon-btn" + (on ? " on" : "")} title={on ? "Parar a leitura" : "Ler em voz alta"} onClick={toggle} data-testid="read-aloud"><IVolume size={13} /></button>;
+  return <button className={"icon-btn" + (on ? " on" : "")} title={on ? t("chat.readAloud.stop") : t("chat.readAloud.start")} onClick={toggle} data-testid="read-aloud"><IVolume size={13} /></button>;
 }

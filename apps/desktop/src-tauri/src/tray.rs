@@ -5,6 +5,7 @@
 //!
 //! Também aqui: os comandos de uso (`usage_*`), a lista de agentes rodando e o laço que relê os limites
 //! (a cada 5 min) e avisa quando um alerta novo aparece.
+use crate::i18n::tr;
 use crate::App;
 use kabul_core::usage::{self, AlertConfig, LimitsSnapshot, Overview};
 use serde::Serialize;
@@ -96,7 +97,7 @@ pub async fn usage_csv(handle: AppHandle, days: Option<u32>) -> R<String> {
 #[tauri::command]
 pub async fn usage_csv_save(handle: AppHandle, days: Option<u32>) -> R<String> {
     let csv = usage_csv(handle, days).await?;
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(std::path::PathBuf::from).ok_or("sem pasta do usuário")?;
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(std::path::PathBuf::from).ok_or(tr("sem pasta do usuário", "no home folder"))?;
     let dir = home.join("Downloads");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let name = format!("kabul-uso-{}.csv", usage::day_of(kabul_core::store::now(), usage::local_offset()));
@@ -134,7 +135,7 @@ pub fn tray_action(handle: AppHandle, action: String, workspace_id: Option<Strin
     if let Some(p) = handle.get_webview_window("tray") {
         let _ = p.hide();
     }
-    let main = handle.get_webview_window("main").ok_or("janela principal não encontrada")?;
+    let main = handle.get_webview_window("main").ok_or(tr("janela principal não encontrada", "main window not found"))?;
     match action.as_str() {
         "open" | "open-workspace" | "new-workspace" | "usage" => {
             let _ = main.unminimize();
@@ -142,7 +143,7 @@ pub fn tray_action(handle: AppHandle, action: String, workspace_id: Option<Strin
             let _ = main.set_focus();
         }
         "pause-all" => {}
-        other => return Err(format!("ação desconhecida: {other}")),
+        other => return Err(format!("{}: {other}", tr("ação desconhecida", "unknown action"))),
     }
     // O frontend da janela principal faz o resto (rota, modal, parar com o mesmo fluxo do botão Parar).
     let _ = main.emit("tray-action", serde_json::json!({ "action": action, "workspace_id": workspace_id }));
@@ -173,7 +174,10 @@ fn refresh_icon(handle: &AppHandle) {
     let _ = tray.set_icon(Some(icon_image(a, b)));
     let tight = snap.limits.iter().filter(|l| l.live(now)).max_by(|x, y| x.used_pct.partial_cmp(&y.used_pct).unwrap_or(std::cmp::Ordering::Equal));
     let tip = match tight {
-        Some(l) => format!("Kabul · {} {}: {:.0}%{}", usage::limits::provider_label(&l.provider), l.title, l.used_pct, l.resets_at.map(|r| format!(" (reinicia em {})", usage::countdown(r.saturating_sub(now)))).unwrap_or_default()),
+        Some(l) => {
+            let resets = l.resets_at.map(|r| format!(" ({} {})", tr("reinicia em", "resets in"), countdown(r.saturating_sub(now)))).unwrap_or_default();
+            format!("Kabul · {} {}: {:.0}%{resets}", usage::limits::provider_label(&l.provider), limit_title(&l.window, &l.title), l.used_pct)
+        }
         None => "Kabul".into(),
     };
     let _ = tray.set_tooltip(Some(&tip));
@@ -250,18 +254,87 @@ pub fn apply(handle: &AppHandle) {
     }
 }
 
-fn build(handle: &AppHandle) -> tauri::Result<()> {
-    let menu = Menu::with_items(
+fn tray_menu(handle: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    Menu::with_items(
         handle,
         &[
-            &MenuItem::with_id(handle, "tray-open", "Abrir o Kabul", true, None::<&str>)?,
-            &MenuItem::with_id(handle, "tray-new", "Novo workspace", true, None::<&str>)?,
-            &MenuItem::with_id(handle, "tray-usage", "Uso e limites", true, None::<&str>)?,
-            &MenuItem::with_id(handle, "tray-pause", "Pausar todos os agentes", true, None::<&str>)?,
+            &MenuItem::with_id(handle, "tray-open", tr("Abrir o Kabul", "Open Kabul"), true, None::<&str>)?,
+            &MenuItem::with_id(handle, "tray-new", tr("Novo workspace", "New workspace"), true, None::<&str>)?,
+            &MenuItem::with_id(handle, "tray-usage", tr("Uso e limites", "Usage and limits"), true, None::<&str>)?,
+            &MenuItem::with_id(handle, "tray-pause", tr("Pausar todos os agentes", "Pause all agents"), true, None::<&str>)?,
             &PredefinedMenuItem::separator(handle)?,
-            &MenuItem::with_id(handle, "tray-refresh", "Atualizar limites", true, None::<&str>)?,
+            &MenuItem::with_id(handle, "tray-refresh", tr("Atualizar limites", "Refresh limits"), true, None::<&str>)?,
         ],
-    )?;
+    )
+}
+
+/// Idioma trocou: menu e dica do ícone no idioma novo.
+pub fn relabel(handle: &AppHandle) {
+    if let Some(tray) = handle.tray_by_id(TRAY_ID) {
+        if let Ok(m) = tray_menu(handle) {
+            let _ = tray.set_menu(Some(m));
+        }
+        refresh_icon(handle);
+    }
+}
+
+/// Título da janela de limite no idioma da interface (o core guarda em português).
+pub fn limit_title(window: &str, title: &str) -> String {
+    if !crate::i18n::is_en() {
+        return title.to_string();
+    }
+    let num = |suffix: &str| window.strip_suffix(suffix).and_then(|n| n.parse::<u64>().ok());
+    match window {
+        "5h" => "Session (5h)".into(),
+        "semana" | "seven_day" => "Week".into(),
+        "mes" => "Month".into(),
+        "seven_day_opus" => "Week (Opus)".into(),
+        "seven_day_sonnet" => "Week (Sonnet)".into(),
+        _ => match (num("d"), num("h"), num("m")) {
+            (Some(d), _, _) => format!("{d} days"),
+            (_, Some(h), _) => format!("{h}h"),
+            (_, _, Some(m)) => format!("{m} min"),
+            _ => title.to_string(),
+        },
+    }
+}
+
+/// "3 h 20 min" (pt-BR) / "3h 20m" (en).
+pub fn countdown(secs: u64) -> String {
+    if !crate::i18n::is_en() {
+        return usage::countdown(secs);
+    }
+    let (d, h, m) = (secs / 86_400, secs % 86_400 / 3600, secs % 3600 / 60);
+    if d > 0 {
+        format!("{d}d {h}h")
+    } else if h > 0 {
+        format!("{h}h {m}m")
+    } else {
+        format!("{}m", m.max(1))
+    }
+}
+
+/// Texto do alerta no idioma da interface (o `text` do core é a versão em português).
+fn alert_text(a: &usage::Alert) -> String {
+    if !crate::i18n::is_en() {
+        return a.text.clone();
+    }
+    match (a.kind.as_str(), a.spent_usd, a.budget_usd) {
+        ("daily_budget", Some(s), Some(b)) => format!("Today's spend: ${s:.2} of ${b:.2} ({:.0}%)", a.pct),
+        ("monthly_budget", Some(s), Some(b)) => format!("This month's spend: ${s:.2} of ${b:.2} ({:.0}%)", a.pct),
+        ("limit", _, _) => {
+            let who = a.account_label.as_ref().map(|x| format!(" ({x})")).unwrap_or_default();
+            let provider = a.provider.as_deref().map(usage::limits::provider_label).unwrap_or("");
+            let title = limit_title(a.window.as_deref().unwrap_or(""), a.title.as_deref().unwrap_or(""));
+            let resets = a.resets_in_secs.map(|s| format!(", resets in {}", countdown(s))).unwrap_or_default();
+            format!("{provider}{who}: {title} at {:.0}%{resets}", a.pct)
+        }
+        _ => a.text.clone(),
+    }
+}
+
+fn build(handle: &AppHandle) -> tauri::Result<()> {
+    let menu = tray_menu(handle)?;
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon_image(None, None))
         .icon_as_template(cfg!(target_os = "macos"))
@@ -325,7 +398,8 @@ fn check_alerts(handle: &AppHandle) {
     let mut seen = st.notified.lock().unwrap();
     for a in o.alerts {
         if seen.insert(a.key.clone()) {
-            let _ = crate::send_notification(handle, &app, if a.level == "crit" { "Limite atingido" } else { "Uso de IA" }, &a.text);
+            let title = if a.level == "crit" { tr("Limite atingido", "Limit reached") } else { tr("Uso de IA", "AI usage") };
+            let _ = crate::send_notification(handle, &app, title, &alert_text(&a));
         }
     }
 }

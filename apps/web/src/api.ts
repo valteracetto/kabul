@@ -1,5 +1,7 @@
 import { lastNotify } from "./components/links";
 import { transport } from "./transport";
+import { t, lazyRecord } from "./i18n";
+import { fmtNum } from "./i18n/format";
 
 export type HarnessKind = "claude" | "codex" | "antigravity" | "opencode" | "qwen" | "gemini" | "goose" | "cursor";
 export type Api = "openai" | "anthropic" | "gemini";
@@ -328,8 +330,8 @@ export const api = {
 
 export const HARNESS_LABEL: Record<HarnessKind, string> = { claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", opencode: "OpenCode", qwen: "Qwen Code", gemini: "Gemini CLI", goose: "Goose", cursor: "Cursor" };
 export const EFFORT_LABEL: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "XHigh", max: "Max", ultra: "Ultra" };
-export const STATUS_LABEL: Record<string, string> = { backlog: "Backlog", "in-progress": "Em andamento", "in-review": "Em revisão", done: "Concluído", canceled: "Cancelado" };
+export const STATUS_LABEL: Record<string, string> = lazyRecord(() => ({ backlog: t("app.status.backlog"), "in-progress": t("app.status.inProgress"), "in-review": t("app.status.inReview"), done: t("app.status.done"), canceled: t("app.status.canceled") }));
 /** Ordem dos grupos por status na barra lateral. */
 export const STATUS_ORDER = ["done", "in-review", "in-progress", "backlog", "canceled"];
 export const wsTitle = (w: Workspace) => w.title || w.name[0].toUpperCase() + w.name.slice(1);
-export const fmtBytes = (n: number | null) => (n == null ? "—" : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
+export const fmtBytes = (n: number | null) => (n == null ? "—" : n >= 1e9 ? `${fmtNum(n / 1e9, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} GB` : `${Math.round(n / 1e6)} MB`);

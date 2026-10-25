@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { trLabel } from "../components/Usage";
 import { ProviderMark } from "../icons";
 import { HARNESS_LABEL, type HarnessKind, type Model } from "../api";
 import { useModelPrefs } from "../components/prefs";
 import { ACCOUNT_PROVIDER, EFFORTS, EFFORT_PT, isOwner, k, type Account, type StartOpts } from "./kabuld";
 import { AgentIcon, Group, I, Row, Sheet, haptic } from "./ui";
+import { t } from "../i18n";
+import { trError } from "../i18n/errors";
 
 export type RunsWhere = "local" | "cloud";
 
@@ -27,7 +30,7 @@ export function useMobileModels() {
  * Selecionar modelo: favoritos (✓ no ativo) + "Todos ›" agrupado por provedor, esforço em trilho
  * segmentado, modo rápido, conta do provedor e onde roda. `mode="start"`: tocar num modelo já começa.
  */
-export function ModelSheet({ title = "Selecionar modelo", testid = "m-model-sheet", mode = "pick", onClose, onPick, where, onWhere, current }: {
+export function ModelSheet({ title, testid = "m-model-sheet", mode = "pick", onClose, onPick, where, onWhere, current }: {
   title?: string; testid?: string; mode?: "pick" | "start"; onClose: () => void; onPick: (m: Model, o: StartOpts) => Promise<unknown> | void; where?: RunsWhere; onWhere?: (w: RunsWhere) => void; current?: string | null;
 }) {
   const { models, err: loadErr, prefs, setPrefs, selected, effort } = useMobileModels();
@@ -61,60 +64,61 @@ export function ModelSheet({ title = "Selecionar modelo", testid = "m-model-shee
   const groups = useMemo(() => {
     const g = new Map<string, Model[]>();
     for (const m of models ?? []) {
+      // "Locais" é a chave interna do grupo; o cabeçalho traduz. i18n-ignore
       const key = m.local ? "Locais" : `${PROVIDER_LABEL[m.provider] ?? m.provider} · ${HARNESS_LABEL[m.harness as HarnessKind] ?? m.harness}`;
       g.set(key, [...(g.get(key) ?? []), m]);
     }
     return [...g.entries()].sort((a, b) => (a[0] === "Locais" ? 1 : b[0] === "Locais" ? -1 : a[0].localeCompare(b[0])));
   }, [models]);
-  const sheetTitle = view === "all" ? "Todos os modelos" : view === "account" ? "Conta" : title;
-  const accName = accounts.find((a) => a.id === account)?.nickname;
+  const sheetTitle = view === "all" ? t("mobile.model.all") : view === "account" ? t("mobile.model.account") : title ?? t("mobile.model.select");
+  const accName = trLabel(accounts.find((a) => a.id === account)?.nickname ?? "") || undefined;
   return (
     <Sheet title={sheetTitle} onClose={onClose} testid={testid} full onBack={view !== "main" ? () => setView("main") : undefined}>
-      {!models && !loadErr && <div className="m-sheet-note">Carregando modelos…</div>}
+      {!models && !loadErr && <div className="m-sheet-note">{t("mobile.model.loading")}</div>}
       {view === "main" && models && (
         <>
           <Group>
             {favs.map((m) => (
-              <Row key={m.key} icon={markOf(m)} title={m.label} sub={m.local ? `Local · ${m.local.source_name}` : undefined} check={mode === "pick" && m.key === active?.key} onClick={busy ? undefined : () => choose(m)} testid="m-model" />
+              <Row key={m.key} icon={markOf(m)} title={m.label} sub={m.local ? t("mobile.model.localSub", { source: m.local.source_name }) : undefined} check={mode === "pick" && m.key === active?.key} onClick={busy ? undefined : () => choose(m)} testid="m-model" />
             ))}
-            <Row title="Todos" chevron onClick={() => setView("all")} testid="m-model-all" />
+            <Row title={t("mobile.model.allRow")} chevron onClick={() => setView("all")} testid="m-model-all" />
           </Group>
           {active && active.efforts.length > 0 && (
             <Group>
-              <div className="m-effort-head"><span>Esforço</span><span className="m-row-value">{EFFORT_PT[effort ?? ""] ?? effort}</span></div>
+              <div className="m-effort-head"><span>{t("mobile.model.effort")}</span><span className="m-row-value">{EFFORT_PT[effort ?? ""] ?? effort}</span></div>
               <EffortTrack levels={active.efforts} value={effort} onChange={(e) => setPrefs((p) => ({ ...p, effort: e }))} />
-              <Row icon={<I.bolt />} title="Modo rápido" toggle={prefs.fast} onClick={() => setPrefs((p) => ({ ...p, fast: !p.fast }))} testid="m-fast" />
+              <Row icon={<I.bolt />} title={t("mobile.model.fast")} toggle={prefs.fast} onClick={() => setPrefs((p) => ({ ...p, fast: !p.fast }))} testid="m-fast" />
             </Group>
           )}
           {accounts.length > 1 && (
             <Group>
-              <Row icon={<I.key />} title="Conta" value={accName ?? "Padrão do sistema"} chevron onClick={() => setView("account")} testid="m-account" />
+              <Row icon={<I.key />} title={t("mobile.model.account")} value={accName ?? t("mobile.model.systemDefault")} chevron onClick={() => setView("account")} testid="m-account" />
             </Group>
           )}
           {onWhere && active?.harness === "claude" && (
-            <Group header="Onde roda" footer={where === "cloud" ? "Roda na nuvem da Anthropic (claude --cloud) e abre o terminal da sessão aqui." : undefined}>
-              <Row icon={<I.laptop />} title="Este computador" check={where !== "cloud"} onClick={() => onWhere("local")} testid="m-where-local" />
-              <Row icon={<I.cloud />} title="Nuvem · Anthropic" check={where === "cloud"} onClick={() => onWhere("cloud")} testid="m-where-cloud" />
+            <Group header={t("mobile.model.where")} footer={where === "cloud" ? t("mobile.model.cloudFooter") : undefined}>
+              <Row icon={<I.laptop />} title={t("mobile.model.thisComputer")} check={where !== "cloud"} onClick={() => onWhere("local")} testid="m-where-local" />
+              <Row icon={<I.cloud />} title={t("mobile.model.cloudAnthropic")} check={where === "cloud"} onClick={() => onWhere("cloud")} testid="m-where-cloud" />
             </Group>
           )}
         </>
       )}
       {view === "all" &&
         groups.map(([g, ms]) => (
-          <Group key={g} header={g}>
+          <Group key={g} header={g === "Locais" ? t("mobile.model.local") : g}>
             {ms.map((m) => (
-              <Row key={m.key} icon={markOf(m)} title={m.label} sub={m.local ? m.local.source_name : undefined} value={m.local ? <span className="m-badge">Local</span> : undefined} check={m.key === active?.key} onClick={busy ? undefined : () => (choose(m, true), mode === "pick" ? undefined : setView("main"))} testid="m-model-any" />
+              <Row key={m.key} icon={markOf(m)} title={m.label} sub={m.local ? m.local.source_name : undefined} value={m.local ? <span className="m-badge">{t("mobile.model.localBadge")}</span> : undefined} check={m.key === active?.key} onClick={busy ? undefined : () => (choose(m, true), mode === "pick" ? undefined : setView("main"))} testid="m-model-any" />
             ))}
           </Group>
         ))}
       {view === "account" && (
-        <Group footer="Para adicionar ou entrar numa conta, use Configurações › Contas no app desktop.">
+        <Group footer={t("mobile.model.accountFooter")}>
           {accounts.map((a) => (
-            <Row key={a.id} title={a.nickname} sub={[a.email, a.plan].filter(Boolean).join(" · ") || undefined} check={a.id === account} onClick={() => (setAccount(a.id), setView("main"))} />
+            <Row key={a.id} title={trLabel(a.nickname)} sub={[a.email, a.plan].filter(Boolean).join(" · ") || undefined} check={a.id === account} onClick={() => (setAccount(a.id), setView("main"))} />
           ))}
         </Group>
       )}
-      {(err || loadErr) && <div className="m-error">{err ?? loadErr}</div>}
+      {(err || loadErr) && <div className="m-error">{trError(err ?? loadErr)}</div>}
     </Sheet>
   );
 }
@@ -126,8 +130,8 @@ function EffortTrack({ levels, value, onChange }: { levels: string[]; value: str
   const ref = useRef<HTMLDivElement>(null);
   const at = (x: number) => {
     const r = ref.current!.getBoundingClientRect();
-    const t = Math.min(1, Math.max(0, (x - r.left - 22) / (r.width - 44)));
-    return Math.round(t * (lv.length - 1));
+    const f = Math.min(1, Math.max(0, (x - r.left - 22) / (r.width - 44)));
+    return Math.round(f * (lv.length - 1));
   };
   const set = (j: number) => {
     if (lv[j] && lv[j] !== value) (haptic(null), onChange(lv[j]));
@@ -138,7 +142,7 @@ function EffortTrack({ levels, value, onChange }: { levels: string[]; value: str
       className="m-effort"
       ref={ref}
       role="slider"
-      aria-label="Esforço"
+      aria-label={t("mobile.model.effort")}
       aria-valuemin={0}
       aria-valuemax={lv.length - 1}
       aria-valuenow={i}

@@ -231,8 +231,8 @@ servidores MCP de cada um.
 roda comandos com o seu usuário (terminal e aprovações), então só convide como editor quem você deixaria usar
 o seu computador.
 
-**A interface está em português?** Sim. Hoje a interface do app é em português do Brasil; a tradução para o
-inglês está em andamento.
+**A interface está em português?** Sim, e em inglês. O app desktop, o app do celular, os menus e as notificações
+seguem o idioma do sistema; para escolher, vá em Configurações › Geral › Idioma (Sistema, English ou Português).
 
 **Tem app do celular nas lojas?** Ainda não. O app do celular é uma PWA que você instala pelo navegador; as
 versões para as lojas estão no roadmap.

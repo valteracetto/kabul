@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { base, dir } from "./api";
+import { t } from "../../i18n";
 
 interface Node { name: string; path: string; dirs: Map<string, Node>; files: string[] }
 
@@ -63,7 +64,7 @@ export function Tree({ ws, list, changed, onOpen }: { ws: string; list: string[]
         <span className="m-ellipsis">{base(f)}</span>
         {showDir && dir(f) && <span className="dim small m-ellipsis">{dir(f)}</span>}
       </span>
-      {changed.has(f) && <span className="pv-dot" title="Alterado" />}
+      {changed.has(f) && <span className="pv-dot" title={t("mobile.pv.changed")} />}
     </button>
   );
   const render = (n: Node, depth: number): ReactNode[] => {
@@ -84,11 +85,11 @@ export function Tree({ ws, list, changed, onOpen }: { ws: string; list: string[]
   return (
     <div className="pv-tree">
       <div className="pv-search">
-        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Buscar em ${list.length} arquivos`} data-testid="pv-search" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("mobile.pv.searchIn", { count: list.length })} data-testid="pv-search" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
       </div>
       {query ? (
         <div data-testid="pv-results">
-          {hits.length === 0 && <div className="m-empty dim">Nada com “{q}”.</div>}
+          {hits.length === 0 && <div className="m-empty dim">{t("mobile.pv.nothingWith", { q })}</div>}
           {hits.map((f) => file(f, 0, true))}
         </div>
       ) : (
