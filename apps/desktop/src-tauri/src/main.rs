@@ -1353,8 +1353,9 @@ fn app_settings_get(app: State<App>) -> AppSettings {
 fn app_settings_save(handle: AppHandle, app: State<App>, settings: AppSettings) -> R<()> {
     settings.apply_bin_overrides();
     settings.save(&app.file("app-settings.json")).map_err(e)?;
-    // Liga/desliga o ícone da barra de menus na hora.
+    // Liga/desliga o ícone da barra de menus na hora e redesenha com o que foi escolhido para ele.
     tray::apply(&handle);
+    tray::changed(&handle);
     Ok(())
 }
 

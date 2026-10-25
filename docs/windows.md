@@ -74,10 +74,11 @@ destacada.
 | Tailscale | PATH ou `/Applications/Tailscale.app` | PATH ou `%ProgramFiles%\Tailscale\tailscale.exe` | `kabuld::net` |
 | Ditado | `ffmpeg` + `whisper-cli` | os mesmos, opcionais: sem eles o erro diz o que instalar (`winget install Gyan.FFmpeg`, `whisper-cli.exe` no PATH ou em `KABUL_BIN_WHISPER_CLI`); modelo também em `%LOCALAPPDATA%\kabul\whisper` | `speech` |
 | Ícone do executável | `icon.icns` | `icons/icon.ico` (exigido pelo `tauri-build`) | `tauri.conf.json` |
-| Barra do Kabul | ícone "template" na barra de menus (o macOS pinta claro/escuro) e texto ao lado (`set_title`) | tray do Tauri na bandeja: ícone em cinza claro (`usage::icon::render` com cor) e a porcentagem na dica (tooltip); o popover abre acima do ícone quando a bandeja está embaixo. A testar: cor do ícone no tema claro da barra de tarefas | `tray.rs` |
+| Barra do Kabul | ícone "template" na barra de menus (o macOS pinta claro/escuro) e texto ao lado (`set_title`): porcentagens dos limites escolhidos e o gasto do dia, conforme o estilo | tray do Tauri na bandeja: ícone em cinza claro (`usage::icon::render_for` com cor); a bandeja não tem texto ao lado, então "porcentagem", "barras + %" e "mostrar o gasto de hoje" vão só na dica (tooltip, uma linha por limite escolhido + o gasto), cortada em 127 caracteres pelo Windows; no estilo "porcentagem" o ícone vira o símbolo (sem barras) e os números ficam na dica. O popover abre acima do ícone quando a bandeja está embaixo. A testar: cor do ícone no tema claro da barra de tarefas | `tray.rs`, `usage/icon.rs` |
 | Alertas de uso | notificação pelo plugin | o mesmo plugin | `send_notification` (usado por `notify` e pelo laço de `tray.rs`) |
 | CSV de uso | salvo em `$HOME/Downloads` | `%USERPROFILE%\Downloads`; o ideal é o diálogo de salvar (`tauri-plugin-dialog`) | `usage_csv_save` |
-| CodexBar CLI (fonte opcional de limites) | lido quando instalado | só existe no macOS: a fonte não aparece (limites vêm do stream dos agentes e do app-server do Codex) | `usage/limits.rs` |
+| CodexBar CLI (fonte opcional de limites) | lido quando instalado (PATH, `/Applications` ou `~/Applications`); link quebrado do Homebrew aparece em "Fontes" | só existe no macOS: a fonte não aparece (limites vêm do stream dos agentes, do app-server do Codex e da assinatura do Claude) | `usage/limits.rs` |
+| Limites da assinatura do Claude | credencial do Claude Code no Keychain (`Claude Code-credentials`, com sufixo do sha256 da pasta em contas com `CLAUDE_CONFIG_DIR`) via `/usr/bin/security` | arquivo `.credentials.json` da pasta de config (`%USERPROFILE%\.claude` ou o `CLAUDE_CONFIG_DIR` da conta). A testar no Windows real: se o Claude Code ainda grava o arquivo ali | `usage/claude_oauth.rs` |
 
 ## O que falta
 

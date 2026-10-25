@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { startKabuld, type Kabuld } from "./helpers";
+import { startKabuld, wsAction, type Kabuld } from "./helpers";
 
 // Android (Pixel 8): visual Material pela plataforma e voltar do sistema pelo histórico (tela e folha).
 let kd: Kabuld;
@@ -21,7 +21,7 @@ test("android: plataforma, voltar do sistema fecha folha e tela", async ({ page 
   await expect(page.getByTestId("m-list")).toBeVisible();
 
   // Tela empilhada: voltar do sistema e ‹ da barra levam à lista; avançar reabre.
-  await page.getByTestId("m-group").filter({ hasText: "Login novo" }).getByTestId("m-new-chat").click();
+  await wsAction(page, "Login novo", "m-new-chat");
   await page.getByTestId("m-model").filter({ has: page.locator('[data-agent="claude"]') }).first().click();
   await expect(page.getByTestId("m-chat")).toBeVisible();
   await page.goBack();

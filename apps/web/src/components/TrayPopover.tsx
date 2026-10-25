@@ -45,7 +45,7 @@ export function TrayPopover() {
       </div>
       {o && o.alerts.length > 0 && <div className="tray-alert" data-testid="tray-alert" onClick={() => act("usage")}>▲ {alertText(o.alerts[0])}{o.suggestions[0] ? ` · ${o.suggestions[0].to_account ? t("usage.tray.useAccount", { account: o.suggestions[0].to_account.nickname }) : t("usage.tray.switchModel")}` : ""}</div>}
       <div className="tray-scroll">
-        {o && <LimitBlocks snap={o.limits} empty={<div className="dim small">{t("usage.tray.noLimits")}</div>} />}
+        {o && <LimitBlocks snap={o.limits} expected={o.expected} empty={<div className="dim small">{t("usage.tray.noLimits")}</div>} />}
         <div className="tray-sec">
           <span>{t("usage.tray.running")}</span><span className="count">{working}/{agents.length}</span>
         </div>

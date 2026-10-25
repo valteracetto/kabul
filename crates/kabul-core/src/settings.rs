@@ -412,6 +412,9 @@ pub struct AppSettings {
     /// Ícone do Kabul na barra de menus (macOS) / bandeja (Windows).
     #[serde(default = "d_true")]
     pub tray: bool,
+    /// O que o ícone mostra (aba Uso e Configurações › Geral › Ícone na barra de menus).
+    #[serde(default)]
+    pub tray_icon: TrayIconPrefs,
     /// Avisa quando uma janela de limite passar disto (%).
     #[serde(default = "d_alert_pct")]
     pub usage_alert_pct: u32,
@@ -435,6 +438,46 @@ pub struct AppSettings {
 
 fn d_alert_pct() -> u32 {
     80
+}
+
+/// Um limite escolhido para o ícone: provedor, conta (perfil do Kabul ou o rótulo da fonte) e janela.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PinnedLimit {
+    pub provider: String,
+    pub account: String,
+    pub window: String,
+}
+
+/// Até quantos limites cabem no ícone.
+pub const TRAY_MAX_PINNED: usize = 3;
+
+/// O que o ícone da barra de menus / bandeja mostra.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrayIconPrefs {
+    /// `auto` (os dois limites mais apertados) ou `manual` (os de `pinned`, até 3).
+    #[serde(default = "d_auto")]
+    pub mode: String,
+    #[serde(default)]
+    pub pinned: Vec<PinnedLimit>,
+    /// `bars`, `percent`, `bars_percent` ou `icon` (só o ícone).
+    #[serde(default = "d_bars_percent")]
+    pub style: String,
+    /// Mostra o gasto de hoje ao lado (macOS) / na dica (Windows).
+    #[serde(default)]
+    pub show_spend: bool,
+}
+
+impl Default for TrayIconPrefs {
+    fn default() -> Self {
+        Self { mode: d_auto(), pinned: vec![], style: d_bars_percent(), show_spend: false }
+    }
+}
+
+fn d_auto() -> String {
+    "auto".into()
+}
+fn d_bars_percent() -> String {
+    "bars_percent".into()
 }
 
 fn d_stable() -> String {

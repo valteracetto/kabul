@@ -11,6 +11,8 @@ rusqlite.workspace = true
 portable-pty.workspace = true
 toml.workspace = true
 ureq = "2"
+# Nome do item do Keychain do Claude Code por pasta de config (sha256 do caminho).
+sha2 = "0.10"
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 vt100 = "0.18"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

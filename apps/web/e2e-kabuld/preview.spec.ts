@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join, resolve } from "node:path";
-import { freePort, startKabuld, type Kabuld } from "./helpers";
+import { freePort, startKabuld, wsAction, type Kabuld } from "./helpers";
 
 // iPhone (WebKit) contra o kabuld real: preview de arquivos do workspace, abrir arquivo a partir do
 // chat, "perguntar no chat" e o app do workspace pelo proxy do Run.
@@ -70,7 +70,7 @@ const openFromTree = async (page: Page, path: string) => {
 
 test("árvore com busca e preview de cada tipo: código, Markdown, CSV, JSON, SVG, imagem com pinça, PDF, binário, arquivo grande em páginas", async ({ page, request }) => {
   await pairPhone(page);
-  await page.getByTestId("m-group").filter({ hasText: "Login novo" }).getByTestId("m-files").click();
+  await wsAction(page, "Login novo", "m-files");
   await expect(page.getByTestId("pv-screen")).toBeVisible();
   await expect(page.getByTestId("pv-title")).toHaveText("Login novo");
 
@@ -171,7 +171,7 @@ test("árvore com busca e preview de cada tipo: código, Markdown, CSV, JSON, SV
 
 test("chat: caminho citado abre o preview, chips de alterados abrem o diff, perguntar sobre um trecho manda ao chat", async ({ page }) => {
   await pairPhone(page);
-  await page.getByTestId("m-group").filter({ hasText: "Login novo" }).getByTestId("m-new-chat").click();
+  await wsAction(page, "Login novo", "m-new-chat");
   await page.getByTestId("m-model").filter({ has: page.locator('[data-agent="claude"]') }).first().click();
   await expect(page.getByTestId("m-chat")).toBeVisible();
   await page.getByTestId("m-chat-input").fill("olhe `src/main.rs:3` e `README.md`");
@@ -212,7 +212,7 @@ test("chat: caminho citado abre o preview, chips de alterados abrem o diff, perg
 
 test("Alterações e o app do workspace pelo proxy do Run (outro endereço, só portas do workspace)", async ({ page }) => {
   await pairPhone(page);
-  await page.getByTestId("m-group").filter({ hasText: "Login novo" }).getByTestId("m-files").click();
+  await wsAction(page, "Login novo", "m-files");
   await page.getByTestId("pv-tab-changes").click();
   await expect(page.getByTestId("pv-change").filter({ hasText: "a.txt" })).toBeVisible();
   await page.getByTestId("pv-scope-branch").click();

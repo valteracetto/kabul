@@ -50,6 +50,8 @@ export const I = {
   gear: ({ size = 24 }: IP) => svg(size, <><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7" /></>, 1.7),
   branch: ({ size = 18 }: IP) => svg(size, <><circle cx="7" cy="5.5" r="2" /><circle cx="7" cy="18.5" r="2" /><circle cx="17" cy="8" r="2" /><path d="M7 7.5v9M17 10c0 4-10 2.5-10 6.5" /></>, 1.6),
   personPlus: ({ size = 19 }: IP) => svg(size, <><circle cx="10" cy="8" r="3.5" /><path d="M3.5 19.5a6.5 6.5 0 0 1 13 0M19 8v6M16 11h6" /></>, 1.7),
+  more: ({ size = 20 }: IP) => (PLATFORM === "android" ? svg(size, <><circle cx="12" cy="5.5" r="1.4" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" /><circle cx="12" cy="18.5" r="1.4" fill="currentColor" stroke="none" /></>) : svg(size, <><circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" /><circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none" /></>)),
+  folder: ({ size = 19 }: IP) => svg(size, <path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />, 1.7),
   chatPlus: ({ size = 19 }: IP) => svg(size, <path d="M20 12a8 8 0 0 1-11.6 7.1L4 20l.9-4.1A8 8 0 1 1 20 12zM12 8.5v7M8.5 12h7" />, 1.7),
   bolt: ({ size = 20 }: IP) => svg(size, <path d="M13 3 5 13.5h6L10 21l8-10.5h-6L13 3z" />, 1.6),
   grip: ({ size = 18 }: IP) => svg(size, <path d="M5 9h14M5 15h14" />, 2),

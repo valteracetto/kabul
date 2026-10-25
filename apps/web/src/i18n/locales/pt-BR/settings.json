@@ -369,5 +369,7 @@
   "settings.diag.rerun": "Rodar de novo",
   "settings.diag.copy": "Copiar relatório",
   "settings.diag.copyRedacted": "Copiar sem dados pessoais",
-  "settings.diag.checking": "Verificando o ambiente…"
+  "settings.diag.checking": "Verificando o ambiente…",
+
+  "settings.general.trayIcon.hint": "O que o ícone mostra: os limites mais apertados ou até 3 escolhidos, o estilo e o gasto do dia"
 }

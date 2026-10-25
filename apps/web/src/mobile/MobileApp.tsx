@@ -21,6 +21,24 @@ import { trError } from "../i18n/errors";
 export type Tab = "home" | "usage" | "settings";
 const TAB_KEY = "kabul.m.tab";
 
+/** Instalada na Tela de Início (sem barra do navegador). */
+const standalone = () => (navigator as Navigator & { standalone?: boolean }).standalone === true || matchMedia("(display-mode: standalone)").matches;
+
+/**
+ * Altura da tela do app sem teclado. Na PWA do iPhone (iOS 26, barra de status `black-translucent`),
+ * `innerHeight` e `visualViewport.height` vêm curtos pela área segura de cima (956 − 62 no 16 Pro Max): usar
+ * esse número deixava a barra de abas flutuando com uma faixa preta embaixo. Ocupando a largura toda da tela,
+ * a PWA ocupa a altura toda também, então vale a altura da tela (na orientação atual).
+ */
+function fullHeight() {
+  const h = Math.max(window.innerHeight, document.documentElement.clientHeight, window.visualViewport?.height ?? 0);
+  if (PLATFORM !== "ios" || !standalone() || !screen.width || !screen.height) return h;
+  const land = window.innerWidth > Math.min(screen.width, screen.height) + 1;
+  const sw = land ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+  const sh = land ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
+  return Math.abs(window.innerWidth - sw) <= 1 ? Math.max(h, sh) : h;
+}
+
 /** Altura visível de verdade (o teclado do iPhone encolhe o visualViewport, não o layout). */
 function useVisualViewport() {
   useEffect(() => {
@@ -30,15 +48,19 @@ function useVisualViewport() {
     root.dataset.platform = PLATFORM;
     if (!vv) return;
     const upd = () => {
-      root.style.setProperty("--m-vvh", `${Math.round(vv.height)}px`);
-      root.classList.toggle("m-kb", window.innerHeight - vv.height > 120);
+      const full = fullHeight();
+      // Teclado aberto: só a parte visível acima dele; fechado: a tela inteira.
+      const kb = full - vv.height > 120;
+      root.style.setProperty("--m-vvh", `${Math.round(kb ? vv.height : full)}px`);
+      root.classList.toggle("m-kb", kb);
       // O Safari rola a página para mostrar o campo; a tela é fixa, então volta para o topo.
       if (window.scrollY) window.scrollTo(0, 0);
     };
     upd();
     vv.addEventListener("resize", upd);
     vv.addEventListener("scroll", upd);
-    return () => (vv.removeEventListener("resize", upd), vv.removeEventListener("scroll", upd));
+    window.addEventListener("resize", upd);
+    return () => (vv.removeEventListener("resize", upd), vv.removeEventListener("scroll", upd), window.removeEventListener("resize", upd));
   }, []);
 }
 

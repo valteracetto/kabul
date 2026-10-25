@@ -39,7 +39,7 @@
 .pv-dl.a .pv-ln, .pv-dl.d .pv-ln { background: inherit; }
 .pv-sign { flex: none; width: 1.1em; text-align: center; user-select: none; -webkit-user-select: none; }
 .pv-hunk { padding: 4px 10px; color: var(--dim); background: var(--sunken); font-size: 11.5px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
-.pv-selbar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 6px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: var(--pop); border-top: 1px solid var(--pop-line); box-shadow: var(--shadow); font-size: 13px; margin-top: auto; }
+.pv-selbar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 6px; padding: 8px 10px calc(8px + var(--m-sab)); background: var(--pop); border-top: 1px solid var(--pop-line); box-shadow: var(--shadow); font-size: 13px; margin-top: auto; }
 .pv-pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--mono); padding: 10px; }
 
 .pv-md { padding: 12px 16px 40px; font-size: 15px; line-height: 1.55; user-select: text; -webkit-user-select: text; }
@@ -90,7 +90,7 @@
 
 /* Cabeçalho e abas da tela de arquivos (as regras .m-top/.m-tabs saíram do mobile.css no visual nativo). */
 .m-app.pv-app { display: flex; flex-direction: column; }
-.pv-app .m-top { flex: none; display: flex; align-items: center; gap: 10px; padding: calc(env(safe-area-inset-top) + 6px) 16px 10px; min-height: 52px; box-shadow: 0 .5px 0 var(--m-sep); }
+.pv-app .m-top { flex: none; display: flex; align-items: center; gap: 10px; padding: calc(var(--m-sat) + 6px) 16px 10px; min-height: 52px; box-shadow: 0 .5px 0 var(--m-sep); }
 .pv-app .m-top .m-btn.ghost { width: 44px; height: 44px; flex: none; display: inline-grid; place-items: center; padding: 0 0 4px; border: 0; border-radius: 50%; background: var(--m-fill); color: var(--m-label); font-size: 30px; line-height: 1; }
 .pv-app .m-top-title { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; }
 .pv-app .m-top-title b { font-size: 17px; font-weight: 600; }

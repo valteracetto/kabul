@@ -44,8 +44,12 @@ impl Limit {
             None => now.saturating_sub(self.updated_at) < 86_400,
         }
     }
+    /// Conta do limite como a tela agrupa: o perfil do Kabul, ou o rótulo da fonte (e-mail) sem perfil.
+    pub fn account_key(&self) -> String {
+        self.account.clone().or(self.account_label.clone()).unwrap_or_default()
+    }
     fn key(&self) -> (String, String, String) {
-        (self.provider.clone(), self.account.clone().or(self.account_label.clone()).unwrap_or_default(), self.window.clone())
+        (self.provider.clone(), self.account_key(), self.window.clone())
     }
 }
 
@@ -73,6 +77,14 @@ pub struct SourceInfo {
     pub name: String,
     pub ok: bool,
     pub detail: String,
+    /// Fonte de uma conta: provedor e perfil do Kabul (para a tela ligar a falha ao bloco da conta).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    /// Código da falha para a interface traduzir (`no_login`, `expired`, `codexbar_broken`…).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -350,14 +362,69 @@ fn run_with_timeout(mut cmd: std::process::Command, timeout: Duration) -> Option
     reader.join().ok()
 }
 
-/// CodexBar instalado? (`codexbar` no PATH ou `KABUL_BIN_CODEXBAR`).
+/// Onde está o CLI do CodexBar.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CodexBarFind {
+    Found(std::path::PathBuf),
+    /// `codexbar` existe no PATH mas é um link quebrado (o app foi removido e o link do Homebrew ficou).
+    Broken {
+        link: std::path::PathBuf,
+        target: std::path::PathBuf,
+    },
+    Missing,
+}
+
+/// CLI dentro do app (o Homebrew liga `codexbar` a ele).
+const CODEXBAR_IN_APP: &str = "CodexBar.app/Contents/Helpers/CodexBarCLI";
+
+/// Procura o CodexBar: `codexbar` no PATH (ou `KABUL_BIN_CODEXBAR`), depois o CLI dentro do app em
+/// `/Applications` e `~/Applications`. Sem nada disso, diz se sobrou um link quebrado no PATH.
+pub fn find_codexbar() -> CodexBarFind {
+    if let Some(p) = crate::harness::which("codexbar") {
+        return CodexBarFind::Found(p);
+    }
+    let dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default().into_iter().chain(crate::harness::extra_bin_dirs()).collect();
+    let apps = [std::path::PathBuf::from("/Applications"), crate::paths::home().join("Applications")];
+    find_codexbar_in(&dirs, &apps)
+}
+
+/// [`find_codexbar`] com as pastas dadas (testável). Não olha o PATH real.
+pub fn find_codexbar_in(path_dirs: &[std::path::PathBuf], app_dirs: &[std::path::PathBuf]) -> CodexBarFind {
+    if let Some(p) = path_dirs.iter().map(|d| d.join("codexbar")).find(|p| p.is_file()) {
+        return CodexBarFind::Found(p);
+    }
+    if let Some(p) = app_dirs.iter().map(|d| d.join(CODEXBAR_IN_APP)).find(|p| p.is_file()) {
+        return CodexBarFind::Found(p);
+    }
+    for link in path_dirs.iter().map(|d| d.join("codexbar")) {
+        let is_link = std::fs::symlink_metadata(&link).is_ok_and(|m| m.file_type().is_symlink());
+        if is_link && !link.exists() {
+            let target = std::fs::read_link(&link).unwrap_or_default();
+            return CodexBarFind::Broken { link, target };
+        }
+    }
+    CodexBarFind::Missing
+}
+
+/// CodexBar instalado e funcionando?
 pub fn codexbar_bin() -> Option<std::path::PathBuf> {
-    crate::harness::which("codexbar")
+    match find_codexbar() {
+        CodexBarFind::Found(p) => Some(p),
+        _ => None,
+    }
+}
+
+/// Falha do CodexBar: código para a interface e texto em português.
+fn codexbar_missing(find: &CodexBarFind) -> (&'static str, String) {
+    match find {
+        CodexBarFind::Broken { link, target } => ("codexbar_broken", format!("CodexBar não encontrado (o link aponta para um app removido: {} → {})", link.display(), target.display())),
+        _ => ("codexbar_missing", "CodexBar não instalado".into()),
+    }
 }
 
 /// Lê o CodexBar (até 45 s: ele consulta as APIs dos provedores).
 pub fn read_codexbar(accounts: &[crate::accounts::AccountProfile]) -> Result<Reading, String> {
-    let bin = codexbar_bin().ok_or("CodexBar não instalado")?;
+    let bin = codexbar_bin().ok_or_else(|| codexbar_missing(&find_codexbar()).1)?;
     let mut c = crate::shell::command(bin);
     c.args(["usage", "--format", "json", "--status", "--no-color"]);
     let out = run_with_timeout(c, Duration::from_secs(45)).ok_or("CodexBar não respondeu")?;
@@ -421,14 +488,34 @@ pub fn refresh(home: &Path, use_codexbar: bool) -> LimitsSnapshot {
     let accs = crate::accounts::Accounts::open(home);
     let mut fresh = vec![];
     let mut sources = vec![];
+    let acct = |provider: &str, p: &crate::accounts::AccountProfile| (Some(provider.to_string()), Some(p.id.clone()));
     if crate::harness::which("codex").is_some() {
         for p in accs.of("codex") {
+            let (provider, account) = acct("codex", &p);
+            let name = format!("Codex app-server · {}", p.nickname);
             match probe_codex(&p) {
                 Ok(l) => {
-                    sources.push(SourceInfo { name: format!("Codex app-server · {}", p.nickname), ok: true, detail: format!("{} janela(s)", l.len()) });
+                    sources.push(SourceInfo { name, ok: true, detail: format!("{} janela(s)", l.len()), provider, account, code: None });
                     fresh.extend(l);
                 }
-                Err(e) => sources.push(SourceInfo { name: format!("Codex app-server · {}", p.nickname), ok: false, detail: e }),
+                Err(e) => sources.push(SourceInfo { name, ok: false, detail: e, provider, account, code: Some("error".into()) }),
+            }
+        }
+    }
+    // Claude: limites da assinatura com o login do próprio Claude Code, um perfil por vez.
+    let claude = accs.of("claude");
+    let mut claude_native = false;
+    if crate::harness::which("claude").is_some() || claude.iter().any(|p| p.dir.is_some()) {
+        for p in &claude {
+            let (provider, account) = acct("claude", p);
+            let name = format!("Claude (assinatura) · {}", p.nickname);
+            match super::claude_oauth::probe(p) {
+                Ok(l) => {
+                    claude_native |= p.dir.is_none();
+                    sources.push(SourceInfo { name, ok: true, detail: format!("{} janela(s)", l.len()), provider, account, code: None });
+                    fresh.extend(l);
+                }
+                Err(e) => sources.push(SourceInfo { name, ok: false, detail: e.text(), provider, account, code: Some(e.code().into()) }),
             }
         }
     }
@@ -437,16 +524,26 @@ pub fn refresh(home: &Path, use_codexbar: bool) -> LimitsSnapshot {
         let all: Vec<_> = ["claude", "codex", "agy", "gemini"].iter().flat_map(|p| accs.of(p)).collect();
         match read_codexbar(&all) {
             Ok((l, s, c)) => {
-                sources.push(SourceInfo { name: "CodexBar".into(), ok: true, detail: format!("{} janela(s)", l.len()) });
+                sources.push(SourceInfo { name: "CodexBar".into(), ok: true, detail: format!("{} janela(s)", l.len()), ..Default::default() });
                 fresh.extend(l);
                 (status, credits) = (Some(s), Some(c));
             }
-            Err(e) => sources.push(SourceInfo { name: "CodexBar".into(), ok: false, detail: e }),
+            Err(e) => {
+                let code = codexbar_bin().is_none().then(|| codexbar_missing(&find_codexbar()).0.to_string()).or(Some("error".into()));
+                sources.push(SourceInfo { name: "CodexBar".into(), ok: false, detail: e, code, ..Default::default() });
+            }
         }
     }
-    sources.push(SourceInfo { name: "Stream dos agentes".into(), ok: true, detail: "Claude e Codex mandam os limites a cada turno".into() });
+    sources.push(SourceInfo { name: "Stream dos agentes".into(), ok: true, detail: "Claude e Codex mandam os limites a cada turno".into(), ..Default::default() });
+    // A leitura direta do Claude (conta do sistema) vale mais que a do CodexBar para a mesma conta.
+    if claude_native {
+        fresh.retain(|l| !(l.provider == "claude" && l.source == "codexbar"));
+    }
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut s = load(home);
+    if claude_native {
+        s.limits.retain(|l| !(l.provider == "claude" && l.source == "codexbar"));
+    }
     s.merge(fresh);
     if let Some(st) = status {
         s.status = st;
@@ -537,5 +634,41 @@ mod tests {
             c.args(["-c", "echo '[]'"]);
             assert_eq!(run_with_timeout(c, Duration::from_secs(5)).unwrap().trim(), "[]");
         }
+    }
+
+    /// Evento como o Claude Code 2.1 manda no stream-json (conferido com `claude -p ok --model haiku
+    /// --output-format stream-json --verbose`; ids trocados).
+    #[test]
+    fn claude_stream_real() {
+        let line = r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1792940400,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"out_of_credits","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.21,"resetsAt":1792940400,"status":"allowed"},"seven_day":{"utilization":0.6,"resetsAt":1793116800,"status":"allowed"}}},"uuid":"00000000-0000-0000-0000-000000000000","session_id":"s"}"#;
+        let ev = crate::harness::claude::parse_claude_line(line, &mut None);
+        let crate::harness::Event::Raw { value } = &ev[0] else { panic!("{ev:?}") };
+        let l = from_claude_event(value, Some("claude:sistema".into()), None);
+        assert_eq!(l.iter().map(|x| (x.window.as_str(), x.used_pct.round() as u64)).collect::<Vec<_>>(), vec![("5h", 21), ("semana", 60)]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codexbar_link_quebrado() {
+        let root = std::env::temp_dir().join(format!("kabul-codexbar-{}", crate::store::id()));
+        let (bin, apps) = (root.join("bin"), root.join("Applications"));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&apps).unwrap();
+        assert_eq!(find_codexbar_in(std::slice::from_ref(&bin), std::slice::from_ref(&apps)), CodexBarFind::Missing);
+        // Link do Homebrew para um app que não existe mais.
+        let gone = apps.join(CODEXBAR_IN_APP);
+        std::os::unix::fs::symlink(&gone, bin.join("codexbar")).unwrap();
+        let f = find_codexbar_in(std::slice::from_ref(&bin), std::slice::from_ref(&apps));
+        assert_eq!(f, CodexBarFind::Broken { link: bin.join("codexbar"), target: gone.clone() });
+        let (code, text) = codexbar_missing(&f);
+        assert_eq!(code, "codexbar_broken");
+        assert!(text.starts_with("CodexBar não encontrado (o link aponta para um app removido"), "{text}");
+        // App reinstalado (em /Applications ou ~/Applications): o link volta a valer e o CLI do app é achado.
+        std::fs::create_dir_all(gone.parent().unwrap()).unwrap();
+        std::fs::write(&gone, "#!/bin/sh\n").unwrap();
+        assert_eq!(find_codexbar_in(std::slice::from_ref(&bin), std::slice::from_ref(&apps)), CodexBarFind::Found(bin.join("codexbar")));
+        std::fs::remove_file(bin.join("codexbar")).unwrap();
+        assert_eq!(find_codexbar_in(std::slice::from_ref(&bin), std::slice::from_ref(&apps)), CodexBarFind::Found(gone));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

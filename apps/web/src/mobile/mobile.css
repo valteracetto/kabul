@@ -3,6 +3,13 @@
    (styles.css) e fonte Geist. As regras base de .m-btn/.m-sheet/.m-ticket também servem ao painel
    "Celular e remoto" do desktop; o resto vale só dentro de .m-app. */
 
+/* Áreas seguras (barra de status/Dynamic Island em cima, indicador de gestos embaixo) por variável: o CSS
+   usa só estas, e o E2E troca os valores (o Playwright não tem área segura). */
+:root {
+  --m-sat: env(safe-area-inset-top, 0px);
+  --m-sab: env(safe-area-inset-bottom, 0px);
+}
+
 /* ---------- tokens (só quando a PWA está montada) ---------- */
 :root[data-mobile] {
   --m-bg: #0c0a09;
@@ -71,7 +78,7 @@
 .m-btn:disabled { opacity: .45; }
 .m-avatar { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: #fff; font-weight: 700; flex: none; }
 .m-sheet-bg { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: flex-end; z-index: 50; }
-.m-sheet { width: 100%; max-height: 88vh; overflow-y: auto; background: var(--pop); border-radius: 16px 16px 0 0; padding: 6px 0 calc(16px + env(safe-area-inset-bottom)); box-shadow: var(--shadow); }
+.m-sheet { width: 100%; max-height: 88vh; overflow-y: auto; background: var(--pop); border-radius: 16px 16px 0 0; padding: 6px 0 calc(16px + var(--m-sab)); box-shadow: var(--shadow); }
 .m-sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; }
 .m-ticket { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px 14px; }
 .m-qr { background: #fff; padding: 6px; border-radius: 10px; line-height: 0; }
@@ -86,7 +93,12 @@
   position: fixed; left: 0; right: 0; top: 0; height: var(--m-vvh, 100dvh); overflow: hidden;
   background: var(--m-bg); color: var(--m-label); font: 400 17px/1.35 var(--sans); letter-spacing: -0.01em;
   -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%;
+  /* Altura da barra de abas sem a área do indicador de gestos, e do botão Criar (a lista reserva as duas). */
+  --m-tab-h: 56px; --m-fab-h: 52px;
 }
+/* Atrás da barra de status: fundo sólido do app, por cima de tudo menos das folhas. Nada que passe por ali
+   (avatar, título rolando, desfoque da barra recolhida) vaza para a barra de status. */
+.m-app::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: var(--m-sat); background: var(--m-bg); z-index: 45; pointer-events: none; }
 .m-app button { cursor: pointer; -webkit-user-select: none; user-select: none; }
 .m-app input, .m-app textarea { font-size: 17px; }
 .m-app .grow { flex: 1; }
@@ -111,14 +123,14 @@
 /* ---------- barra de navegação ---------- */
 .m-nav {
   position: relative; z-index: 5; flex: none; display: flex; align-items: center; gap: 8px;
-  padding: calc(env(safe-area-inset-top) + 6px) 16px 8px; min-height: calc(env(safe-area-inset-top) + 60px);
+  padding: calc(var(--m-sat) + 2px) 16px 8px; min-height: calc(var(--m-sat) + 54px);
   background: transparent; transition: background .2s, box-shadow .2s;
 }
 .m-nav.collapsed { background: var(--m-bar); -webkit-backdrop-filter: blur(22px) saturate(180%); backdrop-filter: blur(22px) saturate(180%); box-shadow: 0 .5px 0 var(--m-sep); }
 .m-nav-side { display: flex; align-items: center; gap: 10px; min-width: 44px; z-index: 1; }
 .m-nav-side.m-nav-l { flex: none; }
 .m-nav-side.m-nav-r { flex: none; margin-left: auto; justify-content: flex-end; min-width: 0; }
-.m-nav-title { position: absolute; left: 76px; right: 76px; bottom: 8px; top: calc(env(safe-area-inset-top) + 6px); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; opacity: 0; transition: opacity .18s; }
+.m-nav-title { position: absolute; left: 76px; right: 76px; bottom: 8px; top: calc(var(--m-sat) + 2px); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; opacity: 0; transition: opacity .18s; }
 .m-nav.collapsed .m-nav-title { opacity: 1; }
 .m-nav-title b { font-size: 17px; font-weight: 600; max-width: 100%; }
 .m-nav-sub { font-size: 12px; margin-top: 1px; color: var(--m-label-2); max-width: 100%; pointer-events: auto; }
@@ -140,7 +152,10 @@
 
 /* ---------- rolagem, puxar para atualizar, vazio ---------- */
 .m-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
-.m-scroll.has-tabbar { padding-bottom: calc(env(safe-area-inset-bottom) + 64px); }
+.m-scroll.has-tabbar { padding-bottom: calc(var(--m-sab) + var(--m-tab-h)); }
+/* Com o botão Criar: a última linha termina acima dele (barra de abas + botão + folga). */
+.m-scroll.has-fab { padding-bottom: calc(var(--m-sab) + var(--m-tab-h) + var(--m-fab-h) + 32px); }
+.m-scroll.has-fab .m-scroll-end { display: none; }
 .m-scroll-end { height: 96px; }
 .m-scroll > .m-grp:first-child { margin-top: 18px; }
 .m-ptr { display: flex; align-items: center; justify-content: center; overflow: hidden; transition: height .2s; }
@@ -168,7 +183,8 @@
 .m-row::before { content: ""; position: absolute; top: 0; left: var(--sep); right: 0; height: .5px; background: var(--m-sep); }
 .m-grp-body > .m-row:first-child::before,
 .m-grp-body > .m-swipe:first-child > .m-swipe-content > .m-row::before,
-.m-grp-body > .m-ws:first-child > .m-swipe:first-child > .m-swipe-content > .m-row::before { display: none; }
+.m-grp-body > .m-ws:first-child > .m-swipe:first-child > .m-swipe-content > .m-row::before,
+.m-grp-body > .m-external-item:first-child > .m-row::before { display: none; }
 .m-row.tappable:active, .m-row.tappable.m-haptic { background: var(--m-cell-hl); transition: none; }
 .m-row:disabled { opacity: 1; }
 .m-row:disabled .m-row-title { color: var(--m-label-2); }
@@ -217,6 +233,7 @@
 .m-session-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; color: var(--m-label-2); min-width: 0; }
 .m-session-sub.mono { font-family: var(--mono); font-size: 12.5px; }
 .m-external .m-row-title { font-size: 16px; }
+.m-external-why { padding: 0 16px 12px 58px; margin-top: -4px; font-size: 13.5px; line-height: 1.35; color: var(--m-orange); }
 .m-chip-btn { flex: none; border: 0; border-radius: 15px; background: var(--m-fill); color: var(--m-label); font-size: 14px; font-weight: 600; padding: 6px 13px; }
 .m-chip-btn:disabled { opacity: .4; }
 .m-chip-btn.danger { background: var(--m-red); color: #fff; }
@@ -256,7 +273,8 @@
 .m-swipe-content.settle { transition: transform .32s cubic-bezier(.2, .9, .3, 1); }
 
 /* ---------- barra de abas e botão criar ---------- */
-.m-tabbar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; padding: 6px 8px calc(env(safe-area-inset-bottom) + 4px); background: var(--m-bar); -webkit-backdrop-filter: blur(22px) saturate(180%); backdrop-filter: blur(22px) saturate(180%); box-shadow: 0 -.5px 0 var(--m-sep); }
+/* Encosta na base: só a área do indicador de gestos fica dentro dela (embaixo dos rótulos). */
+.m-tabbar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; box-sizing: border-box; height: calc(var(--m-tab-h) + max(var(--m-sab), 6px)); padding: 6px 8px max(var(--m-sab), 6px); background: var(--m-bar); -webkit-backdrop-filter: blur(22px) saturate(180%); backdrop-filter: blur(22px) saturate(180%); box-shadow: 0 -.5px 0 var(--m-sep); }
 .m-tabbar button { flex: 1; border: 0; background: transparent; color: var(--m-label-3); display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0 2px; transition: color .2s; }
 .m-tabbar button.on { color: var(--m-label); }
 .m-tabbar button:active .m-tab-icon { transform: scale(.88); }
@@ -264,7 +282,7 @@
 .m-tab-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0; }
 .m-tab-badge { position: absolute; top: -3px; left: 17px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--m-amber); color: #1a1408; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
 .m-kb .m-tabbar, .m-kb .m-fab { display: none; }
-.m-fab { position: absolute; right: 18px; bottom: calc(env(safe-area-inset-bottom) + 76px); z-index: 7; height: 52px; display: inline-flex; align-items: center; gap: 8px; padding: 0 22px 0 18px; border: 0; border-radius: 26px; background: var(--m-fab-bg); color: var(--m-fab-fg); font-size: 17px; font-weight: 600; box-shadow: var(--m-shadow); transition: transform .14s; }
+.m-fab { position: absolute; right: 18px; bottom: calc(var(--m-sab) + var(--m-tab-h) + 16px); z-index: 7; height: var(--m-fab-h); display: inline-flex; align-items: center; gap: 8px; padding: 0 22px 0 18px; border: 0; border-radius: 26px; background: var(--m-fab-bg); color: var(--m-fab-fg); font-size: 17px; font-weight: 600; box-shadow: var(--m-shadow); transition: transform .14s; }
 .m-fab:active { transform: scale(.95); }
 
 /* ---------- folhas ---------- */
@@ -272,12 +290,12 @@
 .m-app .m-sheet-bg.leaving { animation: m-fade-out .2s ease-in forwards; }
 @keyframes m-fade-out { to { opacity: 0; } }
 .m-app .m-sheet {
-  position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; max-height: calc(100% - env(safe-area-inset-top) - 14px);
+  position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; max-height: calc(100% - var(--m-sat) - 14px);
   background: var(--m-sheet); border-radius: 30px 30px 0 0; padding: 0; box-shadow: var(--m-shadow); overflow: hidden;
   animation: m-sheet-in .38s cubic-bezier(.2, .9, .25, 1); transition: transform .25s cubic-bezier(.2, .9, .25, 1);
   --m-cell: var(--m-sheet-cell);
 }
-.m-app .m-sheet.full { top: calc(env(safe-area-inset-top) + 14px); }
+.m-app .m-sheet.full { top: calc(var(--m-sat) + 14px); }
 .m-app .m-sheet.leaving { animation: m-sheet-out .2s ease-in forwards; }
 @keyframes m-sheet-in { from { transform: translateY(100%); } }
 @keyframes m-sheet-out { to { transform: translateY(100%); } }
@@ -285,7 +303,7 @@
 .m-sheet-grab span, .m-sheet-grab-bar { width: 38px; height: 5px; border-radius: 3px; background: var(--m-label-3); opacity: .6; }
 .m-app .m-sheet-head { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; gap: 8px; padding: 4px 16px 16px; touch-action: none; }
 .m-app .m-sheet-head b { text-align: center; font-size: 17px; font-weight: 600; }
-.m-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: calc(env(safe-area-inset-bottom) + 18px); overscroll-behavior: contain; }
+.m-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: calc(var(--m-sab) + 18px); overscroll-behavior: contain; }
 .m-sheet-note { margin: 0 20px 16px; font-size: 14px; color: var(--m-label-2); line-height: 1.45; }
 .m-app .m-ticket { padding: 4px 16px 16px; }
 .m-app .m-ticket .m-btn { border-radius: 16px; background: var(--m-fill); border: 0; font-weight: 600; }
@@ -303,7 +321,7 @@
 .m-local-mark { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: var(--local-line); color: var(--local); font-size: 12px; font-weight: 700; }
 
 /* ---------- composer acima do teclado ---------- */
-.m-dock { flex: none; padding: 8px 10px calc(env(safe-area-inset-bottom) + 8px); }
+.m-dock { flex: none; padding: 8px 10px calc(var(--m-sab) + 8px); }
 .m-kb .m-dock { padding-bottom: 8px; }
 .m-composer { background: var(--m-cell); border-radius: 24px; padding: 8px 10px 8px 14px; box-shadow: 0 0 0 .5px var(--m-sep), 0 6px 24px rgba(0, 0, 0, .18); }
 .m-composer textarea { display: block; width: 100%; border: 0; outline: none; background: transparent; color: var(--m-label); font: 17px/1.35 var(--sans); padding: 6px 2px; resize: none; min-height: 34px; max-height: 140px; field-sizing: content; }
@@ -325,7 +343,7 @@
 .m-composer-repo svg { color: var(--m-label-3); flex: none; }
 .m-model-chip { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 55%; height: 36px; padding: 0 10px; border: 0; border-radius: 18px; background: transparent; color: var(--m-label); font-size: 15px; font-weight: 500; }
 .m-model-chip:active { background: var(--m-fill); }
-.m-readonly { padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); text-align: center; color: var(--m-label-2); font-size: 15px; }
+.m-readonly { padding: 14px 16px calc(14px + var(--m-sab)); text-align: center; color: var(--m-label-2); font-size: 15px; }
 
 .m-new-body { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end; padding: 16px 20px; }
 .m-new-hint { display: flex; flex-direction: column; gap: 4px; color: var(--m-label-2); font-size: 14.5px; text-align: center; padding: 0 12px 8px; }
@@ -416,12 +434,12 @@
 
 /* ---------- pareamento e sobre ---------- */
 .m-onboard { display: flex; flex-direction: column; }
-.m-onboard-body { flex: 1; min-height: 0; overflow-y: auto; padding: calc(env(safe-area-inset-top) + 9vh) 0 20px; text-align: center; }
+.m-onboard-body { flex: 1; min-height: 0; overflow-y: auto; padding: calc(var(--m-sat) + 9vh) 0 20px; text-align: center; }
 .m-onboard h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; margin: 20px 28px 8px; }
 .m-onboard p { font-size: 16px; color: var(--m-label-2); margin: 0 32px 26px; line-height: 1.45; }
 .m-onboard .m-onboard-why { font-size: 13px; margin-top: -14px; }
 .m-onboard .m-grp { text-align: left; }
-.m-onboard-foot { flex: none; padding: 10px 20px calc(env(safe-area-inset-bottom) + 14px); }
+.m-onboard-foot { flex: none; padding: 10px 20px calc(var(--m-sab) + 14px); }
 .m-brand img { border-radius: 20px; box-shadow: var(--m-shadow); }
 .m-field { display: flex; flex-direction: column; position: relative; }
 .m-field + .m-field::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: .5px; background: var(--m-sep); }
@@ -456,7 +474,7 @@
 :root[data-platform="android"] .m-app { font-family: var(--m-font); letter-spacing: 0; font-size: 16px; }
 :root[data-platform="android"] .m-app textarea, :root[data-platform="android"] .m-app input { font-family: var(--m-font); font-size: 16px; }
 /* barra superior: título à esquerda, ícones sem fundo, 64 dp */
-:root[data-platform="android"] .m-nav { min-height: calc(env(safe-area-inset-top) + 64px); padding: calc(env(safe-area-inset-top) + 8px) 8px 8px; gap: 4px; }
+:root[data-platform="android"] .m-nav { min-height: calc(var(--m-sat) + 64px); padding: calc(var(--m-sat) + 8px) 8px 8px; gap: 4px; }
 :root[data-platform="android"] .m-nav.collapsed { -webkit-backdrop-filter: none; backdrop-filter: none; background: color-mix(in oklab, var(--m-cell) 70%, var(--m-bg)); box-shadow: none; }
 :root[data-platform="android"] .m-nav-title { left: 64px; right: 72px; align-items: flex-start; text-align: left; }
 :root[data-platform="android"] .m-nav-title b { font-size: 21px; font-weight: 500; }
@@ -482,16 +500,16 @@
 :root[data-platform="android"] .m-segmented-thumb { top: 0; bottom: 0; left: 0; width: calc(100% / var(--n)); border-radius: 20px; background: var(--m-primary-container) !important; box-shadow: none; }
 :root[data-platform="android"] .m-segmented button { min-height: 40px; font-size: 14px; }
 /* barra de navegação inferior com indicador em pílula */
-:root[data-platform="android"] .m-tabbar { padding: 12px 8px calc(env(safe-area-inset-bottom) + 14px); -webkit-backdrop-filter: none; backdrop-filter: none; background: color-mix(in oklab, var(--m-cell) 85%, var(--m-bg)); box-shadow: none; }
+:root[data-platform="android"] .m-app { --m-tab-h: 80px; --m-fab-h: 56px; }
+:root[data-platform="android"] .m-tabbar { padding: 12px 8px max(var(--m-sab), 6px); -webkit-backdrop-filter: none; backdrop-filter: none; background: color-mix(in oklab, var(--m-cell) 85%, var(--m-bg)); box-shadow: none; }
 :root[data-platform="android"] .m-tabbar button { gap: 4px; color: var(--m-label-2); }
 :root[data-platform="android"] .m-tabbar button.on { color: var(--m-label); }
 :root[data-platform="android"] .m-tab-icon { width: 64px; height: 32px; border-radius: 16px; transition: background .2s; }
 :root[data-platform="android"] .m-tabbar button.on .m-tab-icon { background: var(--m-primary-container); }
 :root[data-platform="android"] .m-tab-label { font-size: 12px; font-weight: 500; }
 :root[data-platform="android"] .m-tab-badge { left: 38px; top: -2px; }
-:root[data-platform="android"] .m-scroll.has-tabbar { padding-bottom: calc(env(safe-area-inset-bottom) + 80px); }
 /* FAB estendido */
-:root[data-platform="android"] .m-fab { overflow: hidden; height: 56px; border-radius: 16px; padding: 0 20px 0 16px; background: var(--m-primary-container); color: var(--m-label); bottom: calc(env(safe-area-inset-bottom) + 96px); box-shadow: 0 4px 10px rgba(0, 0, 0, .3); }
+:root[data-platform="android"] .m-fab { overflow: hidden; border-radius: 16px; padding: 0 20px 0 16px; background: var(--m-primary-container); color: var(--m-label); box-shadow: 0 4px 10px rgba(0, 0, 0, .3); }
 /* bottom sheet Material: puxador curto, título à esquerda */
 :root[data-platform="android"] .m-app .m-sheet { border-radius: 28px 28px 0 0; }
 :root[data-platform="android"] .m-sheet-grab { padding: 16px 0 6px; }

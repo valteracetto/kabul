@@ -9,11 +9,44 @@ import { refresh, setListPrefs, useKabul, useListPrefs, type ListPrefs } from ".
 import { openSession, push } from "./nav";
 import { ModelSheet } from "./ModelSheet";
 import { FilesButton } from "./preview";
+import { openFiles } from "./preview/route";
 import { AgentIcon, Avatar, Empty, Group, I, NavBar, Row, RoundButton, RunsOnLabel, Segmented, Sheet, StatusPill, Swipe, TicketCard, haptic, useCollapse, useCountdown, usePullToRefresh, type SwipeAction } from "./ui";
 import { t } from "../i18n";
 import { trError } from "../i18n/errors";
 
 type Filter = "all" | "waiting";
+type WsActions = { ws: string; name: string; files: boolean; invite: boolean; chat: boolean };
+
+/** Tela estreita (celular em pé): as ações do workspace vão para o menu "…" e o título fica com a linha. */
+const NARROW = "(max-width: 520px)";
+function useNarrow() {
+  const [narrow, setNarrow] = useState(() => matchMedia(NARROW).matches);
+  useEffect(() => {
+    const mq = matchMedia(NARROW);
+    const upd = () => setNarrow(mq.matches);
+    mq.addEventListener?.("change", upd);
+    return () => mq.removeEventListener?.("change", upd);
+  }, []);
+  return narrow;
+}
+
+/** Sessões de fora do Kabul (só o dono): recarrega a cada 15 s. */
+function useExternal(on: boolean) {
+  const [ext, setExt] = useState<ExternalSessions | null>(null);
+  useEffect(() => {
+    if (!on) return;
+    const load = () => k.external().then(setExt, () => {});
+    load();
+    const iv = setInterval(load, 15000);
+    return () => clearInterval(iv);
+  }, [on]);
+  return ext;
+}
+
+const EXTERNAL_RECENT = 10;
+/** Linhas da lista com o filtro "Todas": workspaces, sessões (soltas ou dentro deles) e as de fora do Kabul. */
+const countRows = (groups: GroupNode[], ext: ExternalSessions | null) =>
+  groups.reduce((n, g) => n + g.items.reduce((m, it) => m + (it.kind === "ws" ? 1 + it.sessions.length : 1), 0), 0) + (ext ? ext.running.length + Math.min(ext.recent.length, EXTERNAL_RECENT) : 0);
 
 interface WsNode { kind: "ws"; key: string; ws: Workspace | null; id: string; title: string; branch: string | null; repo: string; sessions: LiveSession[]; activity: number }
 interface Loose { kind: "s"; key: string; s: LiveSession }
@@ -28,13 +61,29 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
   const prefs = useListPrefs();
   const [filter, setFilter] = useState<Filter>("all");
   const [collapsed, onScroll] = useCollapse();
-  const [sheet, setSheet] = useState<null | { kind: "sort" } | { kind: "machine" } | { kind: "invite"; ws: string; name: string } | { kind: "chat"; ws: string; name: string }>(null);
+  const [sheet, setSheet] = useState<null | { kind: "sort" } | { kind: "machine" } | { kind: "invite"; ws: string; name: string } | { kind: "chat"; ws: string; name: string } | ({ kind: "ws" } & WsActions)>(null);
+  // Do menu "…" para outra folha/tela: fechar a folha volta uma entrada no histórico (assíncrono); abrir a
+  // próxima antes disso faria esse "voltar" fechá-la na hora. Então só abre depois do popstate.
+  const afterSheet = (next: () => void) => {
+    setSheet(null);
+    let done = false;
+    const go = () => void (!done && ((done = true), next()));
+    window.addEventListener("popstate", go, { once: true });
+    setTimeout(go, 400);
+  };
+  const narrow = useNarrow();
+  const owner = isOwner();
+  const ext = useExternal(owner);
   const ptr = usePullToRefresh(refresh);
   const who = me();
   const { list, workspaces, repos, sections } = snap;
   const waiting = list.filter((s) => s.status === "waiting").length;
 
-  const groups = useMemo(() => buildGroups(list, workspaces, repos.map((r) => ({ id: r.id, name: r.name })), sections, prefs, filter), [list, workspaces, repos, sections, prefs, filter]);
+  const repoIds = useMemo(() => repos.map((r) => ({ id: r.id, name: r.name })), [repos]);
+  const groups = useMemo(() => buildGroups(list, workspaces, repoIds, sections, prefs, filter), [list, workspaces, repoIds, sections, prefs, filter]);
+  // "Todas" conta o que a lista mostra com esse filtro (antes contava só as sessões ao vivo: 0 com o computador parado).
+  const allGroups = useMemo(() => (filter === "all" ? groups : buildGroups(list, workspaces, repoIds, sections, prefs, "all")), [filter, groups, list, workspaces, repoIds, sections, prefs]);
+  const total = countRows(allGroups, owner ? ext : null);
   const reorder = (g: GroupNode, from: string, to: string) => {
     const ids = g.items.filter((x): x is WsNode => x.kind === "ws" && !!x.ws).map((x) => x.id);
     const a = ids.indexOf(from);
@@ -64,7 +113,7 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
           </>
         }
       />
-      <main className="m-scroll has-tabbar" onScroll={onScroll} {...ptr.handlers}>
+      <main className={"m-scroll has-tabbar" + (owner ? " has-fab" : "")} onScroll={onScroll} {...ptr.handlers}>
         {ptr.indicator}
         <h1 className="m-large-title">{t("mobile.home.title")}</h1>
         <div className="m-under-title">
@@ -72,7 +121,7 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
             value={filter}
             onChange={setFilter}
             options={[
-              { v: "all", label: <>{t("mobile.home.all")} <span className="dim">{list.length}</span></> },
+              { v: "all", label: <>{t("mobile.home.all")} <span className="dim" data-testid="m-count-all">{total}</span></> },
               { v: "waiting", label: <>{t("mobile.home.waitingYou")} {waiting > 0 && <span className="m-count">{waiting}</span>}</>, testid: "m-filter-waiting" },
             ]}
           />
@@ -87,7 +136,7 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
             <div className="m-grp-body">
               {g.items.map((it) =>
                 it.kind === "ws" ? (
-                  <WsBlock key={it.key} n={it} manual={prefs.manual && !!it.ws} onDrop={(to) => reorder(g, it.id, to)} onChat={() => setSheet({ kind: "chat", ws: it.id, name: it.title })} onInvite={() => setSheet({ kind: "invite", ws: it.id, name: it.title })} os={snap.os} machine={snap.machine} />
+                  <WsBlock key={it.key} n={it} manual={prefs.manual && !!it.ws} onDrop={(to) => reorder(g, it.id, to)} onChat={() => setSheet({ kind: "chat", ws: it.id, name: it.title })} onInvite={() => setSheet({ kind: "invite", ws: it.id, name: it.title })} narrow={narrow} onMore={(a) => setSheet({ kind: "ws", ...a })} os={snap.os} machine={snap.machine} />
                 ) : (
                   <SessionRow key={it.key} s={it.s} os={snap.os} machine={snap.machine} />
                 ),
@@ -95,16 +144,25 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
             </div>
           </section>
         ))}
-        {isOwner() && filter === "all" && <ExternalSection />}
+        {owner && filter === "all" && <ExternalSection ext={ext} />}
         <div className="m-scroll-end" />
       </main>
-      {isOwner() && (
+      {owner && (
         <button className="m-fab" onClick={(e) => (haptic(e.currentTarget), push("v=new"))} data-testid="m-create">
           <I.plus size={20} /> {t("mobile.home.create")}
         </button>
       )}
       {sheet?.kind === "sort" && <SortSheet onClose={() => setSheet(null)} />}
       {sheet?.kind === "machine" && <MachineSheet conn={conn} onClose={() => setSheet(null)} />}
+      {sheet?.kind === "ws" && (
+        <Sheet title={sheet.name} onClose={() => setSheet(null)} testid="m-ws-actions">
+          <Group>
+            {sheet.files && <Row icon={<I.folder />} title={t("mobile.pv.files")} onClick={() => afterSheet(() => openFiles(sheet.ws))} testid="m-files" />}
+            {sheet.invite && <Row icon={<I.personPlus />} title={t("mobile.home.invite")} onClick={() => afterSheet(() => setSheet({ kind: "invite", ws: sheet.ws, name: sheet.name }))} testid="m-invite" />}
+            {sheet.chat && <Row icon={<I.chatPlus />} title={t("common.newChat")} onClick={() => afterSheet(() => setSheet({ kind: "chat", ws: sheet.ws, name: sheet.name }))} testid="m-new-chat" />}
+          </Group>
+        </Sheet>
+      )}
       {sheet?.kind === "invite" && <InviteSheet ws={sheet.ws} name={sheet.name} onClose={() => setSheet(null)} />}
       {sheet?.kind === "chat" && (
         <ModelSheet
@@ -195,7 +253,7 @@ function buildGroups(list: LiveSession[], wss: Workspace[], repos: { id: string;
 
 // ---------------- linhas ----------------
 
-function WsBlock({ n, manual, onDrop, onChat, onInvite, os, machine }: { n: WsNode; manual: boolean; onDrop: (to: string) => void; onChat: () => void; onInvite: () => void; os: string; machine: string }) {
+function WsBlock({ n, manual, narrow, onDrop, onChat, onInvite, onMore, os, machine }: { n: WsNode; manual: boolean; narrow: boolean; onDrop: (to: string) => void; onChat: () => void; onInvite: () => void; onMore: (a: WsActions) => void; os: string; machine: string }) {
   const w = n.ws;
   const owner = isOwner();
   const [over, setOver] = useState(false);
@@ -206,6 +264,7 @@ function WsBlock({ n, manual, onDrop, onChat, onInvite, os, machine }: { n: WsNo
   }
   const drag = useDragHandle(n.id, onDrop, setOver);
   const status = w ? WS_STATUS[w.status] ?? w.status : null;
+  const can = { files: !!w && !w.archived, invite: owner && !w?.archived, chat: canWrite() && !w?.archived };
   return (
     <div className={"m-ws" + (w?.archived ? " archived" : "") + (over ? " drop" : "")} data-ws-row={n.id}>
       <Swipe actions={actions}>
@@ -215,13 +274,18 @@ function WsBlock({ n, manual, onDrop, onChat, onInvite, os, machine }: { n: WsNo
             <span className="m-row-title">{n.title}{w?.unread && <span className="m-unread" aria-label={t("mobile.home.new")} />}</span>
             <span className="m-row-sub">{[n.branch, status, w?.archived ? t("mobile.home.archived") : null].filter(Boolean).join(" · ")}</span>
           </span>
-          {w && !w.archived && <FilesButton ws={w.id} small />}
-          {owner && !w?.archived && (
+          {narrow && (can.files || can.invite || can.chat) && (
+            <button className="m-icon-btn" onClick={(e) => (haptic(e.currentTarget), onMore({ ws: n.id, name: n.title, ...can }))} data-testid="m-ws-more" aria-label={t("mobile.home.wsActions")}>
+              <I.more />
+            </button>
+          )}
+          {!narrow && can.files && <FilesButton ws={n.id} small />}
+          {!narrow && can.invite && (
             <button className="m-icon-btn" onClick={(e) => (haptic(e.currentTarget), onInvite())} data-testid="m-invite" aria-label={t("mobile.home.invite")}>
               <I.personPlus />
             </button>
           )}
-          {canWrite() && !w?.archived && (
+          {!narrow && can.chat && (
             <button className="m-icon-btn" onClick={(e) => (haptic(e.currentTarget), onChat())} data-testid="m-new-chat" aria-label={t("common.newChat")}>
               <I.chatPlus />
             </button>
@@ -399,44 +463,53 @@ function InviteSheet({ ws: wsId, name, onClose }: { ws: string; name: string; on
 }
 
 /** Agentes e sessões de fora do Kabul (só o dono vê): mesma lista do Painel do desktop. */
-function ExternalSection() {
-  const [ext, setExt] = useState<ExternalSessions | null>(null);
+function ExternalSection({ ext }: { ext: ExternalSessions | null }) {
   const { workspaces: wss } = useKabul();
   const [models, setModels] = useState<Model[]>([]);
-  const [err, setErr] = useState<string | null>(null);
-  useEffect(() => {
-    const load = () => k.external().then(setExt, () => {});
-    load();
-    k.models().then(setModels, () => {});
-    const iv = setInterval(load, 15000);
-    return () => clearInterval(iv);
-  }, []);
+  // O motivo de não continuar aparece logo abaixo da linha tocada (no topo da seção ninguém via).
+  const [err, setErr] = useState<{ key: string; msg: string } | null>(null);
+  useEffect(() => void k.models().then(setModels, () => {}), []);
   if (!ext || (!ext.running.length && !ext.recent.length)) return null;
   const nowS = now();
-  const cont = async (agent: string, id: string | null, cwd: string | null) => {
+  const cont = async (key: string, agent: string, id: string, cwd: string | null) => {
+    setErr(null);
     const w = workspaceFor(cwd, wss);
+    if (!w) return setErr({ key, msg: t("mobile.home.noWorkspaceHere") });
     // A lista de modelos pode demorar (o Codex lista pelo app-server): espera aqui se ainda não chegou.
     const m = modelFor(agent, models.length ? models : await k.models().catch(() => []));
-    if (!w || !id || !m) return setErr(!w ? t("mobile.home.noWorkspaceHere") : !id ? t("mobile.home.sessionIdUnknown") : t("mobile.home.noModelFor", { agent }));
-    k.chatStart(w.id, m, id).then((c) => openSession(`chat:${c.id}`), (e) => setErr(String(e)));
+    if (!m) return setErr({ key, msg: t("mobile.home.noModelFor", { agent }) });
+    k.chatStart(w.id, m, id).then((c) => openSession(`chat:${c.id}`), (e) => setErr({ key, msg: String(e) }));
   };
+  // Sem repositório vale o nome da pasta (o "?" não dizia nada); sem pasta, nada.
+  const where = (repo: string | null, cwd: string | null) => repo || cwd?.replace(/\/+$/, "").split("/").pop() || null;
+  const label = (agent: string) => AGENT_LABEL[agent] ?? agent;
   const row = (key: string, agent: string, title: string, sub: string, id: string | null, cwd: string | null, testid: string) => (
-    <div key={key} className="m-row m-external" data-testid={testid}>
-      <AgentIcon agent={agent} size={30} />
-      <span className="m-row-text">
-        <span className="m-row-title">{title}</span>
-        <span className="m-row-sub">{sub}</span>
-      </span>
-      <button className="m-chip-btn" disabled={!id || !workspaceFor(cwd, wss)} onClick={(e) => (haptic(e.currentTarget), cont(agent, id, cwd))} data-testid="m-external-continue">{t("common.continue")}</button>
+    <div key={key} className="m-external-item">
+      <div className="m-row m-external" data-testid={testid}>
+        <AgentIcon agent={agent} size={30} />
+        <span className="m-row-text">
+          <span className="m-row-title">{title}</span>
+          <span className="m-row-sub">{sub}</span>
+        </span>
+        {/* Sem id de sessão não há o que continuar: sem botão (apagado, parecia quebrado). */}
+        {id && <button className="m-chip-btn" onClick={(e) => (haptic(e.currentTarget), cont(key, agent, id, cwd))} data-testid="m-external-continue">{t("common.continue")}</button>}
+      </div>
+      {err?.key === key && <div className="m-external-why" data-testid="m-external-why">{trError(err.msg)}</div>}
     </div>
   );
   return (
     <section className="m-group" data-testid="m-external">
       <div className="m-grp-head"><span className="m-grp-title">{t("mobile.home.outsideKabul")}</span></div>
-      {err && <div className="m-error">{trError(err)}</div>}
       <div className="m-grp-body">
-        {ext.running.map((r) => row(`r${r.pid}`, r.agent, `${AGENT_LABEL[r.agent] ?? r.agent} · ${r.repo ?? "?"}`, `${r.terminal ?? t("mobile.home.otherTerminal")} · ${ago(r.running_secs)}${r.branch ? ` · ${r.branch}` : ""}`, r.session_id, r.cwd, "m-external-running"))}
-        {ext.recent.slice(0, 10).map((r) => row(`h${r.agent}${r.id}`, r.agent, r.title, t("mobile.home.recentSub", { agent: AGENT_LABEL[r.agent] ?? r.agent, repo: r.repo ?? "?", ago: ago(nowS - r.updated) }), r.id, r.cwd, "m-external-recent"))}
+        {ext.running.map((r) => {
+          const w = where(r.repo, r.cwd);
+          return row(`r${r.pid}`, r.agent, w ? `${label(r.agent)} · ${w}` : label(r.agent), `${r.terminal ?? t("mobile.home.otherTerminal")} · ${ago(r.running_secs)}${r.branch ? ` · ${r.branch}` : ""}`, r.session_id, r.cwd, "m-external-running");
+        })}
+        {ext.recent.slice(0, EXTERNAL_RECENT).map((r) => {
+          const w = where(r.repo, r.cwd);
+          const sub = w ? t("mobile.home.recentSub", { agent: label(r.agent), repo: w, ago: ago(nowS - r.updated) }) : t("mobile.home.recentSubNoRepo", { agent: label(r.agent), ago: ago(nowS - r.updated) });
+          return row(`h${r.agent}${r.id}`, r.agent, r.title, sub, r.id, r.cwd, "m-external-recent");
+        })}
       </div>
     </section>
   );

@@ -27,7 +27,7 @@ const db = {
   history: {} as Record<string, any>,
   endpoints: [] as any[],
   registry: "",
-  settings: { branch_prefix_type: "github", branch_prefix_custom: "", notifications: true, sound: true, caffeinate: true, show_resources: true, auto_rename_branch: true, env: [], env_file: null, completion_sound: "Glass", always_show_context: false, auto_convert_long_text: true, not_absolutely_right: false, open_prs_in: "github", delete_branch_on_archive: false, archive_on_merge: false, rename_ws_on_branch: true, merge_method: "squash", github_dry_run: false, pr_include_workspace_link: true, automerge: false, optional_checks_blocking: false, push_set_upstream: true, stacked_prs: true, clone_dir: "~/Developer", claude_output_style: "default", codex_personality: "pragmatic", review_model: null, default_plan: false, claude_path: null, codex_path: null, opencode_path: null, scrollback_mb: 10, tray: true, usage_alert_pct: 80, usage_daily_budget: null, usage_monthly_budget: null, usage_codexbar: true, auto_update: true, update_channel: "stable" } as any,
+  settings: { branch_prefix_type: "github", branch_prefix_custom: "", notifications: true, sound: true, caffeinate: true, show_resources: true, auto_rename_branch: true, env: [], env_file: null, completion_sound: "Glass", always_show_context: false, auto_convert_long_text: true, not_absolutely_right: false, open_prs_in: "github", delete_branch_on_archive: false, archive_on_merge: false, rename_ws_on_branch: true, merge_method: "squash", github_dry_run: false, pr_include_workspace_link: true, automerge: false, optional_checks_blocking: false, push_set_upstream: true, stacked_prs: true, clone_dir: "~/Developer", claude_output_style: "default", codex_personality: "pragmatic", review_model: null, default_plan: false, claude_path: null, codex_path: null, opencode_path: null, scrollback_mb: 10, tray: true, tray_icon: { mode: "auto", pinned: [], style: "bars_percent", show_spend: false }, usage_alert_pct: 80, usage_daily_budget: null, usage_monthly_budget: null, usage_codexbar: true, auto_update: true, update_channel: "stable" } as any,
   repoSettings: { scripts: { setup: "echo instalando", archive: null, run_mode: "concurrent", run: { web: { command: "npm run dev", default: true, icon: "globe", available_in: null } } }, file_include_globs: [], target_branch: null, env: { API_URL: "http://localhost:$KABUL_PORT" }, prompts: { general: null, review: null, create_pr: null, fix_errors: null, resolve_conflicts: null, branch_rename: null }, preview_url: "http://localhost:$KABUL_PORT" } as any,
   chats: {} as Record<string, { pending: string | null; turn: number; last?: string; ws?: string; model?: string; provider?: string; since?: number; working?: boolean }>,
   kept: [] as any[],
@@ -245,6 +245,25 @@ function usageGroup(turns: UTurn[], key: (t: UTurn) => string, label: (k: string
   return [...m.values()].sort((a, b) => b.cost_usd - a.cost_usd || b.tokens - a.tokens);
 }
 const PL: Record<string, string> = { claude: "Claude", codex: "Codex", agy: "Antigravity", local: "Local" };
+/** Um bloco por provedor/conta em uso, com ou sem limite (espelha o core `expected_blocks`). `__mock.usageCodes`
+ *  simula a última leitura que falhou por conta (`{ "claude:sistema": "expired" }`). */
+function mockExpected(lims: any[], turns: UTurn[], sources: any[]) {
+  const t = now();
+  const live = lims.filter((l) => !l.resets_at || l.resets_at > t);
+  const codes: Record<string, string> = { ...Object.fromEntries(sources.filter((x) => !x.ok && x.account && x.code).map((x) => [x.account, x.code])), ...((window as any).__mock?.usageCodes ?? {}) };
+  const out: any[] = [];
+  for (const p of ["claude", "codex", "agy"]) {
+    const profiles = [{ id: `${p}:sistema`, nickname: "Padrão do sistema" }, ...db.accounts.filter((a: any) => a.provider === p)];
+    const used = new Set<string>([...turns.filter((x) => x.provider === p).map((x) => x.account ?? ""), ...live.filter((l) => l.provider === p).map((l) => l.account ?? ""), ...Object.keys(codes).filter((k) => k.startsWith(p + ":"))]);
+    if (!used.size && profiles.length < 2) continue;
+    for (const a of profiles) {
+      const sistema = a.id.endsWith(":sistema");
+      if (sistema && profiles.length > 1 && !used.has(a.id) && !used.has("")) continue;
+      out.push({ provider: p, account: a.id, label: a.nickname, has_data: live.some((l) => l.provider === p && (l.account === a.id || (sistema && !l.account))), code: codes[a.id] ?? null });
+    }
+  }
+  return out;
+}
 function usageOverview(days: number) {
   seedUsage();
   const t = now();
@@ -271,11 +290,13 @@ function usageOverview(days: number) {
     return { session: r.key, workspace_id: ts[0].workspace_id, provider: ts[0].provider, model: ts[ts.length - 1].model, account: ts[0].account, started: Math.min(...ts.map((x) => x.at)) - 45, ended: Math.max(...ts.map((x) => x.at)), turns: r.turns, tokens: r.tokens, cost_usd: r.cost_usd, unpriced: r.unpriced, duration_ms: r.duration_ms };
   }).sort((a, b) => b.ended - a.ended);
   const wsLabel = (k: string) => ws(k)?.title ?? ws(k)?.name ?? k;
+  // `__mock.usageSources` troca as fontes (ex.: Claude sem login, CodexBar com link quebrado).
+  const sources: any[] = (window as any).__mock?.usageSources ?? [{ name: "Claude (assinatura) · Padrão do sistema", ok: true, detail: "2 janela(s)", provider: "claude", account: "claude:sistema" }, { name: "Codex app-server · Padrão do sistema", ok: true, detail: "1 janela(s)", provider: "codex", account: "codex:sistema" }, { name: "CodexBar", ok: true, detail: "2 janela(s)" }];
   return {
     schema_version: 1, days, today_usd, month_usd, today_tokens: sum((x) => dayKey(x.at) === today, tokensOf), month_tokens: sum((x) => dayKey(x.at).startsWith(month), tokensOf), unpriced_turns: turns.filter((x) => x.cost_usd == null).length,
     by_day, by_model: usageGroup(turns, (x) => x.model, (k) => k), by_account: usageGroup(turns, (x) => x.account ?? x.provider, (k) => `${PL[k.split(":")[0]] ?? k} · Padrão do sistema`), by_workspace: usageGroup(turns, (x) => x.workspace_id, wsLabel), by_provider: usageGroup(turns, (x) => x.provider, (k) => PL[k] ?? k),
-    sessions, limits: { schema_version: 1, limits: lims, status: [{ provider: "codex", indicator: "minor", description: "Lentidão parcial", url: "https://status.example" }], credits: [], sources: [{ name: "Codex app-server · Padrão do sistema", ok: true, detail: "1 janela(s)" }, { name: "CodexBar", ok: true, detail: "2 janela(s)" }], updated_at: t },
-    tightest: [...lims].sort((a, b) => b.used_pct - a.used_pct)[0] ?? null, alerts, suggestions,
+    sessions, limits: { schema_version: 1, limits: lims, status: [{ provider: "codex", indicator: "minor", description: "Lentidão parcial", url: "https://status.example" }], credits: [], sources, updated_at: t },
+    tightest: [...lims].sort((a, b) => b.used_pct - a.used_pct)[0] ?? null, alerts, suggestions, expected: mockExpected(lims, usage.turns, sources),
   };
 }
 function usageCsv(days: number) {

@@ -61,6 +61,26 @@ html.tray-window, html.tray-window body { background: var(--pop); }
 .tray-actions .btn { justify-content: center; }
 .btn.ghost { background: transparent; border-color: transparent; }
 
+/* Bloco sem dados (provedor/conta em uso sem limite conhecido) e alfinete "Mostrar no ícone". */
+.lim-empty { border-style: dashed; }
+.lim-nodata { font-size: 12.5px; color: var(--text-2); }
+.lim-pin { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; padding: 0; }
+.lim-pin:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.lim-pin.on { color: var(--viz-series); }
+.lim-pin:disabled { opacity: 0.35; cursor: not-allowed; }
+.lim-pin:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.usage-sources-h { color: var(--text-2); font-weight: 500; }
+
+/* "Na barra de menus": o que o ícone mostra. */
+.tray-prefs { display: flex; flex-direction: column; gap: 8px; max-width: 560px; }
+.tray-prefs .seg { align-self: flex-start; }
+.tray-pick { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.tray-pick-row { display: flex; align-items: center; gap: 8px; padding: 3px 2px; font-size: 12.5px; cursor: pointer; min-width: 0; }
+.tray-pick-row > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tray-prefs-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px; }
+.tray-spend-opt { display: inline-flex; align-items: center; gap: 6px; }
+.set-sub .tray-prefs { min-width: 300px; }
+
 /* Celular. */
 .m-usage h3 { font-size: 13px; color: var(--muted); margin: 18px 0 8px; font-weight: 500; }
 .m-usage .lim-blocks { grid-template-columns: 1fr; }

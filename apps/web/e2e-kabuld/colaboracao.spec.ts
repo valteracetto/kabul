@@ -1,5 +1,5 @@
 import { test, expect, devices, type Browser, type Page } from "@playwright/test";
-import { startKabuld, type Kabuld } from "./helpers";
+import { startKabuld, wsAction, wsMenu, type Kabuld } from "./helpers";
 
 // Colaboração em tempo real: Ana (dona, pareada pelo QR), Bia (editora, por convite) e Caio
 // (observador) no mesmo workspace, cada um num iPhone. Chat com agente falso (stream-json do Claude).
@@ -22,7 +22,7 @@ async function pairAs(page: Page, link: string, name: string) {
 }
 
 async function invite(ana: Page, role: "editor" | "observer"): Promise<string> {
-  await ana.getByTestId("m-group").filter({ hasText: "Login novo" }).getByTestId("m-invite").click();
+  await wsAction(ana, "Login novo", "m-invite");
   await ana.getByTestId(role === "editor" ? "m-role-editor" : "m-role-observer").click();
   await ana.getByTestId("m-invite-go").click();
   const url = (await ana.getByTestId("ticket-url").textContent())!.trim();
@@ -45,10 +45,11 @@ test("dois clientes no mesmo chat: autoria, digitando, fila única, primeira apr
   await expect(bia.getByTestId("m-group")).toHaveCount(1);
   await expect(bia.getByTestId("m-group")).toContainText("Login novo");
   await expect(bia.locator(`[data-id="tmux:${kd.sessions.shell}"]`)).toHaveCount(0);
-  await expect(bia.getByTestId("m-invite")).toHaveCount(0);
+  await expect((await wsMenu(bia, "Login novo")).getByTestId("m-invite")).toHaveCount(0);
+  await bia.keyboard.press("Escape");
 
   // Ana abre um chat no workspace (agente falso no lugar do claude).
-  await ana.getByTestId("m-group").filter({ hasText: "Login novo" }).getByTestId("m-new-chat").click();
+  await wsAction(ana, "Login novo", "m-new-chat");
   await ana.getByTestId("m-model").filter({ has: ana.locator('[data-agent="claude"]') }).first().click();
   await expect(ana.getByTestId("m-chat")).toBeVisible();
   const chatId = decodeURIComponent(new URL(ana.url()).hash.replace("#s=", ""));
@@ -109,7 +110,8 @@ test("dois clientes no mesmo chat: autoria, digitando, fila única, primeira apr
   await ana.getByTestId("m-back").click();
   const caio = await phone(browser);
   await pairAs(caio, await invite(ana, "observer"), "Caio");
-  await expect(caio.getByTestId("m-new-chat")).toHaveCount(0);
+  await expect((await wsMenu(caio, "Login novo")).getByTestId("m-new-chat")).toHaveCount(0);
+  await caio.keyboard.press("Escape");
   await caio.locator(`[data-id="${chatId}"]`).click();
   await expect(caio.getByTestId("m-readonly")).toBeVisible();
   await expect(caio.getByTestId("m-msg-user").first()).toBeVisible();

@@ -21,8 +21,10 @@ test("aba Uso: resumo, limites com contagem, gráfico com hover, agrupamentos, s
   const v = page.getByTestId("usage-view");
   await expect(v).toBeVisible();
   await expect(page.getByTestId("usage-today")).toContainText("US$");
-  // Um bloco por provedor/conta; o Claude passa do alerta (86% ≥ 80%) e mostra ícone + rótulo, não só cor.
-  await expect(page.getByTestId("limit-block")).toHaveCount(2);
+  // Um bloco por provedor/conta em uso (o Antigravity, sem limites, aparece vazio); o Claude passa do alerta
+  // (86% ≥ 80%) e mostra ícone + rótulo, não só cor.
+  await expect(page.getByTestId("limit-block")).toHaveCount(3);
+  await expect(page.locator("[data-testid=limit-block][data-empty=true]")).toHaveCount(1);
   const claude = page.locator("[data-testid=limit-block][data-provider=claude]");
   await expect(claude).toContainText("Sessão (5 h)");
   await expect(claude).toContainText("86%");
@@ -135,7 +137,7 @@ test("barra do Kabul: popover com gasto, limites, agentes e ações rápidas", a
   const pop = page.getByTestId("tray-popover");
   await expect(pop).toBeVisible();
   await expect(page.getByTestId("tray-spend")).toContainText("Hoje");
-  await expect(page.getByTestId("limit-block")).toHaveCount(2);
+  await expect(page.getByTestId("limit-block")).toHaveCount(3);
   await expect(page.getByTestId("tray-alert")).toContainText("Claude");
   await expect(pop).toContainText("Nenhuma conversa aberta.");
   await expect(page.getByTestId("tray-pause")).toBeDisabled();

@@ -6,7 +6,7 @@ and [Conventional Commits](https://www.conventionalcommits.org); this file is ge
 
 Todas as mudanças relevantes do Kabul ficam aqui (SemVer + Conventional Commits, gerado pelo git-cliff).
 
-## [0.9.0] - 2026-10-24
+## [0.9.0] - 2026-10-25
 
 First public release. It summarizes everything built before the project adopted Conventional Commits; from
 here on each release lists its commits by type.
@@ -27,11 +27,19 @@ diante cada versão lista os commits por tipo.
 - **desktop:** board view (kanban by status) and local routines (a prompt on a cron schedule or on a PR event); `kabul://` deep links; native notifications that open the chat that called; custom keyboard shortcuts with conflict warnings; split tabs (`⌘D`); full-tab terminals with a preset agent (`⌘⇧T`); workspace preview card; Mermaid and KaTeX in chat; errors with retry; read aloud.
 - **web:** React frontend with an abstract transport (Tauri, WebSocket, HTTP, mock): chat with per-tool cards and live steps, terminal, full diff viewer (unified/split, syntax highlight), git panel, command palette, resizable panels, light/dark themes, settings pages.
 - **kabuld:** axum server with RPC over WebSocket, live mirror of every tmux session, QR pairing with per-device credentials, roles (owner/editor/observer), Web Push and real-time collaboration (presence, single queue); embedded in the desktop app; one-click HTTPS through `tailscale serve`.
+- **usage:** Claude subscription limits read directly from the Claude Code login (5-hour, weekly, per-model weekly and extra usage), one block per account, without CodexBar; every provider in use always shows a block; a broken CodexBar install is reported.
+- **usage:** choose what the menu bar icon shows: automatic (tightest limits) or up to 3 pinned limits, style (bars, percent, both, icon only) and today's spend.
 - **mobile:** installable app (PWA at `/m/`) for iOS and Android from one codebase (iOS look on iPhone, Material 3 on Android): pairing, sessions grouped by repo and workspace, live terminal, structured chat with approvals, new workspaces and model picker over Tailscale.
 - **mobile:** workspace files and changes with preview by type (code, Markdown, images and SVG, PDF, video/audio, CSV, JSON), "Ask in chat" with the selected lines, and the app you are running through an authenticated proxy limited to the workspace ports.
 - **i18n:** the whole interface in English and Portuguese (Brazil): desktop, phone, native menus, tray and notifications. Follows the system language, with a selector in Settings › General › Language; only the dictionary in use is downloaded.
 - **windows (beta):** builds and runs on Windows 10 1809+ and 11: a `TerminalBackend` with Kabul's own multiplexer over ConPTY, Credential Manager for secrets, Git Bash for scripts, portable paths, accounts, dictation and diagnostics, background processes without console windows, `.msi` and NSIS installers. Terminal sessions don't survive closing the app yet.
 - **docs:** bilingual public documentation (English and pt-BR) on a VitePress site, with a threat model, Windows, performance and collaboration pages.
+- **docs:** credits in `ACKNOWLEDGMENTS.md`; screenshots and a short demo video from a fictional demo environment.
+
+### Fixes · Correções
+
+- **mobile:** layout of the installed app on iPhone: solid background behind the status bar, tab bar flush with the bottom edge, the list no longer hides behind "+ Create", correct "All" count, workspace actions in a "…" menu on narrow screens, folder name instead of "?" for sessions outside Kabul.
+- **usage:** a suggested model switch applies to the very first message after returning to the chat.
 
 ### Performance · Desempenho
 

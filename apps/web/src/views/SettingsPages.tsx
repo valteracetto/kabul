@@ -8,6 +8,7 @@ import { DEFAULT_PROMPTS, promptLabels } from "../components/useGit";
 import { Row, Toggle, useAppSettings, useLocalPref } from "./settingsUi";
 import { applyZoom } from "../App";
 import { UpdatesSection } from "../components/Updates";
+import { TrayIconSection } from "../components/TrayIconPrefs";
 import type { Route } from "../App";
 import { LANG_NAMES, langPref, setLangPref, systemLang, t, type LangPref } from "../i18n";
 import { tNode } from "../i18n/react";
@@ -43,6 +44,12 @@ export function GeneralPage({ onError }: { onError: (e: string) => void }) {
       <Toggle s={s} save={save} k="show_resources" label={t("settings.general.resources")} hint={t("settings.general.resources.hint")} />
       <Toggle s={s} save={save} k="caffeinate" label={t("settings.general.caffeinate")} hint={t("settings.general.caffeinate.hint")} />
       <Toggle s={s} save={save} k="tray" label={t("settings.general.tray")} hint={t("settings.general.tray.hint")} />
+      {s.tray !== false && (
+        <div className="set-row set-sub" data-setting="tray_icon">
+          <div><div>{t("usage.tray.section")}</div><div className="dim small">{t("settings.general.trayIcon.hint")}</div></div>
+          <TrayIconSection s={s} save={save} />
+        </div>
+      )}
       <Row label={t("settings.general.alertPct")} hint={t("settings.general.alertPct.hint")} id="usage_alert_pct">
         <select value={s.usage_alert_pct ?? 80} onChange={(e) => save({ ...s, usage_alert_pct: Number(e.target.value) })} data-testid="usage-alert-pct">
           {[50, 70, 80, 90, 95].map((p) => <option key={p} value={p}>{p}%</option>)}

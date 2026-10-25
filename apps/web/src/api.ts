@@ -47,13 +47,17 @@ export interface SourceStatus { id: string; name: string; kind: string; base_url
 export interface LocalOverview { sources: SourceStatus[]; memory: number | null; harnesses: [HarnessKind, boolean, string][] }
 export interface CustomEndpoint { id: string; name: string; base_url: string; apis: Api[]; api_key: string | null }
 export interface EnvVar { key: string; value: string; scope: string }
+/** Limite escolhido para o ícone da barra: provedor, conta (perfil do Kabul ou rótulo da fonte) e janela. */
+export interface PinnedLimit { provider: string; account: string; window: string }
+/** O que o ícone da barra de menus / bandeja mostra (app-settings `tray_icon`). */
+export interface TrayIconPrefs { mode: "auto" | "manual"; pinned: PinnedLimit[]; style: "bars" | "percent" | "bars_percent" | "icon"; show_spend: boolean }
 export interface AppSettings {
   branch_prefix_type: string; branch_prefix_custom: string; notifications: boolean; sound: boolean; caffeinate: boolean; auto_rename_branch: boolean; env: EnvVar[]; env_file?: string | null;
   completion_sound?: string; always_show_context?: boolean; auto_convert_long_text?: boolean; not_absolutely_right?: boolean;
   open_prs_in?: string; delete_branch_on_archive?: boolean; archive_on_merge?: boolean; rename_ws_on_branch?: boolean; merge_method?: string; github_dry_run?: boolean; pr_include_workspace_link?: boolean; automerge?: boolean; optional_checks_blocking?: boolean; push_set_upstream?: boolean; stacked_prs?: boolean;
   claude_output_style?: string; codex_personality?: string; review_model?: string | null; default_plan?: boolean; agy_skip_permissions?: boolean; show_resources?: boolean;
   clone_dir?: string; claude_path?: string | null; codex_path?: string | null; opencode_path?: string | null; scrollback_mb?: number;
-  tray?: boolean; usage_alert_pct?: number; usage_daily_budget?: number | null; usage_monthly_budget?: number | null; usage_codexbar?: boolean;
+  tray?: boolean; tray_icon?: TrayIconPrefs; usage_alert_pct?: number; usage_daily_budget?: number | null; usage_monthly_budget?: number | null; usage_codexbar?: boolean;
   /** Configurações › Avançado › Atualizações. */
   auto_update?: boolean; update_channel?: string; schema_version?: number;
 }
@@ -123,13 +127,19 @@ export interface UsageRow { key: string; label: string; turns: number; input: nu
 export interface UsageSession { session: string; workspace_id: string; provider: string; model: string; account: string | null; started: number; ended: number; turns: number; tokens: number; cost_usd: number; unpriced: number; duration_ms: number }
 export interface UsageLimit { provider: string; account: string | null; account_label: string | null; plan: string | null; window: string; title: string; used_pct: number; window_mins: number | null; resets_at: number | null; source: string; updated_at: number }
 export interface ProviderStatus { provider: string; indicator: string; description: string; url: string | null }
-export interface LimitsSnapshot { schema_version: number; limits: UsageLimit[]; status: ProviderStatus[]; credits: { provider: string; account_label: string | null; remaining: number }[]; sources: { name: string; ok: boolean; detail: string }[]; updated_at: number }
+export interface LimitsSnapshot { schema_version: number; limits: UsageLimit[]; status: ProviderStatus[]; credits: { provider: string; account_label: string | null; remaining: number }[]; sources: LimitSource[]; updated_at: number }
+/** Como foi cada fonte de limites. Fonte de uma conta traz provedor, perfil e o código da falha (`no_login`, `expired`, `codexbar_broken`…). */
+export interface LimitSource { name: string; ok: boolean; detail: string; provider?: string | null; account?: string | null; code?: string | null }
+/** Provedor/conta em uso que a tela mostra mesmo sem limites conhecidos. */
+export interface ExpectedBlock { provider: string; account: string; label: string; has_data: boolean; code?: string | null; detail?: string | null }
 export interface UsageAlert { key: string; kind: string; level: "warn" | "crit"; text: string; provider: string | null; account: string | null }
 export interface UsageSuggestion { provider: string; account: string | null; to_account: { id: string; nickname: string } | null; to_provider: string | null; text: string }
 export interface UsageOverview {
   schema_version: number; days: number; today_usd: number; month_usd: number; today_tokens: number; month_tokens: number; unpriced_turns: number;
   by_day: UsageRow[]; by_model: UsageRow[]; by_account: UsageRow[]; by_workspace: UsageRow[]; by_provider: UsageRow[]; sessions: UsageSession[];
   limits: LimitsSnapshot; tightest: UsageLimit | null; alerts: UsageAlert[]; suggestions: UsageSuggestion[];
+  /** Um bloco por provedor/conta em uso (core `expected_blocks`); ausente em servidores antigos. */
+  expected?: ExpectedBlock[];
 }
 export interface RunningAgent { chat_id: string; workspace_id: string; workspace: string; model: string; harness: string; since: number; working: boolean }
 

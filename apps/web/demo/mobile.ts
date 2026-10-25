@@ -5,7 +5,9 @@
  *
  * Parâmetros da URL (só para as capturas):
  * - `as=maya`: o aparelho é da Maya Chen (editora convidada no workspace do dark mode), não da Sam;
- * - `collab`: a Maya já aprovou o pedido do agente e está digitando (captura de colaboração).
+ * - `collab`: a Maya já aprovou o pedido do agente e está digitando (captura de colaboração);
+ * - `quieto`: nenhuma sessão ao vivo (só os workspaces), como um computador parado;
+ * - `fora`: agentes e conversas de fora do Kabul (um sem repositório, um sem id de sessão, um numa pasta sem workspace).
  *
  * Só se instala em /m/: o desktop (`/?mock&demo`) segue igual.
  */
@@ -305,6 +307,22 @@ export function installMobile(ctx: Ctx) {
     push_subscribe: () => undefined,
     push_test: () => 2,
   });
+  if (pwa && q.has("quieto")) handlers.live_sessions = () => ({ machine: MACHINE, os: "macos", sessions: [] });
+  if (pwa && q.has("fora")) {
+    const rate = wsOf("w-rate");
+    handlers.external_sessions = () => ({
+      running: [
+        { agent: "claude", pid: 5102, cwd: darkWs?.path ?? null, repo: "acme-web", branch: darkWs?.branch ?? "main", running_secs: 2 * 3600, terminal: null, session_id: "5102-claude-sess" },
+        { agent: "gemini", pid: 5101, cwd: `${HOME}/Downloads/notes`, repo: null, branch: null, running_secs: 9 * 3600, terminal: null, session_id: null },
+      ],
+      recent: [
+        { agent: "claude", id: "7001-claude-hist", title: "Tidy up the release notes", cwd: darkWs?.path ?? null, repo: "acme-web", branch: "main", updated: t0 - 38 },
+        { agent: "agy", id: "7002-agy-hist", title: "Audit the API error codes", cwd: rate?.path ?? null, repo: "acme-api", branch: rate?.branch ?? null, updated: t0 - 31 * 60 },
+        { agent: "opencode", id: "7003-opencode-hist", title: "Benchmark the feed renderer", cwd: `${HOME}/scratch/bench`, repo: null, branch: null, updated: t0 - 19 * 3600 },
+      ],
+      cloud_note: "",
+    });
+  }
   if (!pwa) for (const k of ["remote_status", "devices_list", "device_revoke", "pair_create", "invite_create", "machines_discover", "presence_list"]) if (extra[k]) ctx.handlers[k] = extra[k];
 }
 

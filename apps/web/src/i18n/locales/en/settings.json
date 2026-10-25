@@ -369,5 +369,7 @@
   "settings.diag.rerun": "Run again",
   "settings.diag.copy": "Copy report",
   "settings.diag.copyRedacted": "Copy without personal data",
-  "settings.diag.checking": "Checking the environment…"
+  "settings.diag.checking": "Checking the environment…",
+
+  "settings.general.trayIcon.hint": "What the icon shows: the tightest limits or up to 3 you choose, the style and today's spend"
 }

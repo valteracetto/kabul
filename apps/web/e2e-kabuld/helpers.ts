@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, chmodSync, 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createServer } from "node:net";
+import type { Page } from "@playwright/test";
 
 /** kabuld real + estado sintético + sessões tmux de teste (`kabul-test-*`) + agente falso no PATH. */
 export interface Kabuld {
@@ -125,6 +126,25 @@ export async function startKabuld(opts: { trustLocalBrowser?: boolean; repoName?
       } catch {}
     },
   };
+}
+
+/**
+ * Ações de um workspace na lista do celular: em tela estreita ficam no menu "…" (o título fica com a linha);
+ * em tela larga, direto na linha. Abre o menu se for o caso e devolve onde as ações estão.
+ */
+export async function wsMenu(page: Page, ws: string) {
+  const g = page.getByTestId("m-group").filter({ hasText: ws });
+  await g.getByTestId("m-ws").first().waitFor();
+  const more = g.getByTestId("m-ws-more").first();
+  if (!(await more.isVisible())) return g;
+  await more.click();
+  const sheet = page.getByTestId("m-ws-actions");
+  await sheet.waitFor();
+  return sheet;
+}
+
+export async function wsAction(page: Page, ws: string, action: "m-files" | "m-invite" | "m-new-chat") {
+  await (await wsMenu(page, ws)).getByTestId(action).first().click();
 }
 
 export function ensureBuilt() {

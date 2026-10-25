@@ -1,7 +1,8 @@
 //! Barra do Kabul: ícone na barra de menus (macOS) / bandeja (Windows, Linux) pelo tray do Tauri.
 //! Clique esquerdo abre um popover (janela `tray`, a mesma PWA em modo compacto); clique direito, um
-//! menu nativo com as ações rápidas. O ícone mostra os dois limites mais apertados (core `usage::icon`)
-//! e, no macOS, o maior uso em texto ao lado.
+//! menu nativo com as ações rápidas. O ícone mostra os limites escolhidos na aba Uso (ou, no automático,
+//! os dois mais apertados) no estilo escolhido (core `usage::icon`); no macOS, as porcentagens e o gasto
+//! do dia em texto ao lado; no Windows, tudo na dica.
 //!
 //! Também aqui: os comandos de uso (`usage_*`), a lista de agentes rodando e o laço que relê os limites
 //! (a cada 5 min) e avisa quando um alerta novo aparece.
@@ -168,28 +169,67 @@ pub fn changed(handle: &AppHandle) {
 fn refresh_icon(handle: &AppHandle) {
     let Some(tray) = handle.tray_by_id(TRAY_ID) else { return };
     let app = handle.state::<App>();
+    let prefs = app.app_settings().tray_icon;
     let snap = usage::limits::load(&app.home);
     let now = kabul_core::store::now();
-    let (a, b) = usage::icon::top_two(&snap.limits, now);
-    let _ = tray.set_icon(Some(icon_image(a, b)));
-    let tight = snap.limits.iter().filter(|l| l.live(now)).max_by(|x, y| x.used_pct.partial_cmp(&y.used_pct).unwrap_or(std::cmp::Ordering::Equal));
-    let tip = match tight {
-        Some(l) => {
-            let resets = l.resets_at.map(|r| format!(" ({} {})", tr("reinicia em", "resets in"), countdown(r.saturating_sub(now)))).unwrap_or_default();
-            format!("Kabul · {} {}: {:.0}%{resets}", usage::limits::provider_label(&l.provider), limit_title(&l.window, &l.title), l.used_pct)
-        }
-        None => "Kabul".into(),
-    };
-    let _ = tray.set_tooltip(Some(&tip));
-    // Texto ao lado do ícone: só macOS (no Windows a bandeja não tem título; fica a dica).
+    // O que vai no ícone: automático (os dois mais apertados) ou os limites escolhidos na aba Uso.
+    let slots = usage::icon::select(&snap.limits, &prefs, now);
+    let spend = prefs.show_spend.then(|| money(usage::today_usd(&app.home)));
+    let _ = tray.set_icon(Some(icon_image(&slots, &prefs)));
+    let _ = tray.set_tooltip(Some(&tooltip(&slots, spend.as_deref(), now)));
+    // Texto ao lado do ícone: só macOS (no Windows a bandeja não tem título; tudo vai na dica).
     #[cfg(target_os = "macos")]
-    let _ = tray.set_title(tight.map(|l| format!("{:.0}%", l.used_pct)));
+    let _ = tray.set_title(usage::icon::title_text(&slots, &prefs, spend.as_deref()));
 }
 
-fn icon_image(a: Option<f64>, b: Option<f64>) -> tauri::image::Image<'static> {
+/// "US$ 1,20" (pt-BR) / "$1.20" (en).
+fn money(v: f64) -> String {
+    if crate::i18n::is_en() {
+        format!("${v:.2}")
+    } else {
+        format!("US$ {v:.2}").replace('.', ",")
+    }
+}
+
+/// "Padrão do sistema" no idioma da interface.
+fn sys_label(l: &str) -> String {
+    if l == "Padrão do sistema" {
+        tr("Padrão do sistema", "System default").to_string()
+    } else {
+        l.to_string()
+    }
+}
+
+/// Dica do ícone: uma linha por limite do ícone e o gasto de hoje. No Windows a dica é o único texto
+/// (a bandeja não tem título) e o sistema corta em 127 caracteres.
+fn tooltip(slots: &[usage::icon::Slot], spend: Option<&str>, now: u64) -> String {
+    let mut lines = vec!["Kabul".to_string()];
+    let several = |p: &str| slots.iter().filter(|s| s.provider == p).map(|s| &s.account).collect::<HashSet<_>>().len() > 1;
+    for s in slots {
+        let who = s.account_label.as_ref().filter(|_| several(&s.provider)).map(|l| format!(" ({})", sys_label(l))).unwrap_or_default();
+        let head = format!("{}{who} {}", usage::limits::provider_label(&s.provider), limit_title(&s.window, &s.title));
+        lines.push(match s.used_pct {
+            Some(p) => {
+                let resets = s.resets_at.map(|r| format!(" ({} {})", tr("reinicia em", "resets in"), countdown(r.saturating_sub(now)))).unwrap_or_default();
+                format!("{head}: {p:.0}%{resets}")
+            }
+            None => format!("{head}: {}", tr("sem dado agora", "no data now")),
+        });
+    }
+    if let Some(sp) = spend {
+        lines.push(format!("{}: {sp}", tr("Hoje", "Today")));
+    }
+    let tip = lines.join("\n");
+    if cfg!(windows) && tip.chars().count() > 127 {
+        return tip.chars().take(126).collect::<String>() + "…";
+    }
+    tip
+}
+
+fn icon_image(slots: &[usage::icon::Slot], prefs: &kabul_core::settings::TrayIconPrefs) -> tauri::image::Image<'static> {
     // macOS: template (o sistema pinta). Windows/Linux: cinza claro, legível na barra escura e na clara.
     let rgb = if cfg!(target_os = "macos") { [0, 0, 0] } else { [200, 200, 200] };
-    tauri::image::Image::new_owned(usage::icon::render(a, b, rgb), usage::icon::SIZE, usage::icon::SIZE)
+    tauri::image::Image::new_owned(usage::icon::render_for(slots, prefs, rgb), usage::icon::SIZE, usage::icon::SIZE)
 }
 
 // ---------------- popover ----------------
@@ -290,6 +330,9 @@ pub fn limit_title(window: &str, title: &str) -> String {
         "mes" => "Month".into(),
         "seven_day_opus" => "Week (Opus)".into(),
         "seven_day_sonnet" => "Week (Sonnet)".into(),
+        "extra" => "Extra usage".into(),
+        // Semana de um modelo ("Semana (Fable)"): o nome do modelo vem no título.
+        w if w.starts_with("seven_day_") => title.strip_prefix("Semana (").and_then(|m| m.strip_suffix(')')).map(|m| format!("Week ({m})")).unwrap_or_else(|| title.to_string()),
         _ => match (num("d"), num("h"), num("m")) {
             (Some(d), _, _) => format!("{d} days"),
             (_, Some(h), _) => format!("{h}h"),
@@ -336,7 +379,7 @@ fn alert_text(a: &usage::Alert) -> String {
 fn build(handle: &AppHandle) -> tauri::Result<()> {
     let menu = tray_menu(handle)?;
     TrayIconBuilder::with_id(TRAY_ID)
-        .icon(icon_image(None, None))
+        .icon(icon_image(&[], &Default::default()))
         .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("Kabul")
         .menu(&menu)

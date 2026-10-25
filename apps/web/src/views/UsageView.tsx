@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type UsageOverview, type UsageRow, type UsageSuggestion, type Workspace } from "../api";
-import { DayChart, LimitBlocks, alertText, fmtDur, fmtTokens, fmtUsd, providerLabel, sourceText, suggestionText, trLabel } from "../components/Usage";
+import { api, type UsageLimit, type UsageOverview, type UsageRow, type UsageSuggestion, type Workspace } from "../api";
+import { DayChart, LimitBlocks, alertText, fmtDur, fmtTokens, fmtUsd, pinOf, providerLabel, sourceText, suggestionText, trLabel, type PinApi } from "../components/Usage";
+import { TrayIconSection, pinnedNow, togglePin, trayPrefs } from "../components/TrayIconPrefs";
+import { useAppSettings } from "./settingsUi";
 import { t, type Key } from "../i18n";
 import { fmtDate } from "../i18n/format";
 import type { Route } from "../App";
@@ -18,12 +20,12 @@ export function UsageView({ onError, onRoute }: { onError: (e: string) => void; 
   const [group, setGroup] = useState<Group>("model");
   const [refreshing, setRefreshing] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const [alertPct, setAlertPct] = useState(80);
   const [wss, setWss] = useState<Workspace[]>([]);
+  const [settings, saveSettings] = useAppSettings(onError);
+  const alertPct = settings?.usage_alert_pct ?? 80;
   const load = useCallback(() => api.usageOverview(days).then(setO, (e) => onError(String(e))), [days, onError]);
   useEffect(() => void load(), [load]);
   useEffect(() => api.onUsageChanged(() => void load()), [load]);
-  useEffect(() => void api.appSettings().then((s) => setAlertPct(s.usage_alert_pct ?? 80), () => {}), []);
   useEffect(() => void api.workspaces().then(setWss, () => {}), []);
   // Sem custo nenhum no período (só Codex/Gemini, que não reportam custo): o gráfico mostra tokens.
   useEffect(() => void (o && o.by_day.every((r) => r.cost_usd === 0) && o.by_day.some((r) => r.tokens > 0) && setMetric("tokens")), [o?.days]);
@@ -58,6 +60,9 @@ export function UsageView({ onError, onRoute }: { onError: (e: string) => void; 
     const provider = providerLabel(s.provider);
     setNote(s.to_account ? t(makeDefault ? "usage.switched.accountDefault" : "usage.switched.account", { provider, account: s.to_account.nickname }) : t("usage.switched.provider", { provider, to: providerLabel(s.to_provider ?? "") }));
   };
+
+  // Alfinete "Mostrar no ícone" em cada janela: grava em app-settings e o ícone muda na hora.
+  const pins: PinApi | undefined = settings ? { pinned: pinnedNow(trayPrefs(settings)), toggle: (l: UsageLimit) => saveSettings({ ...settings, tray_icon: togglePin(trayPrefs(settings), pinOf(l)) }) } : undefined;
 
   const rows: UsageRow[] = o ? { model: o.by_model, account: o.by_account, workspace: o.by_workspace, provider: o.by_provider }[group] : [];
   const wsName = (id: string) => { const w = wss.find((x) => x.id === id); return w ? w.title || w.name : o?.by_workspace.find((r) => r.key === id)?.label ?? id; };
@@ -99,8 +104,15 @@ export function UsageView({ onError, onRoute }: { onError: (e: string) => void; 
           {o.unpriced_turns > 0 && <div className="dim small">{t("usage.unpricedTurns", { count: o.unpriced_turns })}</div>}
 
           <h3>{t("usage.limits")}</h3>
-          <LimitBlocks snap={o.limits} alertPct={alertPct} />
-          {o.limits.sources.length > 0 && <div className="dim small usage-sources">{o.limits.sources.map(sourceText).join(" · ")}</div>}
+          <LimitBlocks snap={o.limits} alertPct={alertPct} expected={o.expected} pins={pins} />
+          {o.limits.sources.length > 0 && <div className="dim small usage-sources" data-testid="usage-sources"><span className="usage-sources-h">{t("usage.sources")}</span> {o.limits.sources.map(sourceText).join(" · ")}</div>}
+
+          {settings && (
+            <>
+              <h3 id="tray-icon">{t("usage.tray.section")}</h3>
+              <TrayIconSection s={settings} save={saveSettings} limits={o.limits.limits} />
+            </>
+          )}
 
           <h3>
             {metric === "cost" ? t("usage.chart.costPerDay") : t("usage.chart.tokensPerDay")}

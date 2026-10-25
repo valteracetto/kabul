@@ -17,8 +17,8 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// `state.json` (repos, workspaces, comentários, seções).
 pub const STATE: u32 = 1;
-/// `app-settings.json` (Configurações do app).
-pub const APP_SETTINGS: u32 = 1;
+/// `app-settings.json` (Configurações do app). v2: `tray_icon` (o que o ícone da barra mostra).
+pub const APP_SETTINGS: u32 = 2;
 /// `settings.toml` / `settings.local.toml` (do repo e do usuário).
 pub const REPO_SETTINGS: u32 = 1;
 /// `accounts.json` (perfis de conta por provedor).
@@ -103,11 +103,20 @@ pub fn load_json(file: &Path, current: u32, migrations: &[Migration]) -> Option<
 
 /// `state.json`: v0 -> v1 só carimba a versão.
 pub const STATE_MIGRATIONS: &[Migration] = &[stamp];
-pub const APP_SETTINGS_MIGRATIONS: &[Migration] = &[stamp];
+/// `app-settings.json`: v1 -> v2 acrescenta `tray_icon` com o comportamento de antes (os dois limites mais
+/// apertados em barras, com a porcentagem ao lado no macOS).
+pub const APP_SETTINGS_MIGRATIONS: &[Migration] = &[stamp, app_settings_v1_to_v2];
 pub const REPO_SETTINGS_MIGRATIONS: &[Migration] = &[stamp];
 pub const TRANSCRIPT_MIGRATIONS: &[Migration] = &[stamp];
 /// `accounts.json`: v0 era a lista pura; v1 é `{schema_version, accounts: [...]}`.
 pub const ACCOUNTS_MIGRATIONS: &[Migration] = &[accounts_v0_to_v1];
+
+fn app_settings_v1_to_v2(doc: &mut Value) -> Result<()> {
+    if !doc.get("tray_icon").is_some_and(Value::is_object) {
+        doc["tray_icon"] = json!({ "mode": "auto", "pinned": [], "style": "bars_percent", "show_spend": false });
+    }
+    Ok(())
+}
 
 fn accounts_v0_to_v1(doc: &mut Value) -> Result<()> {
     let list = match doc.take() {
@@ -212,6 +221,23 @@ mod tests {
         assert_eq!(migrate(&mut d, ACCOUNTS, ACCOUNTS_MIGRATIONS).unwrap(), Outcome::Migrated { from: 0 });
         assert_eq!(d["schema_version"], 1);
         assert_eq!(d["accounts"][0]["nickname"], "Trabalho");
+    }
+
+    #[test]
+    fn configuracoes_v1_ganham_o_icone_da_barra() {
+        let mut d = json!({"schema_version": 1, "tray": false, "usage_alert_pct": 90});
+        assert_eq!(migrate(&mut d, APP_SETTINGS, APP_SETTINGS_MIGRATIONS).unwrap(), Outcome::Migrated { from: 1 });
+        assert_eq!(d["schema_version"], 2);
+        assert_eq!(d["tray_icon"], json!({"mode": "auto", "pinned": [], "style": "bars_percent", "show_spend": false}));
+        assert_eq!((d["tray"].as_bool(), d["usage_alert_pct"].as_u64()), (Some(false), Some(90)), "o resto fica como estava");
+        // Já tinha (gravado por uma versão de teste): não sobrescreve.
+        let mut d = json!({"schema_version": 1, "tray_icon": {"mode": "manual", "pinned": [], "style": "icon"}});
+        migrate(&mut d, APP_SETTINGS, APP_SETTINGS_MIGRATIONS).unwrap();
+        assert_eq!(d["tray_icon"]["style"], "icon");
+        // Sem versão nenhuma (v0) passa pelas duas.
+        let mut d = json!({});
+        assert_eq!(migrate(&mut d, APP_SETTINGS, APP_SETTINGS_MIGRATIONS).unwrap(), Outcome::Migrated { from: 0 });
+        assert_eq!(d["tray_icon"]["mode"], "auto");
     }
 
     #[test]

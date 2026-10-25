@@ -1,6 +1,6 @@
 import { test, expect, devices, type Browser, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
-import { startKabuld, type Kabuld } from "./helpers";
+import { startKabuld, wsAction, type Kabuld } from "./helpers";
 
 // Capturas da PWA no iPhone para comparar versões da interface (antes/depois de uma mudança visual).
 // Grava em .context/comparar/mobile/<CAPTURA>/ (CAPTURA=antes|depois; padrão "atual").
@@ -41,7 +41,7 @@ for (const scheme of ["dark", "light"] as const) {
     await shot(page, `03-lista${sfx}`);
 
     // Folha de novo chat (seletor de modelo) e o chat com aprovação.
-    await page.getByTestId("m-group").filter({ hasText: "Login novo" }).getByTestId("m-new-chat").click();
+    await wsAction(page, "Login novo", "m-new-chat");
     await expect(page.getByTestId("m-model").first()).toBeVisible();
     await shot(page, `04-seletor-modelo${sfx}`);
     await page.getByTestId("m-model").filter({ has: page.locator('[data-agent="claude"]') }).first().click();

@@ -4,7 +4,7 @@
  * reservadas, sempre com ícone + rótulo + número (nunca só a cor).
  */
 import { useEffect, useState } from "react";
-import type { LimitsSnapshot, UsageAlert, UsageLimit, UsageRow, UsageSuggestion } from "../api";
+import type { ExpectedBlock, LimitSource, LimitsSnapshot, PinnedLimit, UsageAlert, UsageLimit, UsageRow, UsageSuggestion } from "../api";
 import { lang, t, type Key } from "../i18n";
 import { fmtDate, fmtMoney, fmtNum } from "../i18n/format";
 import { trError } from "../i18n/errors";
@@ -53,6 +53,7 @@ export function limitTitle(title: string): string {
   if (title === "Semana") return t("usage.window.week");
   if ((m = title.match(/^Semana \((.+)\)$/))) return t("usage.window.weekOf", { model: m[1] });
   if (title === "Mês") return t("usage.window.month"); // i18n-ignore: valor do backend
+  if (title === "Uso extra") return t("usage.window.extra"); // i18n-ignore: valor do backend
   if ((m = title.match(/^(\d+) dias$/))) return t("usage.window.days", { count: Number(m[1]) });
   if ((m = title.match(/^(\d+) h$/))) return t("usage.window.hours", { n: m[1] });
   if ((m = title.match(/^(\d+) min$/))) return t("usage.window.mins", { n: m[1] });
@@ -62,15 +63,25 @@ export function limitTitle(title: string): string {
 /** Rótulos de conta/fonte que trazem "Padrão do sistema". */
 export const trLabel = (s: string) => (en() ? s.replace(/Padrão do sistema/g, t("usage.systemDefault")) : s);
 
+/** Falhas com código (core `SourceInfo.code`): o texto sai no idioma da interface. */
+const CODE_KEY: Record<string, Key> = {
+  no_login: "usage.code.noLogin", expired: "usage.code.expired", unauthorized: "usage.code.unauthorized", rate_limited: "usage.code.rateLimited", network: "usage.code.network",
+  codexbar_broken: "usage.src.codexbarBroken", codexbar_missing: "usage.src.codexbarMissing",
+};
+export const codeText = (code: string | null | undefined): string | null => (code && CODE_KEY[code] ? t(CODE_KEY[code]) : null);
+
 /** Fonte dos limites (nome e detalhe vêm do backend). */
-export function sourceText(s: { name: string; ok: boolean; detail: string }): string {
+export function sourceText(s: LimitSource): string {
   let name = trLabel(s.name), detail = s.detail;
+  const coded = !s.ok ? codeText(s.code) : null;
+  if (coded) detail = coded;
   if (en()) {
     if (name === "Stream dos agentes") name = t("usage.src.agentStreams"); // i18n-ignore: valor do backend
+    name = name.replace(/^Claude \(assinatura\)/, t("usage.src.claudeSubscription"));
     const m = detail.match(/^(\d+) janela\(s\)$/);
     if (m) detail = t("usage.src.windows", { count: Number(m[1]) });
     else if (detail === "Claude e Codex mandam os limites a cada turno") detail = t("usage.src.agentStreamsDetail");
-    else if (!s.ok) detail = trError(detail);
+    else if (!s.ok && !coded) detail = trError(detail);
   }
   return `${s.ok ? "✓" : "✕"} ${name}: ${detail}`;
 }
@@ -148,11 +159,24 @@ export function groupLimits(lims: UsageLimit[], now: number) {
   return [...m.entries()].map(([key, g]) => ({ key, ...g, worst: Math.max(...g.windows.map((w) => w.used_pct)) }));
 }
 
-const SOURCE_KEY: Record<string, Key> = { "claude-stream": "usage.source.claudeStream", "codex-stream": "usage.source.codexStream", "codex-app-server": "usage.source.codexAppServer" };
+const SOURCE_KEY: Record<string, Key> = { "claude-stream": "usage.source.claudeStream", "claude-oauth": "usage.source.claudeOauth", "codex-stream": "usage.source.codexStream", "codex-app-server": "usage.source.codexAppServer" };
+
+/** Conta do limite como os blocos agrupam (perfil do Kabul, ou o rótulo da fonte sem perfil). */
+export const limitAccount = (l: UsageLimit) => l.account ?? l.account_label ?? "";
+/** O limite escolhido para o ícone da barra (core `settings::PinnedLimit`). */
+export const pinOf = (l: UsageLimit): PinnedLimit => ({ provider: l.provider, account: limitAccount(l), window: l.window });
+export const samePin = (a: PinnedLimit, b: PinnedLimit) => a.provider === b.provider && a.account === b.account && a.window === b.window;
+/** Até quantos limites cabem no ícone (core `TRAY_MAX_PINNED`). */
+export const MAX_PINNED = 3;
+
+/** Alfinete "Mostrar no ícone" em cada janela (aba Uso). */
+export interface PinApi { pinned: PinnedLimit[]; toggle: (l: UsageLimit) => void }
 const sourceLabel = (src: string) => (SOURCE_KEY[src] ? t(SOURCE_KEY[src]) : src === "codexbar" ? "CodexBar" : src);
 
-export function LimitBar({ l, now, alertPct }: { l: UsageLimit; now: number; alertPct: number }) {
+export function LimitBar({ l, now, alertPct, pins }: { l: UsageLimit; now: number; alertPct: number; pins?: PinApi }) {
   const lv = level(l.used_pct, alertPct);
+  const pinned = !!pins?.pinned.some((p) => samePin(p, pinOf(l)));
+  const full = !pinned && (pins?.pinned.length ?? 0) >= MAX_PINNED;
   const pct = Math.max(0, Math.min(100, l.used_pct));
   const title = limitTitle(l.title), lvText = levelText(lv);
   const tip = { title, pct: l.used_pct.toFixed(0), level: lvText, source: sourceLabel(l.source) };
@@ -163,6 +187,12 @@ export function LimitBar({ l, now, alertPct }: { l: UsageLimit; now: number; ale
         <span className="grow" />
         {LEVEL_ICON[lv] && <span className="lim-flag" aria-label={lvText}>{LEVEL_ICON[lv]} {lvText}</span>}
         <span className="lim-pct">{l.used_pct.toFixed(0)}%</span>
+        {pins && (
+          <button className={"lim-pin" + (pinned ? " on" : "")} aria-pressed={pinned} disabled={full} onClick={() => pins.toggle(l)} data-testid="limit-pin"
+            title={pinned ? t("usage.pin.remove") : full ? t("usage.pin.full") : t("usage.pin.add")} aria-label={pinned ? t("usage.pin.remove") : t("usage.pin.add")}>
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M10.5 1.5l4 4-2 1-2.5 2.5.5 3-1.5 1.5-3-3-3.5 3.5-.5-.5L5.5 10l-3-3L4 5.5l3 .5L9.5 3.5z" fill={pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /></svg>
+          </button>
+        )}
       </div>
       <div className="lim-track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label={title}><div className="lim-fill" style={{ width: `${pct}%` }} /></div>
       {l.resets_at && <div className="lim-reset dim small">{t("usage.limit.resetsIn", { time: countdown(Math.max(0, l.resets_at - now)) })}</div>}
@@ -170,10 +200,33 @@ export function LimitBar({ l, now, alertPct }: { l: UsageLimit; now: number; ale
   );
 }
 
-export function LimitBlocks({ snap, alertPct = 80, empty }: { snap: LimitsSnapshot; alertPct?: number; empty?: React.ReactNode }) {
+/** Como conectar a conta para os limites aparecerem (bloco sem dados). */
+function connectHint(e: ExpectedBlock): string {
+  const coded = codeText(e.code);
+  if (coded) return coded;
+  if (e.code === "error" && e.detail) return t("usage.code.error", { detail: trError(e.detail) });
+  return t(e.provider === "claude" ? "usage.connect.claude" : e.provider === "codex" ? "usage.connect.codex" : e.provider === "agy" ? "usage.connect.agy" : "usage.connect.other");
+}
+
+/** Bloco de um provedor/conta em uso sem limite conhecido: não some da tela, diz como conectar. */
+function EmptyBlock({ e }: { e: ExpectedBlock }) {
+  return (
+    <div className="lim-block lim-empty" data-testid="limit-block" data-provider={e.provider} data-account={e.account} data-empty="true">
+      <div className="lim-head">
+        <b>{providerLabel(e.provider)}</b>
+        <span className="dim">{e.account.endsWith(":sistema") ? t("usage.defaultAccount") : trLabel(e.label)}</span>
+      </div>
+      <div className="lim-nodata">{t("usage.limits.noData")}</div>
+      <div className="dim small" data-testid="limit-connect">{connectHint(e)}</div>
+    </div>
+  );
+}
+
+export function LimitBlocks({ snap, alertPct = 80, empty, expected, pins }: { snap: LimitsSnapshot; alertPct?: number; empty?: React.ReactNode; expected?: ExpectedBlock[]; pins?: PinApi }) {
   const now = useNow();
   const groups = groupLimits(snap.limits, now);
-  if (!groups.length) return <>{empty ?? <div className="dim small">{t("usage.limits.none")}</div>}</>;
+  const missing = (expected ?? []).filter((e) => !e.has_data);
+  if (!groups.length && !missing.length) return <>{empty ?? <div className="dim small">{t("usage.limits.none")}</div>}</>;
   return (
     <div className="lim-blocks">
       {groups.map((g) => {
@@ -189,10 +242,11 @@ export function LimitBlocks({ snap, alertPct = 80, empty }: { snap: LimitsSnapsh
               {cr && <span className="dim small">{t("usage.credits", { n: fmtNum(cr.remaining) })}</span>}
             </div>
             {st && <a className="lim-status small" href={st.url ?? undefined} onClick={(e) => (e.preventDefault(), st.url && window.dispatchEvent(new CustomEvent("kabul:open-url", { detail: st.url })))}>▲ {st.description}</a>}
-            {g.windows.map((w) => <LimitBar key={w.window} l={w} now={now} alertPct={alertPct} />)}
+            {g.windows.map((w) => <LimitBar key={w.window} l={w} now={now} alertPct={alertPct} pins={pins} />)}
           </div>
         );
       })}
+      {missing.map((e) => <EmptyBlock key={`${e.provider}|${e.account}`} e={e} />)}
     </div>
   );
 }

@@ -1,11 +1,19 @@
 //! Uso, custos e limites de IA. Fontes, nesta ordem: (1) o que o Kabul mede em cada turno (tokens, custo
 //! e duração reportados pelos harnesses), (2) os próprios agentes (eventos de limite do Claude e do Codex
-//! no stream, `account/rateLimits/read` do app-server do Codex), (3) o CLI do CodexBar quando instalado.
+//! no stream, `account/rateLimits/read` do app-server do Codex, endpoint de uso da assinatura do Claude
+//! com o login do próprio Claude Code), (3) o CLI do CodexBar quando instalado.
 //!
 //! Os turnos ficam em `<estado>/usage.jsonl` (uma linha por turno; a primeira traz o `schema_version`).
 //! Nada de conteúdo de prompt, código ou caminhos: só metadados (provedor, modelo, conta, workspace, sessão).
+pub mod claude_oauth;
 pub mod icon;
 pub mod limits;
+
+/// sha256 em hex minúsculo.
+pub fn sha256_hex(data: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect()
+}
 
 use crate::harness::{Event, HarnessKind};
 use anyhow::Result;
@@ -643,6 +651,74 @@ pub struct Overview {
     pub tightest: Option<Limit>,
     pub alerts: Vec<Alert>,
     pub suggestions: Vec<Suggestion>,
+    /// Um bloco por provedor/conta em uso, com ou sem limites conhecidos (a tela nunca "perde" uma conta).
+    pub expected: Vec<ExpectedBlock>,
+}
+
+/// Provedor/conta que a tela de uso deve mostrar mesmo sem dados de limite.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct ExpectedBlock {
+    pub provider: String,
+    /// Id do perfil de conta do Kabul (`claude:sistema`, `claude:abc`).
+    pub account: String,
+    /// Apelido do perfil.
+    pub label: String,
+    /// Há janela de limite valendo para esta conta.
+    pub has_data: bool,
+    /// Última leitura que falhou para esta conta: código (`no_login`, `expired`, `unauthorized`,
+    /// `rate_limited`, `network`, `error`) e o texto em português.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Provedores com limites que o Kabul sabe ler, na ordem da tela.
+const LIMIT_PROVIDERS: [&str; 3] = ["claude", "codex", "agy"];
+
+/// Blocos esperados: para Claude, Codex e Antigravity, cada perfil cadastrado (o "padrão do sistema" só
+/// quando foi usado ou é o único); para os outros provedores com turnos, um bloco por conta usada.
+pub fn expected_blocks(turns: &[Turn], snap: &LimitsSnapshot, accounts: &BTreeMap<String, Vec<AccountRef>>, now: u64) -> Vec<ExpectedBlock> {
+    let live: Vec<&Limit> = snap.limits.iter().filter(|l| l.live(now)).collect();
+    let mut out = vec![];
+    let mut push = |provider: &str, id: &str, label: &str| {
+        let sistema = id.ends_with(":sistema");
+        // Leitura sem perfil (CodexBar, pelo e-mail) é da config padrão do CLI: conta como a do sistema.
+        let has_data = live.iter().any(|l| l.provider == provider && (l.account.as_deref() == Some(id) || (sistema && l.account.is_none())));
+        let fail = snap.sources.iter().find(|s| !s.ok && s.provider.as_deref() == Some(provider) && s.account.as_deref() == Some(id));
+        out.push(ExpectedBlock { provider: provider.into(), account: id.into(), label: label.into(), has_data, code: fail.and_then(|s| s.code.clone()), detail: fail.map(|s| s.detail.clone()) });
+    };
+    for p in LIMIT_PROVIDERS {
+        let profiles = accounts.get(p).cloned().unwrap_or_else(|| vec![AccountRef { id: format!("{p}:sistema"), nickname: "Padrão do sistema".into() }]);
+        let mut used: std::collections::HashSet<&str> = turns.iter().filter(|t| t.provider == p).filter_map(|t| t.account.as_deref()).collect();
+        used.extend(snap.sources.iter().filter(|s| s.provider.as_deref() == Some(p)).filter_map(|s| s.account.as_deref()));
+        used.extend(live.iter().filter(|l| l.provider == p).map(|l| l.account.as_deref().unwrap_or("")));
+        if used.is_empty() && profiles.len() < 2 {
+            continue;
+        }
+        for a in &profiles {
+            let sistema = a.id.ends_with(":sistema");
+            if !sistema || profiles.len() == 1 || used.contains(a.id.as_str()) || used.contains("") {
+                push(p, &a.id, &a.nickname);
+            }
+        }
+    }
+    let mut others: Vec<(String, String)> =
+        turns.iter().filter(|t| !LIMIT_PROVIDERS.contains(&t.provider.as_str()) && t.provider != "local" && !t.provider.is_empty()).map(|t| (t.provider.clone(), t.account.clone().unwrap_or_else(|| format!("{}:sistema", t.provider)))).collect();
+    others.sort();
+    others.dedup();
+    for (p, id) in others {
+        push(&p, &id, if id.ends_with(":sistema") { "Padrão do sistema" } else { id.split(':').nth(1).unwrap_or(&id) });
+    }
+    out
+}
+
+/// Gasto reportado hoje (dia local), em US$.
+pub fn today_usd(home: &Path) -> f64 {
+    let now = crate::store::now();
+    let offset = local_offset();
+    let today = day_of(now, offset);
+    Ledger::open(home).since(now.saturating_sub(2 * 86_400)).iter().filter(|t| day_of(t.at, offset) == today).filter_map(|t| t.cost_usd).sum()
 }
 
 /// Perfis de conta por provedor (para rótulos e sugestões).
@@ -690,7 +766,9 @@ pub fn overview_from(all: &[Turn], lims: LimitsSnapshot, accounts: &BTreeMap<Str
     let tightest = lims.limits.iter().filter(|l| l.live(now)).max_by(|a, b| a.used_pct.partial_cmp(&b.used_pct).unwrap_or(std::cmp::Ordering::Equal)).cloned();
     let alerts = alerts(&lims.limits, today_usd, month_usd, cfg, now);
     let suggestions = suggestions(&lims.limits, accounts, cfg, now);
+    let expected = expected_blocks(all, &lims, accounts, now);
     Overview {
+        expected,
         schema_version: SCHEMA_VERSION,
         days,
         today_usd,
@@ -884,5 +962,38 @@ mod tests {
         assert_eq!(o.by_workspace[0].label, "Meu workspace");
         assert_eq!(o.sessions.len(), 1);
         assert!(o.tightest.is_none());
+        // Claude usado e sem nenhum limite conhecido: o bloco aparece mesmo assim (sem dados).
+        assert_eq!(o.expected.len(), 1);
+        assert_eq!((o.expected[0].provider.as_str(), o.expected[0].account.as_str(), o.expected[0].has_data), ("claude", "claude:sistema", false));
+    }
+
+    #[test]
+    fn blocos_esperados_por_conta() {
+        let now = 1_000_000;
+        let refs = |p: &str, extra: &[(&str, &str)]| {
+            let mut v = vec![AccountRef { id: format!("{p}:sistema"), nickname: "Padrão do sistema".into() }];
+            v.extend(extra.iter().map(|(id, n)| AccountRef { id: id.to_string(), nickname: n.to_string() }));
+            v
+        };
+        let mut accs = BTreeMap::new();
+        accs.insert("claude".to_string(), refs("claude", &[("claude:t", "Trabalho")]));
+        accs.insert("codex".to_string(), refs("codex", &[]));
+        accs.insert("agy".to_string(), refs("agy", &[]));
+        let lim = |p: &str, acc: Option<&str>| Limit { provider: p.into(), account: acc.map(String::from), window: "5h".into(), title: "x".into(), used_pct: 10.0, resets_at: Some(now + 60), updated_at: now, source: "t".into(), ..Default::default() };
+        let mut snap = LimitsSnapshot { limits: vec![lim("codex", Some("codex:sistema"))], ..Default::default() };
+        // A conta "Trabalho" do Claude falhou por login vencido; a do sistema nem foi usada.
+        snap.sources.push(limits::SourceInfo { name: "Claude · Trabalho".into(), ok: false, detail: "venceu".into(), provider: Some("claude".into()), account: Some("claude:t".into()), code: Some("expired".into()) });
+        let turns = vec![Turn { provider: "gemini".into(), account: None, ..Default::default() }, Turn { provider: "local".into(), ..Default::default() }];
+        let e = expected_blocks(&turns, &snap, &accs, now);
+        let ids: Vec<&str> = e.iter().map(|b| b.account.as_str()).collect();
+        // Claude: só o perfil cadastrado (o do sistema não foi usado); Codex com dados; Antigravity não usado
+        // fica de fora; Gemini usado (sem limites) entra; "local" não tem limite.
+        assert_eq!(ids, vec!["claude:t", "codex:sistema", "gemini:sistema"]);
+        assert_eq!((e[0].has_data, e[0].code.as_deref(), e[0].label.as_str()), (false, Some("expired"), "Trabalho"));
+        assert!(e[1].has_data);
+        // Leitura do CodexBar sem perfil (pelo e-mail) cobre a conta do sistema.
+        let snap = LimitsSnapshot { limits: vec![lim("claude", None)], ..Default::default() };
+        let e = expected_blocks(&[], &snap, &accs, now);
+        assert_eq!(e.iter().map(|b| (b.account.as_str(), b.has_data)).collect::<Vec<_>>(), vec![("claude:sistema", true), ("claude:t", false)]);
     }
 }
