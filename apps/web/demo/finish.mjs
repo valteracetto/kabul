@@ -42,6 +42,8 @@ const DESKTOP = {
   "switch-llm": "model-picker",
   agents: "agents",
   usage: "usage",
+  browser: "browser",
+  sidebar: "sidebar",
   mcp: "mcp",
   collab: "collab",
   "light-switch": "switch-llm-light",

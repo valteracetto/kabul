@@ -172,10 +172,12 @@ export function renderPage(lang: Lang, ctx: Ctx): string {
   const hasSupport = donations.length > 0 || !!pix;
   const sponsor = donations.find((d) => d.id === "github-sponsors")?.url;
 
-  const shotOrder: Img[] = ["agents", "menubar", "usage", "mcp"];
+  // The shared browser (0.10) spans the whole row first; then wide and tall shots in pairs.
+  const shotOrder: Img[] = ["browser", "agents", "menubar", "usage", "mcp"];
   const shots = shotOrder.map((k) => c.features.shots.find((s) => s.img === k)!);
   const wideSizes = "(max-width: 640px) 100vw, 780px";
   const tallSizes = "(max-width: 640px) 100vw, 400px";
+  const fullSizes = "(max-width: 1260px) 100vw, 1180px";
   const shotFigure = (s: (typeof shots)[number]) => {
     const tall = s.img === "mcp" || s.img === "menubar";
     // The first, wide slot is the "switch models" clip when it was recorded; otherwise the Agents screenshot.
@@ -183,7 +185,8 @@ export function renderPage(lang: Lang, ctx: Ctx): string {
       const k = c.clips.switch;
       return `<figure class="shot" data-reveal><div class="window frame">${clip(c, ctx.clips.switch, k.alt, wideSizes)}</div><figcaption><strong>${esc(k.title!)}</strong>${esc(k.caption!)}</figcaption></figure>`;
     }
-    return `<figure class="shot${tall ? " tall" : ""}" data-reveal><div class="window frame">${picture(ctx, s.img, s.alt, tall ? tallSizes : wideSizes)}</div><figcaption><strong>${esc(s.title)}</strong>${esc(s.caption)}</figcaption></figure>`;
+    const full = s.img === "browser";
+    return `<figure class="shot${tall ? " tall" : ""}${full ? " full" : ""}" data-reveal><div class="window frame">${picture(ctx, s.img, s.alt, tall ? tallSizes : full ? fullSizes : wideSizes)}</div><figcaption><strong>${esc(s.title)}</strong>${esc(s.caption)}</figcaption></figure>`;
   };
   // WebM large, WebM small, MP4 large, MP4 small: the browser takes the first source it can play whose media matches.
   // Hidden and preload="none": site.js starts it after the page has loaded, so it never competes with the LCP image.
@@ -303,7 +306,7 @@ ${c.diff.items
   <div class="wrap why">
     <div class="why-text" data-reveal><h2 id="why-title">${esc(c.why.title)}</h2>${c.why.body.map((p) => `<p>${p}</p>`).join("")}</div>
     <figure data-reveal>
-      <div class="window">${ctx.clips.agents ? clip(c, ctx.clips.agents, c.clips.agents.alt, "(max-width: 980px) 100vw, 680px") : picture(ctx, "agents", c.features.shots[0].alt, "(max-width: 980px) 100vw, 680px")}</div>
+      <div class="window">${ctx.clips.agents ? clip(c, ctx.clips.agents, c.clips.agents.alt, "(max-width: 980px) 100vw, 680px") : picture(ctx, "agents", c.features.shots.find((s) => s.img === "agents")!.alt, "(max-width: 980px) 100vw, 680px")}</div>
       <figcaption>${esc(c.clips.agents.caption!)}</figcaption>
     </figure>
   </div>

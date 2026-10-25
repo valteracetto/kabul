@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RepoMark } from "../icons";
+import { RepoIcon } from "../components/RepoIcon";
 import type { Model } from "../api";
 import { useDictation } from "../components/useDictation";
 import { k, type StartOpts } from "./kabuld";
@@ -78,7 +78,7 @@ export function NewWorkspace({ onBack }: { onBack: () => void }) {
       <div className="m-dock">
         <div className={"m-composer big" + (planMode ? " plan" : "")}>
           <button className="m-composer-repo" onClick={(e) => (haptic(e.currentTarget), setSheet("repo"))} data-testid="m-new-repo">
-            {repo ? <RepoMark name={repo.name} size={18} /> : null}
+            {repo ? <RepoIcon repo={repo} size={18} /> : null}
             <span className="m-ellipsis">{repo?.name ?? t("mobile.new.pickRepo")}</span>
             <I.updown size={12} />
           </button>
@@ -101,7 +101,7 @@ export function NewWorkspace({ onBack }: { onBack: () => void }) {
         <Sheet title={t("mobile.new.selectRepo")} onClose={() => setSheet(null)} testid="m-repo-sheet">
           <Group footer={visible.length ? undefined : t("mobile.new.addRepos")}>
             {visible.map((r) => (
-              <Row key={r.id} icon={<RepoMark name={r.name} size={22} />} title={r.name} sub={r.default_branch} check={r.id === repo?.id} onClick={() => (setRepoId(r.id), setSheet(null))} testid="m-repo" />
+              <Row key={r.id} icon={<RepoIcon repo={r} size={22} />} title={r.name} sub={r.default_branch} check={r.id === repo?.id} onClick={() => (setRepoId(r.id), setSheet(null))} testid="m-repo" />
             ))}
           </Group>
         </Sheet>

@@ -102,6 +102,13 @@ your branch or `HEAD`). Restore the files to any point, or reset the chat to it.
 **Terminal.** A real terminal per workspace, plus full-tab terminals that can start Claude Code, Codex,
 Gemini or OpenCode for you. Sessions survive the app on macOS (tmux).
 
+**A browser your AIs share.** Every workspace has its own Chromium, live in the **Browser** tab (`⌘⇧B`, or
+`⌘⇧B` in a terminal to open the dev server it just printed). Claude, Codex, Gemini and every other agent drive
+that same page through the built-in `kabul-browser` MCP server, so one agent can sign in and the next one picks
+up from there. You see who is in control, click and type alongside them, and **Take control** pauses the
+agents until you hand it back. By default, other sites and running JavaScript ask you first.
+[Browser guide](docs/guide/browser.md).
+
 **MCP, shared and per session.** Kabul reads the MCP servers you configured in Claude Code, Codex,
 OpenCode, Gemini CLI, Qwen Code and Antigravity, and offers them to every agent, in each CLI's own format,
 without editing your configs. Turn servers on or off per session, see how many tokens their definitions cost
@@ -147,10 +154,11 @@ in a sandbox. Secrets never go on a command line. [Threat model](docs/security.m
 
 | | |
 |---|---|
-| <img src="docs/assets/agents.png" alt="Agents panel: every running chat across workspaces, with subagent trees, tokens and cost" width="440"><br><sub>**Agents**: every chat in every workspace, with its subagents</sub> | <img src="docs/assets/usage.png" alt="Usage tab: spend today and this month, limit bars per account and a cost-per-day chart" width="440"><br><sub>**Usage**: cost per day, limits per account, a nudge before you hit one</sub> |
+| <img src="docs/assets/browser.png" alt="Browser tab split with the chat: Claude checks dark mode on the local dashboard through kabul-browser, with &quot;Claude is controlling the browser&quot; and Take control" width="440"><br><sub>**Browser**: the agents and you on the same page</sub> | <img src="docs/assets/sidebar.png" alt="Sidebar: workspaces with agents running, the More menu open and an update waiting in the footer" width="200"><br><sub>**Sidebar**: agents at work, More menu, update ready</sub> |
+| <img src="docs/assets/agents.png" alt="Agents panel: every running chat across workspaces, with subagent trees, tokens and cost" width="440"><br><sub>**Agents**: every chat in every workspace, with its subagents</sub> | <img src="docs/assets/usage.png" alt="Usage tab: limit bars per account and the menu bar icon set to show two chosen Claude limits" width="440"><br><sub>**Usage**: limits per account, and the ones the menu bar shows</sub> |
 | <img src="docs/assets/model-picker.png" alt="Model picker with Claude, GPT and Gemini side by side in the same chat" width="440"><br><sub>**Model picker**: Claude, GPT and Gemini in the same chat</sub> | <img src="docs/assets/mcp.png" alt="Session MCP panel: servers from Claude Code and Codex, tools and tokens per turn, and the tokens saved" width="440"><br><sub>**MCP**: one registry for every AI, and the tokens you save per turn</sub> |
 | <img src="docs/assets/workspaces.png" alt="Board with workspaces by status: backlog, in progress, in review, done" width="440"><br><sub>**Board**: workspaces by status</sub> | <img src="docs/assets/menubar.png" alt="Menu bar popover with spend, limits and the agents running now" width="300"><br><sub>**Menu bar**: limits and running agents at a glance</sub> |
-| <img src="docs/assets/mobile-preview.png" alt="Phone: file preview with syntax highlight and the model picker" width="440"><br><sub>**Phone**: files with preview, model picker</sub> | <img src="docs/assets/mobile-android.png" alt="Android (Material 3): session list and a chat that switched models" width="440"><br><sub>**Android**: Material 3, same app</sub> |
+| <img src="docs/assets/mobile-preview.png" alt="Phone: file preview with syntax highlight, the model picker and Costs and limits" width="440"><br><sub>**Phone**: files with preview, model picker, costs and limits</sub> | <img src="docs/assets/mobile-android.png" alt="Android (Material 3): session list and a chat that switched models" width="440"><br><sub>**Android**: Material 3, same app</sub> |
 | <img src="docs/assets/switch-llm-light.png" alt="Light theme: the same conversation across three models" width="440"><br><sub>**Light theme**</sub> | <img src="docs/assets/usage-light.png" alt="Light theme: Usage tab" width="440"><br><sub>**Light theme**: Usage</sub> |
 
 <sub>All screenshots come from a demo environment with made-up data (`npm run demo:capture` in `apps/web`).</sub>

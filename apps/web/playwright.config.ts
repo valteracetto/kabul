@@ -3,6 +3,8 @@ import { defineConfig } from "@playwright/test";
 // tmux só num servidor próprio (`tmux -L`): o `kabul serve`/kabuld que os testes sobem herdam isto e nunca usam
 // o servidor padrão de quem roda o teste (lá o Kabul de verdade listaria as sessões de teste).
 process.env.KABUL_TMUX_SOCKET ||= `kabul-test-e2e-${process.pid}`;
+// Avatar do GitHub sem rede nos backends que os testes sobem (repo clonado do GitHub não baixa imagem).
+process.env.KABUL_GITHUB_AVATAR ||= "off";
 
 // Porta do Vite (KABUL_E2E_PORT, ou E2E_PORT): worktrees diferentes rodando E2E ao mesmo tempo não podem
 // dividir o servidor. Os specs com backend real deslocam as portas do `kabul serve` junto.

@@ -3,7 +3,8 @@ import { api, type AppSettings, type Model, type Prompts, type Repo, type RepoSe
 import { noSuggest } from "../noSuggest";
 import { confirmDialog } from "../components/Confirm";
 import { getThemePref, setThemePref, applyAppearance, type ThemePref } from "../theme";
-import { IMonitor, IMoon, ISun, RepoMark } from "../icons";
+import { IMonitor, IMoon, ISun } from "../icons";
+import { RepoIcon, forgetRepoAvatar, refreshRepoAvatar, useRepoAvatar } from "../components/RepoIcon";
 import { DEFAULT_PROMPTS, promptLabels } from "../components/useGit";
 import { Row, Toggle, useAppSettings, useLocalPref } from "./settingsUi";
 import { applyZoom } from "../App";
@@ -240,6 +241,30 @@ export function ActionsPage({ repos, repoId, onError, onRoute }: { repos: Repo[]
 
 const ICONS = ["", "🚀", "🧪", "🛒", "📱", "🌐", "⚙️", "📦", "🎮", "📊", "🤖", "🔧"];
 
+/**
+ * "Usar a imagem do GitHub": avatar do dono (organização ou usuário) como ícone padrão, abaixo do emoji
+ * escolhido e acima da letra. "Atualizar" baixa de novo (o cache vale 7 dias).
+ */
+function GithubAvatarRow({ repo, onChange, onError }: { repo: Repo; onChange: () => void; onError: (e: string) => void }) {
+  const av = useRepoAvatar(repo);
+  const [busy, setBusy] = useState(false);
+  const on = repo.github_avatar !== false;
+  const toggle = () => api.repoUpdate(repo.id, { githubAvatar: !on }).then(() => (forgetRepoAvatar(repo.id), onChange()), (x) => onError(String(x)));
+  const refresh = () => (setBusy(true), refreshRepoAvatar(repo.id).finally(() => setBusy(false)));
+  const owner = av ? `${av.host}/${av.owner}` : "";
+  const hint = !on ? t("settings.misc.githubAvatar.hint") : av === undefined ? t("settings.misc.githubAvatar.loading") : av === null ? t("settings.misc.githubAvatar.notGithub") : av.data_url ? t("settings.misc.githubAvatar.from", { owner }) : t("settings.misc.githubAvatar.offline", { owner });
+  return (
+    <Row label={t("settings.misc.githubAvatar")} hint={hint} id="github_avatar">
+      <span className="row" style={{ gap: 8 }}>
+        {on && av?.data_url && <RepoIcon repo={repo} size={20} noEmoji />}
+        {on && av && <button className="btn" disabled={busy} onClick={refresh} data-testid="github-avatar-refresh">{busy ? t("settings.misc.githubAvatar.refreshing") : t("settings.misc.githubAvatar.refresh")}</button>}
+        <span className={"toggle" + (on ? " on" : "")} role="switch" aria-checked={on} aria-label={t("settings.misc.githubAvatar.use")} title={t("settings.misc.githubAvatar.use")} tabIndex={0}
+          onClick={toggle} onKeyDown={(e) => (e.key === " " || e.key === "Enter") && (e.preventDefault(), toggle())} data-testid="toggle-github-avatar"><span /></span>
+      </span>
+    </Row>
+  );
+}
+
 /** Diversos do repositório: ícone, caminhos (só leitura), URL de preview com a porta e remover. */
 export function MiscPage({ repos, repoId, onError, onRoute, onChange }: { repos: Repo[]; repoId?: string; onError: (e: string) => void; onRoute: (r: Route) => void; onChange: () => void }) {
   const id = repoId ?? repos[0]?.id;
@@ -251,8 +276,9 @@ export function MiscPage({ repos, repoId, onError, onRoute, onChange }: { repos:
     <div className="set-group" data-testid="misc-page">
       <div className="set-row"><div>{t("settings.repo.label")}</div><select value={id} onChange={(e) => onRoute({ kind: "settings", tab: "diversos", repoId: e.target.value })}>{repos.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
       <Row label={t("settings.misc.icon")} hint={t("settings.misc.icon.hint")}>
-        <div className="emoji-grid">{ICONS.map((e) => <button key={e || "none"} className={"emoji" + ((repo.icon ?? "") === e ? " on" : "")} onClick={() => api.repoUpdate(repo.id, { icon: e }).then(onChange, (x) => onError(String(x)))} data-testid="repo-icon">{e || <RepoMark name={repo.name} size={16} />}</button>)}</div>
+        <div className="emoji-grid">{ICONS.map((e) => <button key={e || "none"} className={"emoji" + ((repo.icon ?? "") === e ? " on" : "")} onClick={() => api.repoUpdate(repo.id, { icon: e }).then(onChange, (x) => onError(String(x)))} data-testid="repo-icon">{e || <RepoIcon repo={repo} size={16} noEmoji />}</button>)}</div>
       </Row>
+      <GithubAvatarRow repo={repo} onChange={onChange} onError={onError} />
       <Row label={t("settings.misc.folder")}><code className="dim small">{repo.path}</code></Row>
       <Row label={t("settings.misc.preview")} hint={t("settings.misc.preview.hint")}>
         {s && <input {...noSuggest} autoComplete="off" defaultValue={s.preview_url ?? ""} placeholder="http://localhost:$KABUL_PORT" onBlur={(e) => api.saveRepoSettings(repo.id, { ...s, preview_url: e.target.value || null }).catch((x) => onError(String(x)))} data-testid="preview-url" />}

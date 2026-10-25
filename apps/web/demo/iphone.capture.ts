@@ -3,7 +3,8 @@ import { test, expect } from "../playwright-silencio";
 import { BASE, composeCollab, frame, prepare, shot } from "./frame";
 
 // iPhone 15 Pro (WebKit), PWA em tela cheia, inglês, tema escuro. Cru em .context/demo/raw/iphone-*.png;
-// no fim, as composições com moldura em docs/assets/ (mobile.png, mobile-preview.png e, se o Android já
+// no fim, as composições com moldura em docs/assets/ (mobile.png, mobile-preview.png com o preview, o seletor
+// de modelo e Custos e limites e, se o Android já
 // rodou, collab-mobile.png).
 test.describe.configure({ mode: "serial" });
 test.beforeEach(async ({ page }) => prepare(page, "iphone"));
@@ -42,6 +43,16 @@ test("seletor de modelo", async ({ page }) => {
   await shot(page, "iphone-models");
 });
 
+test("custos e limites (barra nova, só o dono)", async ({ page }) => {
+  await page.goto(BASE);
+  await page.getByTestId("m-tab-usage").click();
+  await page.getByTestId("m-open-usage").click();
+  await expect(page.getByTestId("m-usage-today")).toBeVisible();
+  // Rola até o gráfico de custo por dia caber inteiro (a barra de cima, com voltar e período, fica fixa).
+  await page.locator(".m-usage").evaluate((el) => (el.scrollTop = 200));
+  await shot(page, "iphone-usage");
+});
+
 test("colaboração (Sam vê a Maya digitando)", async ({ page }) => {
   await page.goto(chat("c-dark", "&collab"));
   await expect(page.getByTestId("m-typing")).toBeVisible();
@@ -51,6 +62,6 @@ test("colaboração (Sam vê a Maya digitando)", async ({ page }) => {
 
 test("moldura", async ({ browser }) => {
   await frame(browser, [{ src: "iphone-list", device: "iphone", theme: "dark" }, { src: "iphone-approval", device: "iphone", theme: "dark" }], "mobile");
-  await frame(browser, [{ src: "iphone-preview", device: "iphone", theme: "dark" }, { src: "iphone-models", device: "iphone", theme: "dark" }], "mobile-preview");
+  await frame(browser, [{ src: "iphone-preview", device: "iphone", theme: "dark" }, { src: "iphone-models", device: "iphone", theme: "dark" }, { src: "iphone-usage", device: "iphone", theme: "dark" }], "mobile-preview");
   await composeCollab(browser);
 });

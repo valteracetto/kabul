@@ -1866,6 +1866,7 @@ fn main() {
             gitcmds::section_save,
             gitcmds::section_delete,
             gitcmds::repo_update,
+            gitcmds::repo_avatar,
             gitcmds::repo_env_layers,
             gitcmds::gh_repos,
             gitcmds::repo_clone_to,

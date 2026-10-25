@@ -103,6 +103,8 @@ kbd { color: var(--dim); border: 1px solid var(--line-2); border-radius: 5px; pa
 .repo-row { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 7px; font-weight: 600; color: var(--text-2); }
 .repo-row .icon-btn { opacity: .8; }
 .repo-mark { display: inline-grid; place-items: center; border-radius: 4px; color: var(--on-accent); font-weight: 700; flex: none; font-family: var(--sans); }
+/* Avatar do dono no GitHub (data URL do cache local) no lugar da letra. */
+img.repo-avatar { display: inline-block; object-fit: cover; background: transparent; }
 .ws-row { display: flex; align-items: center; gap: 9px; padding: 7px 8px 7px 14px; border-radius: 7px; color: var(--muted); }
 .ws-row svg { color: var(--faint); flex: none; }
 .ws-row:hover { background: var(--hover); }

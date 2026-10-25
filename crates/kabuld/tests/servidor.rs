@@ -435,7 +435,8 @@ async fn arquivar_em_segundo_plano() {
     // Desfazer na janela: volta como estava, nada apagado.
     let r = call(&mut ws, 3, "workspace_unarchive", json!({"id": "w1"})).await;
     assert_eq!((r["value"]["archived"].clone(), r["value"]["state"].clone()), (json!(false), json!("ready")), "{r}");
-    assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap(), "mudou\n");
+    // No Windows o git do runner converte fins de linha (core.autocrlf); o conteúdo é o que importa.
+    assert_eq!(std::fs::read_to_string(wt.join("a.txt")).unwrap().replace("\r\n", "\n"), "mudou\n");
     tokio::time::sleep(Duration::from_millis(2000)).await;
     assert!(wt.exists(), "o arquivamento desfeito não roda depois");
 

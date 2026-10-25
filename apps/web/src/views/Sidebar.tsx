@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Floating } from "../components/Floating";
 import { createPortal } from "react-dom";
+import { RepoIcon } from "../components/RepoIcon";
 import { api, STATUS_LABEL, STATUS_ORDER, wsTitle, type Repo, type Section, type Workspace } from "../api";
 import type { AgentState, Route } from "../App";
 import { RunsOnBadge, cloudList, cloudRunsOn, type CloudRecord } from "../components/RunsOn";
@@ -13,7 +14,7 @@ import { noSuggest } from "../noSuggest";
 import { t } from "../i18n";
 import { IBranch, IEye, IEyeOff, ILink, IPR, ITrash, IUpdate } from "../icons";
 import { checkForUpdates, useUpdateAvailable } from "../components/Updates";
-import { IArchive, IBack, IChevronDown, IChevronRight, IFwd, IGear, IHelp, IMore, IPin, IPlus, ISidebar, RepoMark } from "../icons";
+import { IArchive, IBack, IChevronDown, IChevronRight, IFwd, IGear, IHelp, IMore, IPin, IPlus, ISidebar } from "../icons";
 
 type RowH = { down: (w: Workspace, e: React.PointerEvent) => void; click: (w: Workspace) => void; ctx: (w: Workspace, e: React.MouseEvent) => void; enter: (w: Workspace) => void; leave: () => void; mdown: () => void; stay: () => void };
 
@@ -21,8 +22,8 @@ type RowH = { down: (w: Workspace, e: React.PointerEvent) => void; click: (w: Wo
  * Linha do workspace, memorizada: com 100 workspaces, um evento de um agente só re-renderiza a linha
  * dele (antes, a barra lateral inteira). Fora da tela, o navegador pula layout e pintura (content-visibility).
  */
-const WsRow = memo(function WsRow({ w, s, ag, on, dragging, dragActive, byStatus, repoName, peek, cloud, h }: {
-  w: Workspace; s?: [number, number]; ag?: AgentState; on: boolean; dragging: boolean; dragActive: boolean; byStatus: boolean; repoName: string; peek: boolean; cloud?: CloudRecord; h: React.RefObject<RowH>;
+const WsRow = memo(function WsRow({ w, s, ag, on, dragging, dragActive, byStatus, repoName, repo, peek, cloud, h }: {
+  w: Workspace; s?: [number, number]; ag?: AgentState; on: boolean; dragging: boolean; dragActive: boolean; byStatus: boolean; repoName: string; repo?: Repo; peek: boolean; cloud?: CloudRecord; h: React.RefObject<RowH>;
 }) {
   return (
     <div className={"ws-row" + (on ? " on" : "") + (w.unread && !on ? " unread" : "") + (dragging ? " dragging" : "")}
@@ -31,7 +32,7 @@ const WsRow = memo(function WsRow({ w, s, ag, on, dragging, dragActive, byStatus
       onContextMenu={(e) => h.current!.ctx(w, e)}
       onMouseEnter={() => !dragActive && h.current!.enter(w)} onMouseLeave={() => h.current!.leave()} onMouseDown={() => h.current!.mdown()}
       data-testid="ws-row" data-ws={w.id}>
-      {ag === "working" ? <span className="spinner tiny" title={t("app.side.agentWorking")} /> : ag === "waiting" ? <span className="agent-dot waiting" title={t("app.agents.status.waiting")} /> : ag === "queued" ? <span className="agent-dot queued" title={t("app.side.agentQueued")} data-testid="ws-queued" /> : w.state === "setting_up" ? <span className="spinner tiny" title={t("app.side.settingUp")} /> : byStatus ? <RepoMark name={repoName || "?"} size={14} /> : w.pr_url ? <span className="ws-ico" data-status={w.status} title={`PR · ${STATUS_LABEL[w.status] ?? w.status}`}><IPR size={14} /></span> : <span className="ws-ico" data-status={w.status} title={STATUS_LABEL[w.status] ?? w.status}><IBranch size={14} /></span>}
+      {ag === "working" ? <span className="spinner tiny" title={t("app.side.agentWorking")} /> : ag === "waiting" ? <span className="agent-dot waiting" title={t("app.agents.status.waiting")} /> : ag === "queued" ? <span className="agent-dot queued" title={t("app.side.agentQueued")} data-testid="ws-queued" /> : w.state === "setting_up" ? <span className="spinner tiny" title={t("app.side.settingUp")} /> : byStatus ? <RepoIcon repo={repo} name={repoName || "?"} size={14} /> : w.pr_url ? <span className="ws-ico" data-status={w.status} title={`PR · ${STATUS_LABEL[w.status] ?? w.status}`}><IPR size={14} /></span> : <span className="ws-ico" data-status={w.status} title={STATUS_LABEL[w.status] ?? w.status}><IBranch size={14} /></span>}
       <span className="ws-title">{wsTitle(w)}</span>
       {cloud && <RunsOnBadge r={cloudRunsOn(cloud)} size={12} />}
       {w.unread && !on && <span className="unread-dot" title={t("app.side.unread")} />}
@@ -133,6 +134,7 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
   const free = live.filter((w) => !w.pinned && !(w.section && sections.some((s) => s.id === w.section)));
   const visibleRepos = repos.filter((r) => prefs.showHidden || !r.hidden);
   const repoNames = useMemo(() => new Map(repos.map((r) => [r.id, r.name])), [repos]);
+  const repoById = useMemo(() => new Map(repos.map((r) => [r.id, r])), [repos]);
   const repoName = (id: string) => repoNames.get(id) ?? "";
 
   // ---------- arrastar (ponteiro, a partir de 5 px; Esc cancela; rola sozinho perto das bordas) ----------
@@ -198,7 +200,7 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
   };
   const row = (w: Workspace) => (
     <WsRow key={w.id} w={w} s={stats[w.id]} ag={agents[w.id]} on={route.kind === "workspace" && route.id === w.id} dragging={drag?.w.id === w.id} dragActive={!!drag}
-      byStatus={prefs.groupBy === "status"} repoName={repoName(w.repo_id)} peek={peek === w.id && !drag && !menu} cloud={cloudOf.get(w.id)} h={rowH} />
+      byStatus={prefs.groupBy === "status"} repoName={repoName(w.repo_id)} repo={repoById.get(w.repo_id)} peek={peek === w.id && !drag && !menu} cloud={cloudOf.get(w.id)} h={rowH} />
   );
   // R e P com o menu de contexto aberto.
   useEffect(() => {
@@ -295,7 +297,7 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
                 <div key={r.id} className={"repo-group" + (isCollapsed ? " collapsed" : "") + (r.hidden ? " hidden-repo" : "") + over(`repo-${r.id}`)} {...dropProps(`repo-${r.id}`, { kind: "repo", id: r.id })}>
                   <div className="repo-row" title={r.path} onClick={() => toggleGroup(r.id)} onContextMenu={(e) => (e.preventDefault(), setMenu({ kind: "repo", r, x: e.clientX, y: e.clientY }))} data-testid={`repo-${r.name}`}>
                     <span className="repo-chevron">{isCollapsed ? <IChevronRight size={12} /> : <IChevronDown size={12} />}</span>
-                    {r.icon ? <span className="sec-emoji">{r.icon}</span> : <RepoMark name={r.name} />}
+                    <RepoIcon repo={r} />
                     <span className="repo-name">{r.name}</span>
                     {list.length > 0 && <span className="dim small">{list.length}</span>}
                     {isCollapsed && liveAg.length > 0 && <span className={"agent-dot " + (liveAg.includes("waiting") ? "waiting" : "working")} title={liveAg.includes("waiting") ? t("app.side.agentWaiting") : t("app.side.agentWorking")} data-testid="collapsed-indicator" />}

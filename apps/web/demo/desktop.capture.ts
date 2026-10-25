@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Locator } from "../playwright-silencio";
 import { mkdirSync } from "node:fs";
+import { acmeDashboardHtml } from "./acme-dashboard";
 
 /**
  * Capturas do desktop (1600×1000 @2x) no ambiente de demonstração (`?mock&demo`, dados fictícios em inglês).
@@ -110,6 +111,14 @@ test("hero: workspaces em paralelo, aprovação e diff", async ({ page: p }) => 
   await p.getByTestId("ov-dashboard").click();
   await p.waitForTimeout(1500);
   await shot(p, "workspaces");
+
+  // Barra lateral: agentes rodando, ponto de atualização no rodapé e o menu "More" aberto.
+  await p.evaluate(() => (window as any).__mock.emit("update-available", { current: "0.10.0", version: "0.10.1", notes: "Bug fixes.", date: "2026-10-22", channel: "stable" }));
+  await p.getByTestId("nav-more").click();
+  await expect(p.getByTestId("more-pop")).toBeVisible();
+  await p.mouse.move(1500, 980);
+  await p.waitForTimeout(800);
+  await shot(p, "sidebar", p.getByTestId("sidebar"));
 });
 
 test("troca de LLM na mesma conversa (Claude → Codex → Gemini) e seletor de modelo", async ({ page: p }) => {
@@ -128,6 +137,18 @@ test("uso, MCP e barra do Kabul", async ({ page: p }) => {
   await boot(p);
   await p.getByTestId("nav-usage").click();
   await expect(p.getByTestId("usage-view")).toBeVisible();
+  // Ícone da barra de menus no modo "Choose (up to 3)" com dois limites marcados.
+  await p.getByTestId("tray-mode-manual").click();
+  const items = p.getByTestId("tray-pick-item");
+  await expect(items.first()).toBeVisible();
+  await items.nth(0).check();
+  await items.nth(1).check();
+  // Rola só a página da aba Uso até o título "Limits" (com folga em cima).
+  await p.getByTestId("usage-view").evaluate((pg) => {
+    const h = [...pg.querySelectorAll("h3")].find((e) => e.textContent === "Limits")!;
+    pg.scrollTop += h.getBoundingClientRect().top - pg.getBoundingClientRect().top - 16;
+  });
+  await p.mouse.move(1500, 980);
   await p.waitForTimeout(1500);
   await shot(p, "usage");
 
@@ -185,4 +206,40 @@ test("colaboração: aparelhos pareados e convite (editor) para o workspace", as
   const top = (await head.boundingBox())!;
   const qr = (await p.locator("h3", { hasText: "Invite" }).locator("xpath=following-sibling::div[1]").boundingBox())!;
   await p.screenshot({ path: `${RAW}/collab.png`, clip: { x: top.x - 28, y: top.y - 24, width: 1000, height: Math.min(1000 - (top.y - 24), qr.y + qr.height - top.y + 48) } });
+});
+
+test("navegador compartilhado: Claude e Codex na aba Browser do workspace", async ({ page: p, browser }) => {
+  await boot(p);
+  await p.evaluate(() => ((window as any).__demo.mode["w-dark"] = "browser"));
+  await twoTurns(p, "Dark mode for the dashboard", "Make the charts follow the theme too.", "Open the dashboard in the browser and check dark mode.");
+  // Aba Browser (como o ⌘⇧B do terminal) na página do dashboard, dividida com a conversa à esquerda.
+  const url = "http://localhost:4100/dashboard";
+  const go = () => p.evaluate((u) => window.dispatchEvent(new CustomEvent("kabul:browser-open", { detail: { ws: "w-dark", url: u } })), url);
+  await go();
+  await expect(host(p).getByTestId("browser-tab")).toBeVisible();
+  // Montada a aba, o mesmo evento abre a URL (o primeiro só traz a aba).
+  await go();
+  await expect(host(p).getByTestId("browser-frame")).toBeVisible();
+  await host(p).getByTestId("ctab").first().click();
+  await p.keyboard.press("Meta+d");
+  await expect(host(p).getByTestId("split-divider")).toBeVisible();
+  await p.getByTestId("toggle-right").click();
+  // Mais espaço para a página (conversa com 40%).
+  await host(p).getByTestId("split-divider").focus();
+  for (let i = 0; i < 5; i++) await p.keyboard.press("ArrowLeft");
+  // Quadro da página: o "Acme Dashboard" renderizado à parte, no lugar do quadro de mentira do mock.
+  const pg = await browser.newPage({ viewport: { width: 1280, height: 1150 }, deviceScaleFactor: 2, colorScheme: "dark" });
+  await pg.setContent(acmeDashboardHtml());
+  const data = (await pg.screenshot({ type: "jpeg", quality: 88 })).toString("base64");
+  await pg.close();
+  const emitFrame = () => p.evaluate(([d, u]) => (window as any).__mock.emit("browser-frame", { workspace: "w-dark", data: d, width: 1280, height: 1150, url: u }), [data, url]);
+  await emitFrame();
+  await expect(host(p).getByTestId("browser-agent")).toBeVisible({ timeout: 15_000 });
+  await p.waitForTimeout(4000);
+  await emitFrame();
+  await p.mouse.move(400, 700);
+  await p.mouse.wheel(0, 4000);
+  await p.mouse.move(1500, 20);
+  await p.waitForTimeout(600);
+  await shot(p, "browser");
 });

@@ -134,7 +134,7 @@ pub fn section_delete(app: State<App>, id: String) -> R<()> {
 }
 
 #[tauri::command]
-pub fn repo_update(app: State<App>, id: String, hidden: Option<bool>, icon: Option<String>) -> R<Repo> {
+pub fn repo_update(app: State<App>, id: String, hidden: Option<bool>, icon: Option<String>, github_avatar: Option<bool>) -> R<Repo> {
     app.store
         .lock()
         .unwrap()
@@ -145,8 +145,20 @@ pub fn repo_update(app: State<App>, id: String, hidden: Option<bool>, icon: Opti
             if let Some(i) = icon {
                 r.icon = Some(i).filter(|i| !i.trim().is_empty());
             }
+            if let Some(g) = github_avatar {
+                r.github_avatar = (!g).then_some(false);
+            }
         })
         .map_err(e)
+}
+
+/// Avatar do dono no GitHub (data URL, do cache em `<estado>/icons/github`); `null` = repo sem GitHub.
+/// `refresh` ("Atualizar") baixa de novo. Roda fora da thread principal (rede e `gh`).
+#[tauri::command]
+pub async fn repo_avatar(app: State<'_, App>, id: String, refresh: Option<bool>) -> R<Option<kabul_core::avatar::RepoAvatar>> {
+    let r = app.store.lock().unwrap().repo(&id).map_err(e)?.clone();
+    let home = app.home.clone();
+    tauri::async_runtime::spawn_blocking(move || kabul_core::avatar::repo_avatar(&home, &r, refresh.unwrap_or(false))).await.map_err(e)
 }
 
 /// Variáveis do repo por camada ("repo" compartilhada, "repo local"), para a tela de Environment.

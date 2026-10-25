@@ -9,6 +9,7 @@ const GUEST_READ: &[&str] = &[
     "live_sessions",
     "workspaces_list",
     "repos_list",
+    "repo_avatar",
     "machine_info",
     "models_list",
     "chat_list",
@@ -34,7 +35,7 @@ const GUEST_WRITE: &[&str] = &["chat_send", "chat_approve", "chat_stop", "chat_q
 
 /// Comandos sem alvo (listas filtradas pelo próprio hub).
 /// `presence_set` confere o escopo no próprio hub (sair do workspace manda `workspaceId` nulo).
-const UNTARGETED: &[&str] = &["whoami", "live_sessions", "workspaces_list", "repos_list", "machine_info", "models_list", "chat_list", "push_key", "push_subscribe", "presence_set", "transcribe"];
+const UNTARGETED: &[&str] = &["whoami", "live_sessions", "workspaces_list", "repos_list", "repo_avatar", "machine_info", "models_list", "chat_list", "push_key", "push_subscribe", "presence_set", "transcribe"];
 
 /// `target_ws`: workspace a que o comando se refere (resolvido pelo hub a partir de workspaceId, chatId
 /// ou sessão). `None` quando o comando não tem alvo ou o alvo não pertence a workspace nenhum.
@@ -100,5 +101,9 @@ mod tests {
         assert!(check(&obs, "proxy_open", Some("w1")).is_err(), "abrir o app (que pode escrever) é de editor");
         assert!(check(&ed, "proxy_open", Some("w1")).is_ok());
         assert!(check(&ed, "proxy_open", Some("w2")).is_err());
+        // Avatar do repo: leitura (o hub confere o repo do workspace); mudar o repo é do dono.
+        assert!(check(&obs, "repo_avatar", None).is_ok());
+        assert!(check(&ed, "repo_update", Some("w1")).is_err());
+        assert!(check(&dono, "repo_update", None).is_ok());
     }
 }

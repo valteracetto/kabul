@@ -16,7 +16,8 @@ import { pendingBrowserUrl } from "../components/browser";
 import { FileDiff, FileView, viewedMap } from "./FileDiff";
 import type { DiffScope } from "../api";
 import { ScriptsPane } from "./ScriptsPane";
-import { IChevronDown, IClose, IEye, IFile, IFolder, IGlobe, IHistory, IMore, IPanel, IPin, IPlus, IRestore, RepoMark } from "../icons";
+import { IChevronDown, IClose, IEye, IFile, IFolder, IGlobe, IHistory, IMore, IPanel, IPin, IPlus, IRestore } from "../icons";
+import { RepoIcon } from "../components/RepoIcon";
 import { OpenIn } from "../components/OpenIn";
 import { FileTree } from "../components/FileTree";
 import { LazyChunks } from "../components/LazyChunks";
@@ -498,7 +499,7 @@ ${l.slice(-2500)}
     <div className={"ws-layout" + (rightOpen ? "" : " no-right")} style={{ ["--right-w" as string]: `${rightSize.size}px`, ["--bottom-h" as string]: `${bottomSize.size}px` }}>
       <section className="center">
         <header className={"topbar center-top" + (sidebarHidden ? " lights" : "")} data-tauri-drag-region>
-          <RepoMark name={repo.name} />
+          <RepoIcon repo={repo} />
           <span className="crumb-repo">{repo.name}</span>
           <span className="crumb-sep">›</span>
           {editing === "branch" ? (

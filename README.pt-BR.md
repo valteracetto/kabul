@@ -101,6 +101,13 @@ sua branch nem no `HEAD`). Restaure os arquivos de qualquer ponto ou volte a con
 **Terminal.** Um terminal de verdade por workspace e terminais em aba inteira que já abrem o Claude Code, o
 Codex, o Gemini ou o OpenCode. No macOS as sessões sobrevivem ao app (tmux).
 
+**Um navegador que as IAs compartilham.** Cada workspace tem o seu Chromium, ao vivo na aba **Browser** (`⌘⇧B`,
+ou `⌘⇧B` num terminal para abrir o servidor de desenvolvimento que ele acabou de mostrar). Claude, Codex, Gemini e
+os outros agentes usam essa mesma página pelo servidor MCP embutido `kabul-browser`: um agente faz o login e o
+seguinte continua dali. Você vê quem está no controle, clica e digita junto, e **Take control** pausa os agentes
+até você devolver. Por padrão, outros sites e rodar JavaScript pedem a sua aprovação antes.
+[Guia do navegador](docs/pt-BR/guia/navegador.md).
+
 **MCP compartilhado e por sessão.** O Kabul lê os servidores MCP que você configurou no Claude Code, Codex,
 OpenCode, Gemini CLI, Qwen Code e Antigravity e oferece todos a todos os agentes, no formato de cada CLI, sem
 mexer nas suas configs. Ligue e desligue por sessão, veja quantos tokens as definições custam por turno e
@@ -146,10 +153,11 @@ previews em sandbox. Segredos nunca vão para a linha de comando. [Modelo de ame
 
 | | |
 |---|---|
-| <img src="docs/assets/agents.png" alt="Painel Agentes: todas as conversas rodando em todos os workspaces, com a árvore de subagentes, tokens e custo" width="440"><br><sub>**Agentes**: todas as conversas de todos os workspaces, com os subagentes</sub> | <img src="docs/assets/usage.png" alt="Aba Uso: gasto de hoje e do mês, barras de limite por conta e gráfico de custo por dia" width="440"><br><sub>**Uso**: custo por dia, limites por conta e um aviso antes de bater em um</sub> |
+| <img src="docs/assets/browser.png" alt="Aba Browser dividida com a conversa: o Claude confere o dark mode do dashboard local pelo kabul-browser, com &quot;Claude is controlling the browser&quot; e Take control" width="440"><br><sub>**Navegador**: os agentes e você na mesma página</sub> | <img src="docs/assets/sidebar.png" alt="Barra lateral: workspaces com agentes rodando, o menu Mais aberto e uma atualização esperando no rodapé" width="200"><br><sub>**Barra lateral**: agentes trabalhando, menu Mais, atualização pronta</sub> |
+| <img src="docs/assets/agents.png" alt="Painel Agentes: todas as conversas rodando em todos os workspaces, com a árvore de subagentes, tokens e custo" width="440"><br><sub>**Agentes**: todas as conversas de todos os workspaces, com os subagentes</sub> | <img src="docs/assets/usage.png" alt="Aba Uso: barras de limite por conta e o ícone da barra de menus mostrando dois limites do Claude escolhidos" width="440"><br><sub>**Uso**: limites por conta e os que a barra de menus mostra</sub> |
 | <img src="docs/assets/model-picker.png" alt="Seletor de modelo com Claude, GPT e Gemini lado a lado na mesma conversa" width="440"><br><sub>**Seletor de modelo**: Claude, GPT e Gemini na mesma conversa</sub> | <img src="docs/assets/mcp.png" alt="Painel MCP da sessão: servidores do Claude Code e do Codex, ferramentas e tokens por turno, e a economia" width="440"><br><sub>**MCP**: um registro para todas as IAs e os tokens economizados por turno</sub> |
 | <img src="docs/assets/workspaces.png" alt="Quadro com os workspaces por status: backlog, em andamento, em revisão, concluído" width="440"><br><sub>**Quadro**: workspaces por status</sub> | <img src="docs/assets/menubar.png" alt="Popover da barra de menus com gasto, limites e os agentes rodando agora" width="300"><br><sub>**Barra de menus**: limites e agentes rodando num relance</sub> |
-| <img src="docs/assets/mobile-preview.png" alt="Celular: prévia de arquivo com realce e o seletor de modelo" width="440"><br><sub>**Celular**: arquivos com prévia, seletor de modelo</sub> | <img src="docs/assets/mobile-android.png" alt="Android (Material 3): lista de sessões e uma conversa que trocou de modelo" width="440"><br><sub>**Android**: Material 3, o mesmo app</sub> |
+| <img src="docs/assets/mobile-preview.png" alt="Celular: prévia de arquivo com realce, o seletor de modelo e Custos e limites" width="440"><br><sub>**Celular**: arquivos com prévia, seletor de modelo, custos e limites</sub> | <img src="docs/assets/mobile-android.png" alt="Android (Material 3): lista de sessões e uma conversa que trocou de modelo" width="440"><br><sub>**Android**: Material 3, o mesmo app</sub> |
 | <img src="docs/assets/switch-llm-light.png" alt="Tema claro: a mesma conversa passando por três modelos" width="440"><br><sub>**Tema claro**</sub> | <img src="docs/assets/usage-light.png" alt="Tema claro: aba Uso" width="440"><br><sub>**Tema claro**: Uso</sub> |
 
 <sub>As capturas são de um ambiente de demonstração com dados inventados, em inglês (`npm run demo:capture` em `apps/web`).</sub>

@@ -7,7 +7,8 @@ import { useModelPrefs } from "./prefs";
 import { popoverOpen, useDismiss } from "./useDismiss";
 import { useSettings } from "./useSettings";
 import { RunsOnBadge, type RunsOn } from "./RunsOn";
-import { IChevronDown, IMore, IPlus, ISearch, RepoMark } from "../icons";
+import { IChevronDown, IMore, IPlus, ISearch } from "../icons";
+import { RepoIcon } from "./RepoIcon";
 import { CloneDialog, QuickStartDialog } from "./CloneDialog";
 import { t } from "../i18n";
 
@@ -186,7 +187,7 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, initialText,
         }}>
         <div className="create-top">
           <div className="picker" ref={repoRef}>
-            <button className="create-repo" onClick={() => setRepoOpen(!repoOpen)} data-testid="create-repo">{repo && <RepoMark name={repo.name} />}{repo?.name ?? t("app.create.pickProject")} <IChevronDown size={12} /></button>
+            <button className="create-repo" onClick={() => setRepoOpen(!repoOpen)} data-testid="create-repo">{repo && <RepoIcon repo={repo} />}{repo?.name ?? t("app.create.pickProject")} <IChevronDown size={12} /></button>
             {repoOpen && (
               <Floating className="status-pop repo-pop" placement="bottom-start" testid="repo-pop">
                 {adding ? (
@@ -197,7 +198,7 @@ export function CreateModal({ repos, defaultRepo, fromTab, addMode, initialText,
                     <div className="repo-search"><input autoFocus placeholder={t("app.create.searchRepos")} value={repoQ} onChange={(e) => setRepoQ(e.target.value)} /></div>
                     <div className="repo-list">
                       {repos.filter((r) => r.name.toLowerCase().includes(repoQ.toLowerCase())).map((r) => (
-                        <div key={r.id} className={"pop-row" + (r.id === repoId ? " on" : "")} onClick={() => (setRepoId(r.id), setRepoOpen(false), setBase(null), setSource(null))}><RepoMark name={r.name} size={18} /> {r.name}</div>
+                        <div key={r.id} className={"pop-row" + (r.id === repoId ? " on" : "")} onClick={() => (setRepoId(r.id), setRepoOpen(false), setBase(null), setSource(null))}><RepoIcon repo={r} size={18} /> {r.name}</div>
                       ))}
                     </div>
                     <div className="repo-foot pop-row" onClick={() => setAdding(true)} data-testid="add-project"><IFolderPlus /> {t("app.create.addProject")}</div>

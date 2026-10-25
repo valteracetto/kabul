@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BASE, prepare } from "./frame";
+import { BASE, SAFE, iphoneStatusBarHtml, prepare } from "./frame";
 
 /**
  * Clipes curtos da landing page (`npm run demo:site-clips`), no ambiente de demonstração (dados fictícios):
@@ -13,7 +13,8 @@ import { BASE, prepare } from "./frame";
  * - phone: iPhone (PWA em tela cheia), lista → conversa esperando aprovação → aprovar.
  * Cada teste grava o vídeo inteiro e as marcas do trecho útil (segundos desde o início do vídeo) em
  * <repo>/.context/demo/raw/clip-<nome>.webm|.json; `node demo/site-clips.mjs` corta e codifica.
- * O vídeo do WebKit sai em pixels CSS (393×852, borrado no site): o do celular é montado com screenshots em 2×.
+ * O vídeo do WebKit sai em pixels CSS (borrado no site): o do celular é montado com screenshots em 2×. A página
+ * do iPhone tem 393×793 (abaixo da barra de status opaca do iOS); a barra vai em clip-phone-bar.png.
  */
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const RAW = join(ROOT, ".context/demo/raw");
@@ -272,4 +273,10 @@ test("phone: lista → conversa → aprovar @phone", async ({ page: p }) => {
   at("end");
   await rec.save("phone");
   await p.screenshot({ path: join(RAW, "clip-phone-end.png") });
+  // Barra de status opaca do iOS (a página começa abaixo dela): o site-clips.mjs cola esta faixa em cima.
+  // Mesmo contexto (2×) do vídeo: uma página nova só com a faixa, recortada em 393×59.
+  const bar = await p.context().newPage();
+  await bar.setContent(iphoneStatusBarHtml("dark"));
+  await bar.screenshot({ path: join(RAW, "clip-phone-bar.png"), clip: { x: 0, y: 0, width: SAFE.iphone.w, height: SAFE.iphone.bar } });
+  await bar.close();
 });

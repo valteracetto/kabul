@@ -219,6 +219,7 @@ fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
             json!(kabul_core::usage::csv(&kabul_core::usage::Ledger::open(home).since(since), kabul_core::usage::local_offset()))
         }
         "repo_add" => json!(st.add_repo(&PathBuf::from(s(a, "path")?))?),
+        "repo_avatar" => json!(kabul_core::avatar::repo_avatar(home, st.repo(&s(a, "id")?)?, a.get("refresh").and_then(Value::as_bool).unwrap_or(false))),
         "workspaces_list" => json!(st.state.workspaces),
         "workspace_create" => json!(st.create_workspace(&s(a, "repoId")?)?),
         "workspace_create_ex" => {

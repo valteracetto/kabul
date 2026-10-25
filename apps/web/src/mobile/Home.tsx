@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ConnState } from "../transport/websocket";
-import { RepoMark } from "../icons";
-import type { ExternalSessions, Model, Workspace } from "../api";
+import { RepoIcon } from "../components/RepoIcon";
+import type { ExternalSessions, Model, Repo, Workspace } from "../api";
 import { STATUS_LABEL as WS_STATUS } from "../api";
 import { ago, modelFor, workspaceFor } from "../components/external";
 import { AGENT_LABEL, canWrite, isOwner, k, me, ws, type LiveSession, type Ticket } from "./kabuld";
@@ -79,7 +79,7 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
   const { list, workspaces, repos, sections } = snap;
   const waiting = list.filter((s) => s.status === "waiting").length;
 
-  const repoIds = useMemo(() => repos.map((r) => ({ id: r.id, name: r.name })), [repos]);
+  const repoIds = useMemo(() => repos.map((r) => ({ id: r.id, name: r.name, icon: r.icon, github_avatar: r.github_avatar })), [repos]);
   const groups = useMemo(() => buildGroups(list, workspaces, repoIds, sections, prefs, filter), [list, workspaces, repoIds, sections, prefs, filter]);
   // "Todas" conta o que a lista mostra com esse filtro (antes contava só as sessões ao vivo: 0 com o computador parado).
   const allGroups = useMemo(() => (filter === "all" ? groups : buildGroups(list, workspaces, repoIds, sections, prefs, "all")), [filter, groups, list, workspaces, repoIds, sections, prefs]);
@@ -188,7 +188,7 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
 
 // ---------------- montagem dos grupos ----------------
 
-function buildGroups(list: LiveSession[], wss: Workspace[], repos: { id: string; name: string }[], sections: { id: string; name: string; emoji: string; order: number }[], p: ListPrefs, filter: Filter): GroupNode[] {
+function buildGroups(list: LiveSession[], wss: Workspace[], repos: Pick<Repo, "id" | "name" | "icon" | "github_avatar">[], sections: { id: string; name: string; emoji: string; order: number }[], p: ListPrefs, filter: Filter): GroupNode[] {
   const shown = filter === "waiting" ? list.filter((s) => s.status === "waiting") : list;
   const repoName = (id: string) => repos.find((r) => r.id === id)?.name ?? "?";
   const byWs = new Map<string, LiveSession[]>();
@@ -226,7 +226,7 @@ function buildGroups(list: LiveSession[], wss: Workspace[], repos: { id: string;
   vis.forEach((n) => n.sessions.sort(sessOrder));
 
   // "Outras sessões" é o rótulo que o kabuld dá às sessões soltas (dado, não texto da tela). i18n-ignore
-  const repoHead = (r: string) => (r === "Outras sessões" ? <span className="m-grp-title">{t("mobile.home.otherSessions")}</span> : <><RepoMark name={r || "?"} size={16} /><span className="m-grp-title">{r}</span></>);
+  const repoHead = (r: string) => (r === "Outras sessões" ? <span className="m-grp-title">{t("mobile.home.otherSessions")}</span> : <><RepoIcon repo={repos.find((x) => x.name === r)} name={r || "?"} size={16} /><span className="m-grp-title">{r}</span></>);
 
   if (p.sort === "recent") {
     const items: (WsNode | Loose)[] = [...vis.map((n) => n as WsNode | Loose), ...looseVis.map((s) => ({ kind: "s" as const, key: s.id, s }))];
@@ -420,7 +420,7 @@ function SortSheet({ onClose }: { onClose: () => void }) {
         <Group>
           <Row title={t("mobile.home.wsAll")} check={p.repo === "all"} onClick={() => pick({ repo: "all" })} />
           {repos.map((r) => (
-            <Row key={r.id} icon={<RepoMark name={r.name} size={22} />} title={r.name} sub={r.default_branch} check={p.repo === r.name} onClick={() => pick({ repo: r.name })} />
+            <Row key={r.id} icon={<RepoIcon repo={r} size={22} />} title={r.name} sub={r.default_branch} check={p.repo === r.name} onClick={() => pick({ repo: r.name })} />
           ))}
         </Group>
       )}

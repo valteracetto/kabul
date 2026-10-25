@@ -28,6 +28,7 @@ const MEDIA = join(SITE, "media");
 
 const IMAGES: Record<Img, number[]> = {
   hero: [640, 960, 1440, 1920, 2560],
+  browser: [640, 960, 1440, 1920],
   "model-picker": [480, 800, 1280, 1600],
   "switch-llm": [480, 800, 1280, 1600],
   agents: [480, 800, 1280, 1600],

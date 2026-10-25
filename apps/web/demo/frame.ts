@@ -19,10 +19,16 @@ export const ASSETS = join(ROOT, "docs/assets");
 export const BASE = "/m/?mock&demo";
 
 export type Device = "iphone" | "android";
-/** Área segura do PWA em tela cheia: barra de status em cima, indicador de gestos embaixo (pontos CSS). */
-export const SAFE: Record<Device, { top: number; bottom: number; w: number; h: number }> = {
-  iphone: { top: 59, bottom: 34, w: 393, h: 852 },
-  android: { top: 36, bottom: 20, w: 412, h: 915 },
+/**
+ * Tela do PWA instalado (pontos CSS): área segura em cima e embaixo e, no iPhone, a barra de status opaca.
+ * Desde a 0.10 a PWA do iPhone usa `apple-mobile-web-app-status-bar-style` = `black` (`default` no claro):
+ * a web view começa abaixo da barra de status (59 pt no 15 Pro, sem área segura em cima) e vai até a base,
+ * com o indicador de gestos dentro da barra de abas. A captura tem 393×793; a moldura pinta a barra opaca.
+ * No Android (Chrome), a página continua desenhando atrás da barra de status.
+ */
+export const SAFE: Record<Device, { top: number; bottom: number; bar: number; w: number; h: number }> = {
+  iphone: { top: 0, bottom: 34, bar: 59, w: 393, h: 852 },
+  android: { top: 36, bottom: 20, bar: 0, w: 412, h: 915 },
 };
 
 /**
@@ -76,13 +82,27 @@ const ICONS = {
     <svg width="10" height="17" viewBox="0 0 10 17"><rect x="3" y="0" width="4" height="2" rx=".6" fill="${c}"/><rect x=".5" y="1.5" width="9" height="15" rx="1.8" fill="${c}"/></svg>`,
 };
 
+/**
+ * Só a barra de status opaca do iPhone (393×59 pt, relógio e ícones), para os clipes do site: o vídeo grava a
+ * página (que começa abaixo dela) e o site-clips.mjs cola esta faixa em cima.
+ */
+export function iphoneStatusBarHtml(theme: "dark" | "light" = "dark") {
+  const s = SAFE.iphone;
+  const fg = theme === "dark" ? "#fff" : "#000";
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${CSS}</style></head><body style="margin:0;background:${theme === "dark" ? "#000" : "#fff"}">
+    <div class="iphone" style="position:relative;width:${s.w}px;height:${s.bar}px;box-shadow:none;border-radius:0;background:transparent">
+      <div class="sb" style="color:${fg}"><span class="time">9:41</span><span class="icons">${ICONS.iphone(fg)}</span></div>
+    </div></body></html>`;
+}
+
 function phoneHtml(p: Phone, data: string) {
   const s = SAFE[p.device];
   const fg = p.theme === "dark" ? "#fff" : "#000";
   if (p.device === "iphone") {
-    return `<div class="phone iphone" style="--w:${s.w}px;--h:${s.h}px">
+    // Barra de status opaca (`black` no escuro, `default` no claro) e a página logo abaixo dela.
+    return `<div class="phone iphone" style="--w:${s.w}px;--h:${s.h}px;--bar:${s.bar}px">
       <div class="btn b1"></div><div class="btn b2"></div><div class="btn b3"></div><div class="btn b4"></div>
-      <div class="screen"><img src="${data}">
+      <div class="screen" style="background:${p.theme === "dark" ? "#000" : "#fff"}"><img src="${data}">
         <div class="sb" style="color:${fg}"><span class="time">9:41</span><span class="icons">${ICONS.iphone(fg)}</span></div>
         <div class="island"></div><div class="home" style="background:${fg}"></div>
       </div></div>`;
@@ -100,7 +120,7 @@ const CSS = `
   .stage { display: inline-flex; align-items: center; gap: var(--gap); padding: 24px; }
   .phone { position: relative; flex: none; }
   .screen { position: absolute; overflow: hidden; background: #000; }
-  .screen img { display: block; width: var(--w); height: var(--h); }
+  .screen img { display: block; width: var(--w); height: calc(var(--h) - var(--bar, 0px)); margin-top: var(--bar, 0px); }
   .sb { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; font: 600 17px/1 -apple-system, "SF Pro Text", system-ui, sans-serif; letter-spacing: -.2px; }
   .sb .icons { display: inline-flex; align-items: center; }
   .btn { position: absolute; background: linear-gradient(90deg, #2b2b2e, #4a4a4f 50%, #2b2b2e); }

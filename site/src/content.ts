@@ -17,6 +17,7 @@ export type RelayLine =
   | { kind: "switch"; agent: RelayAgent; text: string };
 export type Img =
   | "hero"
+  | "browser"
   | "model-picker"
   | "switch-llm"
   | "collab-mobile"
@@ -150,8 +151,9 @@ const en = {
   features: {
     title: "Everything a task needs, in one window",
     shots: [
+      { img: "browser" as Img, title: "Browser", caption: "One browser per workspace: Claude, Codex and Gemini drive the same page, and you can take control at any time.", alt: "Browser tab split with the chat: Claude checks dark mode on the local dashboard through kabul-browser, with \"Claude is controlling the browser\" and Take control" },
       { img: "agents" as Img, title: "Agents", caption: "Every chat in every workspace, with its subagents, tokens and cost.", alt: "Agents panel: every running chat across workspaces, with subagent trees, tokens and cost" },
-      { img: "usage" as Img, title: "Usage", caption: "Cost per day, limits per account, and a nudge before you hit one.", alt: "Usage tab: spend today and this month, limit bars per account and a cost-per-day chart" },
+      { img: "usage" as Img, title: "Usage", caption: "Limits per account, and the ones you want in the menu bar.", alt: "Usage tab: limit bars per account and the menu bar icon set to show two chosen Claude limits" },
       { img: "mcp" as Img, title: "MCP", caption: "One registry for every AI, and the tokens you save per turn.", alt: "Session MCP panel: servers from Claude Code and Codex, tools and tokens per turn, and the tokens saved" },
       { img: "menubar" as Img, title: "Menu bar", caption: "Limits and running agents at a glance.", alt: "Menu bar popover with spend, limits per account and the agents running now" },
     ],
@@ -161,6 +163,7 @@ const en = {
       { title: "Diff, pull requests and checks", body: "Unified or split diff with line comments you send to the agent. Commit, push, open the PR, fix failing checks with their logs, merge and archive." },
       { title: "Checkpoints", body: "A checkpoint before every message you send, in private git refs that never touch your branch. Restore the files to any point, or reset the chat to it." },
       { title: "A real terminal", body: "One per workspace, plus full-tab terminals that start Claude Code, Codex, Gemini or OpenCode for you. Sessions survive the app on macOS." },
+      { title: "A browser your AIs share", body: "Each workspace has its own Chromium in the Browser tab. Every agent drives the same page through the built-in <code>kabul-browser</code> MCP server; you see who is in control and can take over." },
       { title: "MCP, shared and per session", body: "Kabul reads the MCP servers you already configured in each CLI and offers them to every agent, without editing your configs. Turn them on or off per session." },
       { title: "Linear and GitHub", body: "Start workspaces from Linear issues and close them from the PR. GitHub through the <code>gh</code> CLI, with multiple accounts. Routines run a prompt on a schedule or a PR event." },
       { title: "Usage, costs and limits", body: "Tokens and cost per workspace, model, account and provider; 5-hour, weekly and monthly windows; alerts and a one-click switch to an account with room left." },
@@ -439,8 +442,9 @@ const pt: Content = {
   features: {
     title: "Tudo o que uma tarefa pede, numa janela só",
     shots: [
+      { img: "browser", title: "Navegador", caption: "Um navegador por workspace: Claude, Codex e Gemini mexem na mesma página, e você assume o controle quando quiser.", alt: "Aba Browser dividida com a conversa: o Claude confere o dark mode do dashboard local pelo kabul-browser, com \"Claude is controlling the browser\" e Take control" },
       { img: "agents", title: "Agentes", caption: "Todas as conversas de todos os workspaces, com os subagentes, tokens e custo.", alt: "Painel Agentes: todas as conversas rodando em todos os workspaces, com a árvore de subagentes, tokens e custo" },
-      { img: "usage", title: "Uso", caption: "Custo por dia, limites por conta e um aviso antes de bater em um.", alt: "Aba Uso: gasto de hoje e do mês, barras de limite por conta e gráfico de custo por dia" },
+      { img: "usage", title: "Uso", caption: "Limites por conta e os que você quer ver na barra de menus.", alt: "Aba Uso: barras de limite por conta e o ícone da barra de menus mostrando dois limites do Claude escolhidos" },
       { img: "mcp", title: "MCP", caption: "Um registro para todas as IAs e os tokens economizados por turno.", alt: "Painel MCP da sessão: servidores do Claude Code e do Codex, ferramentas e tokens por turno, e a economia" },
       { img: "menubar", title: "Barra de menus", caption: "Limites e agentes rodando num relance.", alt: "Popover da barra de menus com gasto, limites por conta e os agentes rodando agora" },
     ],
@@ -450,6 +454,7 @@ const pt: Content = {
       { title: "Diff, PR e checks", body: "Diff unificado ou lado a lado, com comentários por linha que vão para o agente. Commit, push, abrir o PR, corrigir checks com os logs, merge e arquivar." },
       { title: "Checkpoints", body: "Um checkpoint antes de cada mensagem enviada, em refs privadas do git que não mexem na sua branch. Restaure os arquivos de qualquer ponto ou volte a conversa até ele." },
       { title: "Um terminal de verdade", body: "Um por workspace e terminais em aba inteira que já abrem o Claude Code, o Codex, o Gemini ou o OpenCode. No macOS as sessões sobrevivem ao app." },
+      { title: "Um navegador que as IAs compartilham", body: "Cada workspace tem o seu Chromium na aba Browser. Todos os agentes mexem na mesma página pelo servidor MCP embutido <code>kabul-browser</code>; você vê quem está no controle e pode assumir." },
       { title: "MCP compartilhado e por sessão", body: "O Kabul lê os servidores MCP que você já configurou em cada CLI e oferece todos a todos os agentes, sem mexer nas suas configs. Ligue e desligue por sessão." },
       { title: "Linear e GitHub", body: "Workspaces a partir de issues do Linear, fechadas pelo PR. GitHub pelo <code>gh</code>, com várias contas. Rotinas rodam um prompt num horário ou num evento do PR." },
       { title: "Uso, custos e limites", body: "Tokens e custo por workspace, modelo, conta e provedor; janelas de 5 horas, semana e mês; alertas e troca com um clique para uma conta com folga." },

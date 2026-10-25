@@ -8,6 +8,8 @@ embutido `kabul-browser`, qualquer que seja o modelo ou o harness: Claude Code, 
 CLI, Qwen Code, OpenCode, Goose, Cursor e modelos locais. Você e o agente olham a mesma aba, e você pode
 clicar e digitar nela enquanto o agente trabalha.
 
+![A aba Browser dividida com a conversa: o Claude confere o dark mode de um dashboard local pelo kabul-browser, com "Claude is controlling the browser" e Take control](../../assets/browser.png)
+
 ## Como abrir
 
 - **`⌘⇧B`** no workspace abre a aba Browser.

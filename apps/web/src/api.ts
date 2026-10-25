@@ -6,7 +6,9 @@ import { fmtNum } from "./i18n/format";
 export type HarnessKind = "claude" | "codex" | "antigravity" | "opencode" | "qwen" | "gemini" | "goose" | "cursor";
 export type Api = "openai" | "anthropic" | "gemini";
 
-export interface Repo { id: string; name: string; path: string; default_branch: string; hidden?: boolean; icon?: string | null }
+export interface Repo { id: string; name: string; path: string; default_branch: string; hidden?: boolean; icon?: string | null; /** `false` = "Usar a imagem do GitHub" desligado. */ github_avatar?: boolean | null }
+/** Avatar do dono no GitHub (data URL do cache local); `null` = repo sem GitHub (só local, outro servidor ou opção desligada). */
+export interface RepoAvatar { host: string; owner: string; data_url: string | null }
 export interface Workspace {
   id: string; repo_id: string; name: string; branch: string; path: string; archived: boolean; created_at: number;
   title: string | null; status: string; state: string; pinned: boolean; notes: string; port: number;
@@ -208,7 +210,8 @@ export const api = {
   sections: () => c<Section[]>("sections_list"),
   sectionSave: (section: Partial<Section> & { name: string }) => c<Section>("section_save", { section: { id: "", emoji: "", order: 0, ...section } }),
   sectionDelete: (id: string) => c<void>("section_delete", { id }),
-  repoUpdate: (id: string, patch: { hidden?: boolean; icon?: string }) => c<Repo>("repo_update", { id, ...patch }),
+  repoUpdate: (id: string, patch: { hidden?: boolean; icon?: string; githubAvatar?: boolean }) => c<Repo>("repo_update", { id, ...patch }),
+  repoAvatar: (id: string, refresh = false) => c<RepoAvatar | null>("repo_avatar", { id, refresh }),
   repoEnvLayers: (repoId: string) => c<[string, Record<string, string>][]>("repo_env_layers", { repoId }),
   soundPlay: (name: string) => c<void>("sound_play", { name }),
   gitIdentity: (repoId: string) => c<GitIdentity>("git_identity", { repoId }),

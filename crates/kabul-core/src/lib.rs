@@ -3,6 +3,7 @@ pub mod accounts;
 pub mod agent;
 pub mod archive;
 pub mod auth;
+pub mod avatar;
 pub mod batch;
 pub mod browser;
 pub mod cache;

@@ -13,9 +13,12 @@ pub struct Repo {
     /// Oculto na barra lateral ("Hide repository").
     #[serde(default)]
     pub hidden: bool,
-    /// Ícone escolhido (emoji); vazio = monograma.
+    /// Ícone escolhido (emoji); vazio = avatar do GitHub ou monograma.
     #[serde(default)]
     pub icon: Option<String>,
+    /// "Usar a imagem do GitHub" (avatar do dono como ícone padrão). `None` = ligado.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_avatar: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

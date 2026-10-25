@@ -28,9 +28,10 @@ export default defineConfig({
         video: { mode: "on", size: { width: 2240, height: 1400 } },
       },
     },
-    // Celular: tela cheia do PWA (393×852) em 2×. O vídeo do WebKit sairia em pixels CSS; o spec grava com
-    // screenshots (786×1704) e o encode reduz para 430 px de largura.
-    { name: "clip-phone", grep: /@phone/, use: { ...devices["iPhone 15 Pro"], viewport: { width: 393, height: 852 }, deviceScaleFactor: 2, locale: "en-US" } },
+    // Celular: PWA em tela cheia abaixo da barra de status opaca do iOS (393×793) em 2×. O vídeo do WebKit sairia
+    // em pixels CSS; o spec grava com screenshots (786×1586), o encode cola a barra (59 pt) em cima — 786×1704 —
+    // e reduz para 430 px de largura.
+    { name: "clip-phone", grep: /@phone/, use: { ...devices["iPhone 15 Pro"], viewport: { width: 393, height: 793 }, deviceScaleFactor: 2, locale: "en-US" } },
   ],
   webServer: { command: `npx vite --port ${PORT} --strictPort`, url: `http://localhost:${PORT}`, reuseExistingServer: false, timeout: 60_000 },
 });

@@ -58,8 +58,12 @@ for (const [name, c] of Object.entries(CLIPS)) {
   const ss = Math.max(0, start - c.pad[0]);
   const dur = end + c.pad[1] - ss;
   const speed = Math.max(1, dur / MAX_S);
-  const vf = `setpts=PTS/${speed.toFixed(4)},fps=${c.fps},scale=${c.width}:-2:flags=lanczos,format=yuv420p`;
-  const cut = ["-ss", ss.toFixed(3), "-t", dur.toFixed(3), "-i", src, "-vf", vf, "-an"];
+  // iPhone: a página começa abaixo da barra de status opaca do iOS; a faixa gravada pelo spec vai em cima.
+  const bar = join(RAW, `clip-${name}-bar.png`);
+  const withBar = name === "phone" && existsSync(bar);
+  const top = withBar ? "[1:v][0:v]vstack=inputs=2:shortest=1," : "[0:v]";
+  const vf = `${top}setpts=PTS/${speed.toFixed(4)},fps=${c.fps},scale=${c.width}:-2:flags=lanczos,format=yuv420p`;
+  const cut = ["-ss", ss.toFixed(3), "-t", dur.toFixed(3), "-i", src, ...(withBar ? ["-loop", "1", "-i", bar] : []), "-filter_complex", vf, "-an"];
 
   const webm = join(OUT, `${name}.webm`);
   for (const crf of [32, 36, 40, 44, 48]) {
@@ -75,7 +79,7 @@ for (const [name, c] of Object.entries(CLIPS)) {
   // Poster: o último quadro do trecho (o resultado na tela), tirado do cru em alta e reduzido pelo sharp.
   const at = Math.max(ss, end - 0.1);
   const png = join(RAW, `_clip-${name}-poster.png`);
-  ff(["-ss", at.toFixed(3), "-i", src, "-frames:v", "1", "-update", "1", png]);
+  ff(["-ss", at.toFixed(3), "-i", src, ...(withBar ? ["-i", bar, "-filter_complex", "[1:v][0:v]vstack=inputs=2"] : []), "-frames:v", "1", "-update", "1", png]);
   const posters = [];
   if (sharp) {
     const img = () => sharp(png).resize({ width: c.width });

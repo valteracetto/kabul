@@ -8,6 +8,8 @@ MCP server `kabul-browser`, whatever the model or harness: Claude Code, Codex, A
 Qwen Code, OpenCode, Goose, Cursor and local models. You and the agent look at the same tab, and you can
 click and type in it while the agent works.
 
+![The Browser tab split with the chat: Claude checks dark mode on a local dashboard through kabul-browser, with "Claude is controlling the browser" and Take control](../assets/browser.png)
+
 ## Opening it
 
 - **`⌘⇧B`** in a workspace opens the Browser tab.

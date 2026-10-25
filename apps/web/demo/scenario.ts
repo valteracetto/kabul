@@ -569,6 +569,37 @@ export function install(ctx: Ctx) {
     void text;
   };
 
+  /**
+   * Navegador compartilhado (captura browser.png): o Claude confere o dark mode na aba Browser do workspace pelo
+   * MCP `kabul-browser` (navegar, ler a página, clicar no botão do tema, screenshot) e segue mexendo na página;
+   * antes dele, o Codex já tinha usado o mesmo navegador (log de ações). O quadro da página vem do spec.
+   */
+  const BROWSER_URL = "http://localhost:4100/dashboard";
+  const browserFlow = (chatId: string, wid: string) => {
+    const act = (agent: string, tool: string, detail: string) => (window as any).__mock?.browserAgent(wid, agent, tool, detail);
+    act("Codex", "navigate", "http://localhost:4100/login");
+    act("Codex", "type", "Email (e7): sam@acme.dev");
+    act("Codex", "click", "Sign in (e9)");
+    const B = "mcp__kabul-browser__";
+    const steps: [string, any, string, string, string][] = [
+      ["browser_navigate", { url: BROWSER_URL }, `Navigated to ${BROWSER_URL} (Acme · Dashboard)`, "navigate", BROWSER_URL],
+      ["browser_snapshot", {}, "- banner\n  - link \"Acme\" [ref=e3]\n  - button \"Theme toggle\" [ref=e42]\n- main\n  - heading \"Dashboard\" [level=1]\n  - img \"Revenue chart\" [ref=e61]", "snapshot", "Acme · Dashboard"],
+      ["browser_click", { element: "Theme toggle", ref: "e42" }, "Clicked \"Theme toggle\". data-theme=dark", "click", "Theme toggle (e42)"],
+      ["browser_screenshot", { fullPage: false }, "Screenshot 1280×800 (image attached)", "screenshot", "1280×800"],
+      ["browser_hover", { element: "Revenue chart", ref: "e61" }, "Tooltip: Oct 21 · $6,240", "hover", "Revenue chart (e61)"],
+    ];
+    play(chatId, [...started(chatId), [80, { type: "reasoning", text: "I'll open the dashboard in the workspace browser, switch to dark mode and check the charts, the cards and the first paint." }]]);
+    steps.forEach(([tool, input, out, short, detail], i) => {
+      const id = `br-${chatId}-${i}`;
+      later(chatId, 300 + i * 700, () => (ev(chatId, { type: "tool_use", id, name: B + tool, input }), act("Claude", short, detail)));
+      if (i < steps.length - 1) later(chatId, 600 + i * 700, () => ev(chatId, { type: "tool_result", id, output: out, is_error: false }));
+    });
+    later(chatId, 300 + steps.length * 700, () => ev(chatId, { type: "text", text: "The theme toggle works and the charts, cards and table follow the dark palette. Reloading shows no white flash. Now checking the tooltip contrast on the revenue chart." }));
+    // Segue "controlando" enquanto o turno roda (o indicador some 8 s depois da última ação).
+    const keep = setInterval(() => act("Claude", "hover", "Revenue chart (e61)"), 2500);
+    (timers.get(chatId) ?? timers.set(chatId, []).get(chatId)!).push(keep as any);
+  };
+
   /** Primeiro turno curto (com custo e tokens) antes do trabalho longo ou do pedido de aprovação. */
   const INTRO: Record<string, [string, any, string][]> = {
     "w-dark": [["Read", { file_path: "src/components/Chart.tsx" }, "export function Chart({ data }: Props) { … }"], ["Edit", { file_path: "src/components/Chart.tsx", old_string: "const colors = PALETTE;", new_string: "const colors = scheme === \"dark\" ? PALETTE_DARK : PALETTE;" }, "ok"]],
@@ -597,6 +628,7 @@ export function install(ctx: Ctx) {
     if (mode && c.turn === 1) return intro(chatId, c.ws);
     if (mode === "background") return background(chatId, c.ws);
     if (mode === "approval") return approval(chatId, c.ws);
+    if (mode === "browser") return browserFlow(chatId, c.ws);
     return flow(chatId, text);
   };
   handlers.chat_approve = ({ chatId, allow }) => {

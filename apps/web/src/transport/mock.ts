@@ -416,7 +416,19 @@ const handlers: Record<string, (a: any) => unknown> = {
   sections_list: () => db.sections,
   section_save: ({ section }) => { const s = { ...section, id: section.id || id(), order: section.id ? section.order : db.sections.length }; db.sections = [...db.sections.filter((x: any) => x.id !== s.id), s].sort((a: any, b: any) => a.order - b.order); return s; },
   section_delete: ({ id: sid }) => { db.sections = db.sections.filter((x: any) => x.id !== sid); db.workspaces.forEach((w) => w.section === sid && (w.section = null)); },
-  repo_update: ({ id: rid, hidden, icon }) => Object.assign(db.repos.find((r) => r.id === rid), hidden === undefined ? {} : { hidden }, icon === undefined ? {} : { icon: icon || null }),
+  repo_update: ({ id: rid, hidden, icon, githubAvatar }) => Object.assign(db.repos.find((r) => r.id === rid), hidden === undefined ? {} : { hidden }, icon === undefined ? {} : { icon: icon || null }, githubAvatar === undefined ? {} : { github_avatar: githubAvatar ? null : false }),
+  // Avatar do GitHub sem rede: `window.__mockAvatar` (pode vir de um addInitScript, antes do app carregar):
+  // `owners` ({nome do repo: dono}) diz quais repos têm remoto no GitHub; `offline` simula sem rede e sem cache
+  // (o app fica com a letra). As chamadas ficam em `__mockAvatar.calls`.
+  repo_avatar: ({ id: rid, refresh }) => {
+    const m = ((window as any).__mockAvatar ??= {});
+    const r = db.repos.find((x) => x.id === rid);
+    m.calls = [...(m.calls ?? []), { id: rid, refresh: !!refresh }];
+    const owner = r && m.owners?.[r.name];
+    if (!r || r.github_avatar === false || !owner) return null;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#2f81f7"/><circle cx="4" cy="4" r="2" fill="#fff"/></svg>`;
+    return { host: "github.com", owner, data_url: m.offline ? null : "data:image/svg+xml;base64," + btoa(svg) };
+  },
   repo_env_layers: () => [["repo", { API_URL: "http://localhost:$KABUL_PORT", LOG: "info" }], ["repo local", { LOG: "debug" }]],
   gh_repos: () => [
     { name_with_owner: "dev/demo-app", owner: "dev", private: true, updated_at: "2026-10-20T10:00:00Z", url: "https://github.com/dev/demo-app", description: "App de demonstração", avatar: "" },

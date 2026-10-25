@@ -482,6 +482,35 @@ impl Hub {
                     }
                 }
             }
+            // Avatar do GitHub (data URL do cache em `<estado>/icons/github`): vai pelo WebSocket autenticado,
+            // sem imagem remota na PWA. Convidado só vê o do repo do workspace dele.
+            "repo_avatar" => {
+                let id = s(a, "id")?;
+                let (repos, wss) = self.snapshot();
+                if let Some(w) = &scope_ws {
+                    anyhow::ensure!(wss.iter().any(|x| &x.id == w && x.repo_id == id), "fora do workspace compartilhado com você");
+                }
+                let r = repos.into_iter().find(|r| r.id == id).context("repo não encontrado")?;
+                json!(kabul_core::avatar::repo_avatar(&self.home, &r, a.get("refresh").and_then(Value::as_bool).unwrap_or(false)))
+            }
+            "repo_update" => {
+                let id = s(a, "id")?;
+                let r = self.with_store(|st| {
+                    st.update_repo(&id, |r| {
+                        if let Some(h) = a.get("hidden").and_then(Value::as_bool) {
+                            r.hidden = h;
+                        }
+                        if let Some(i) = a.get("icon").and_then(Value::as_str) {
+                            r.icon = Some(i.to_string()).filter(|i| !i.trim().is_empty());
+                        }
+                        if let Some(g) = a.get("githubAvatar").and_then(Value::as_bool) {
+                            r.github_avatar = (!g).then_some(false);
+                        }
+                    })
+                })?;
+                self.bus.emit("workspaces-changed", json!({}), None, None);
+                json!(r)
+            }
             "workspaces_list" => {
                 let (_, wss) = self.snapshot();
                 json!(wss.into_iter().filter(|w| who.scope.allows_workspace(Some(&w.id))).collect::<Vec<_>>())
