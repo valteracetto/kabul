@@ -102,15 +102,20 @@ test("fork para nova aba e novo workspace, reset chat, menu da aba, ⌘/ abre o 
   await expect(host(page).locator(".ctab", { hasText: "Fork" })).toBeVisible();
   await expect(chat(page).locator(".msg-user")).toHaveCount(1);
   await expect(host(page).locator(".notice", { hasText: "Fork desta conversa" })).toBeVisible();
-  // Menu da aba: fechar as outras
-  await host(page).getByTestId("ctab").first().click({ button: "right" });
+  // Menu da aba: fechar as outras, ficando com o fork (1 turno). Antes o menu abria na primeira aba (a
+  // original, com 2 turnos): o total final era 4 e o "3" só passava no intervalo entre o fim da
+  // "terceira" e o da "quarta" (falhava no runner lento).
+  await host(page).locator(".ctab", { hasText: "Fork" }).click({ button: "right" });
   await expect(page.getByTestId("tab-menu")).toContainText("Copiar transcript");
   await page.getByTestId("tab-close-others").click();
   await expect(host(page).getByTestId("ctab")).toHaveCount(1);
+  await expect(host(page).getByTestId("ctab")).toContainText("Fork");
   // Reset chat (com "também restaurar arquivos")
   await say(page, "terceira");
   await say(page, "quarta");
+  // 3 é o estado final (fork + terceira + quarta), não um intervalo no meio da fila.
   await expect(chat(page).locator(".turn-meta")).toHaveCount(3);
+  await expect(chat(page).getByTestId("queued-msg")).toHaveCount(0);
   await chat(page).getByTestId("turn-more").nth(1).click();
   await page.getByTestId("reset-chat").click();
   await page.getByTestId("confirm-check").check();

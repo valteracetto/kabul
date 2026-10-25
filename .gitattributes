@@ -1,0 +1,5 @@
+# Fim de linha LF no checkout de qualquer sistema (o Git for Windows liga core.autocrlf por padrão),
+# para os testes e fixtures lidos com include_str! valerem igual no Windows.
+* text=auto eol=lf
+# Saídas gravadas de terminal: bytes exatos (algumas têm \r\n de propósito).
+**/tests/fixtures/** -text

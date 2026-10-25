@@ -991,6 +991,9 @@ mod tests {
         std::fs::create_dir_all(&repo).unwrap();
         let g = |d: &Path, a: &[&str]| assert!(crate::shell::command("git").arg("-C").arg(d).args(a).output().unwrap().status.success(), "{a:?}");
         g(&repo, &["init", "-q", "-b", "main"]);
+        // Sem conversão de fim de linha (o Git for Windows liga `core.autocrlf` no config do sistema):
+        // o teste compara o conteúdo exato depois de arquivar e desarquivar.
+        g(&repo, &["config", "core.autocrlf", "false"]);
         std::fs::write(repo.join("a.txt"), "um\n").unwrap();
         g(&repo, &["add", "."]);
         std::fs::write(repo.join(".gitignore"), ".env*\n").unwrap();

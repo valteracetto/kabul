@@ -279,22 +279,25 @@ mod prep_tests {
         set.save(&home.join("app-settings.json")).unwrap();
         let r = Repo { id: "r".into(), name: "r".into(), path: repo.display().to_string(), default_branch: "main".into(), ..Default::default() };
         let w = Workspace { id: "w".into(), repo_id: "r".into(), name: "kabul".into(), path: repo.display().to_string(), ..Default::default() };
-        let m = models::catalog().into_iter().find(|m| m.harness == HarnessKind::Claude).unwrap();
+        // Catálogo fixo: `models::catalog()` consulta os CLIs instalados (codex, agy), que o CI não tem.
+        let m = models::claude_models().into_iter().find(|m| m.harness == HarnessKind::Claude).unwrap();
         let p = prepare(&home, &w, &r, &m, &ChatRequest::default(), &[], &Registry::load(&home.join("nao-existe.json"))).unwrap();
         let args = p.kind.harness().command(&p.opts).args.join(" ");
         assert!(args.contains(r#"--settings {"outputStyle":"Explanatory"}"#), "{args}");
         assert!(args.contains("--append-system-prompt Responda em português."), "{args}");
         assert!(log_header(&p).contains("env: KABUL_"));
         // Gemini (agy): projeto por workspace; "aprovar tudo" só quando ligado.
-        let agy = models::catalog().into_iter().find(|m| m.harness == HarnessKind::Antigravity).unwrap();
+        let agy = models::parse_agy_models("gemini-4-argon-medium\tGemini 4 Argon (Medium)\n").remove(0);
         let args = |home: &Path| prepare(home, &w, &r, &agy, &ChatRequest::default(), &[], &Registry::load(&home.join("nao-existe.json"))).map(|p| p.kind.harness().command(&p.opts).args).unwrap();
         let a = args(&home);
         assert!(a.contains(&"--project".to_string()) && !a.contains(&"--dangerously-skip-permissions".to_string()), "{a:?}");
         set.agy_skip_permissions = true;
         set.save(&home.join("app-settings.json")).unwrap();
         assert!(args(&home).contains(&"--dangerously-skip-permissions".to_string()));
-        std::env::set_var(crate::harness::bin_override_var("kabul-teste"), "/bin/sh");
-        assert_eq!(crate::harness::which("kabul-teste").unwrap(), std::path::PathBuf::from("/bin/sh"));
+        // Um arquivo que existe em qualquer sistema (o `/bin/sh` não existe no Windows).
+        let exe = std::env::current_exe().unwrap();
+        std::env::set_var(crate::harness::bin_override_var("kabul-teste"), &exe);
+        assert_eq!(crate::harness::which("kabul-teste").unwrap(), exe);
         std::fs::remove_dir_all(&tmp).ok();
     }
 }

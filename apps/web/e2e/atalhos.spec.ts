@@ -1,6 +1,10 @@
 import { test, expect } from "@playwright/test";
 
 test("atalhos personalizados: gravar, conflito, a tecla nova abre e a antiga não; restaurar; fixos não editam", async ({ page }) => {
+  // O gravador (keymap.ts) lê "⌘" como Ctrl fora do macOS, mas os handlers do app ainda ouvem só o
+  // metaKey (a troca para Ctrl está em "O que falta" no docs/windows.md). No runner Linux o Meta+B
+  // chegava ao gravador sem modificador válido. Até a troca, o teste roda com a plataforma do macOS.
+  await page.addInitScript(() => Object.defineProperty(navigator, "platform", { get: () => "MacIntel" }));
   await page.goto("/?mock");
   await page.getByTestId("settings").click();
   await page.getByTestId("set-tab-atalhos").click();

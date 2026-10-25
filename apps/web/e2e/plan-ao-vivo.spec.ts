@@ -49,5 +49,9 @@ test("plan mode: sem troca ao vivo, retoma a sessão com o modo novo", async ({ 
   await composer.fill("Implemente");
   await composer.press("Enter");
   await expect(page.locator(".notice").filter({ hasText: "Continuando" })).toBeVisible();
+  // O aviso entra antes do chat_start (e o mock responde depois de 15 ms): ler o contador logo após o
+  // aviso era corrida. Espera o estado: a segunda sessão sobe e o turno fecha nela, sem uma terceira.
+  await expect.poll(() => page.evaluate(() => (window as any).__kabulStarts)).toBe(2);
+  await expect(page.locator(".turn-meta")).toHaveCount(2);
   expect(await page.evaluate(() => (window as any).__kabulStarts)).toBe(2);
 });

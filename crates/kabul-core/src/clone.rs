@@ -73,9 +73,11 @@ pub fn list_repos(env: &[(String, String)], limit: u32) -> Result<Vec<GhRepo>> {
 
 /// URL de clone e nome da pasta a partir de `owner/repo`, URL https/ssh ou `github.com/owner/repo`.
 pub fn normalize(input: &str) -> Result<(String, String)> {
-    let t = input.trim().trim_end_matches('/');
+    let t = input.trim().trim_end_matches(['/', '\\']);
     anyhow::ensure!(!t.is_empty(), "Informe a URL ou owner/repo");
-    let url = if t.starts_with("https://") || t.starts_with("http://") || t.starts_with("git@") || t.starts_with("ssh://") || t.starts_with("file://") || t.starts_with('/') {
+    // Caminho local absoluto também vale: `/x/y` e, no Windows, `C:\x\y` ou `\\servidor\pasta`.
+    let local = t.starts_with('/') || t.starts_with("\\\\") || (t.len() > 2 && t.as_bytes()[0].is_ascii_alphabetic() && t.as_bytes()[1] == b':' && matches!(t.as_bytes()[2], b'\\' | b'/'));
+    let url = if t.starts_with("https://") || t.starts_with("http://") || t.starts_with("git@") || t.starts_with("ssh://") || t.starts_with("file://") || local {
         t.to_string()
     } else if let Some(rest) = t.strip_prefix("github.com/") {
         format!("https://github.com/{rest}")
@@ -84,7 +86,9 @@ pub fn normalize(input: &str) -> Result<(String, String)> {
     } else {
         bail!("Não reconheci \"{t}\". Use owner/repo ou a URL do repositório.");
     };
-    let name = url.trim_end_matches(".git").rsplit(['/', ':']).next().unwrap_or("repo").to_string();
+    // `\` também separa: no Windows, um caminho local terminado em `\origem` virava um nome com a
+    // pasta inteira, e o `dir.join(nome)` apontava para a própria origem.
+    let name = url.trim_end_matches(".git").rsplit(['/', '\\', ':']).next().unwrap_or("repo").to_string();
     anyhow::ensure!(!name.is_empty() && name != "." && name != "..", "nome de repositório inválido");
     Ok((url, name))
 }
@@ -199,6 +203,8 @@ mod tests {
         assert_eq!(normalize("git@github.com:dev/demo.git").unwrap().1, "demo");
         assert_eq!(normalize("github.com/dev/demo").unwrap().0, "https://github.com/dev/demo");
         assert!(normalize("isso não é repo").is_err());
+        assert_eq!(normalize(r"C:\Users\dev\demo").unwrap(), (r"C:\Users\dev\demo".into(), "demo".into()));
+        assert_eq!(normalize(r"file://C:\Users\dev\demo.git\").unwrap().1, "demo");
         let l = parse_repo_list(r#"[{"nameWithOwner":"dev/app","isPrivate":true,"updatedAt":"2026-10-01T00:00:00Z","url":"https://github.com/dev/app","description":"","owner":{"login":"dev"}}]"#);
         assert_eq!((l[0].owner.as_str(), l[0].private, l[0].description.clone(), l[0].avatar.as_str()), ("dev", true, None, "https://github.com/dev.png?size=40"));
         assert!(friendly_error("remote: Repository not found.\nfatal: repository 'x' not found").starts_with("Repositório não encontrado"));
@@ -213,13 +219,22 @@ mod tests {
         let src = quick_start(&tmp, "origem").unwrap();
         assert!(src.join(".git").exists() && src.join("README.md").exists());
         assert!(quick_start(&tmp, "origem").is_err());
+        // URL `file://` válida nos dois sistemas: no Windows, `file:///C:/...`.
+        let url = |p: &Path| {
+            let s = p.display().to_string().replace('\\', "/");
+            if s.starts_with('/') {
+                format!("file://{s}")
+            } else {
+                format!("file:///{s}")
+            }
+        };
         let mut phases = 0;
-        let dest = clone(&format!("file://{}", src.display()), &tmp.join("clones"), &[], |_, _| phases += 1).unwrap();
+        let dest = clone(&url(&src), &tmp.join("clones"), &[], |_, _| phases += 1).unwrap();
         assert_eq!(dest, tmp.join("clones/origem"));
         assert!(dest.join("README.md").exists());
-        let e = clone(&format!("file://{}", src.display()), &tmp.join("clones"), &[], |_, _| {}).unwrap_err();
+        let e = clone(&url(&src), &tmp.join("clones"), &[], |_, _| {}).unwrap_err();
         assert!(e.to_string().contains("já existe"), "{e}");
-        assert!(clone(&format!("file://{}/nada", tmp.display()), &tmp.join("c2"), &[], |_, _| {}).is_err());
+        assert!(clone(&url(&tmp.join("nada")), &tmp.join("c2"), &[], |_, _| {}).is_err());
         std::fs::remove_dir_all(&tmp).ok();
     }
 }

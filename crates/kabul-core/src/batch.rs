@@ -137,23 +137,39 @@ mod tests {
 
     #[test]
     fn primeiro_sai_na_hora_e_janela_limita() {
+        // Sem `sleep` no produtor: o resultado não depende do agendador do runner. Só limites que o
+        // relógio monotônico garante (a janela é um piso) ou folgados demais para falhar (uma janela
+        // de 30 s contra um `next()` que não deveria esperar nada).
         let (tx, rx) = channel();
+        let mut it = coalesce(rx, Duration::from_secs(30));
+        tx.send(d("0")).unwrap();
         let t0 = Instant::now();
-        let h = std::thread::spawn(move || {
-            for i in 0..20 {
-                tx.send(d(&i.to_string())).unwrap();
-                std::thread::sleep(Duration::from_millis(2));
-            }
-        });
-        let mut it = coalesce(rx, Duration::from_millis(16));
-        let first = it.next().unwrap();
-        assert!(t0.elapsed() < Duration::from_millis(10), "o primeiro não espera a janela");
-        assert_eq!(first, d("0"));
+        assert_eq!(it.next().unwrap(), d("0"));
+        assert!(t0.elapsed() < Duration::from_secs(15), "o primeiro não espera a janela");
+        // Tudo o que chega dentro da janela sai num pedaço só, em ordem; o canal fechado encerra a
+        // espera sem gastar a janela inteira.
+        for i in 1..20 {
+            tx.send(d(&i.to_string())).unwrap();
+        }
+        drop(tx);
         let rest: Vec<Event> = it.collect();
-        h.join().unwrap();
-        let all: String = std::iter::once(first).chain(rest.iter().cloned()).map(|e| if let Event::TextDelta { text } = e { text } else { String::new() }).collect();
-        assert_eq!(all, (0..20).map(|i| i.to_string()).collect::<String>());
-        assert!(rest.len() < 10, "juntou: {} pedaços", rest.len());
+        assert_eq!(rest, vec![d(&(1..20).map(|i| i.to_string()).collect::<String>())]);
+        assert!(t0.elapsed() < Duration::from_secs(15), "canal fechado não espera a janela");
+
+        // A janela limita: o segundo pedaço só sai depois de uma janela inteira desde o primeiro.
+        let window = Duration::from_millis(30);
+        let (tx, rx) = channel();
+        let mut it = coalesce(rx, window);
+        tx.send(d("a")).unwrap();
+        // Medido antes do `next()`: o fim da janela conta de quando o primeiro saiu, que é depois.
+        let saiu = Instant::now();
+        assert_eq!(it.next().unwrap(), d("a"));
+        tx.send(d("b")).unwrap();
+        tx.send(d("c")).unwrap();
+        assert_eq!(it.next().unwrap(), d("bc"));
+        assert!(saiu.elapsed() >= window, "saiu antes da janela: {:?}", saiu.elapsed());
+        drop(tx);
+        assert_eq!(it.next(), None);
     }
 
     #[test]

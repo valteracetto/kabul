@@ -60,7 +60,10 @@ mod tests {
         assert_eq!(state_dir_for("macos", h, None, None), PathBuf::from("/home/dev/Library/Application Support/kabul"));
         assert_eq!(state_dir_for("windows", h, Some("C:/Users/dev/AppData/Roaming".into()), None), PathBuf::from("C:/Users/dev/AppData/Roaming/kabul"));
         assert_eq!(state_dir_for("linux", h, None, None), PathBuf::from("/home/dev/.local/share/kabul"));
-        assert_eq!(state_dir_for("linux", h, None, Some("/x/data".into())), PathBuf::from("/x/data/kabul"));
+        // `is_absolute` segue o sistema que roda o teste: no Windows, `/x/data` não tem unidade.
+        let xdg = if cfg!(windows) { "C:/x/data" } else { "/x/data" };
+        assert_eq!(state_dir_for("linux", h, None, Some(xdg.into())), Path::new(xdg).join("kabul"));
+        assert_eq!(state_dir_for("linux", h, None, Some("relativo".into())), PathBuf::from("/home/dev/.local/share/kabul"));
     }
 
     #[test]

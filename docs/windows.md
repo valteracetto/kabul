@@ -101,8 +101,36 @@ destacada.
 - **Conferir no Windows real:** `cwd` de processos de outros apps (painel de recursos/sessões de fora),
   pastas dos CLIs (`~/.codex`, `%LOCALAPPDATA%\opencode`?), a regra da pasta de projeto do Claude com
   caminhos longos, CRLF e `core.longpaths` nos worktrees, `BROWSER=true` no login dos CLIs.
-- **CI:** matriz `macos-latest` + `windows-latest` com `cargo test`, `npm run build`, `npm run e2e` e
-  `tauri build` (.msi). O bundle hoje só gera `.app` (`"targets": ["app"]`).
+- **Atalhos com Ctrl no frontend:** o gravador de atalhos (`components/keymap.ts`) já lê "⌘" como Ctrl
+  fora do macOS, mas os handlers do app ouvem só o `metaKey`. Até a troca, o `e2e/atalhos.spec.ts`
+  fixa `navigator.platform` do macOS (no runner Linux o Meta+B chegava ao gravador sem modificador).
+- **CI:** falta o `tauri build` (.msi) no Windows. O bundle hoje só gera `.app` (`"targets": ["app"]`).
+
+## CI no Windows
+
+O `.github/workflows/ci.yml` roda `cargo clippy` e `cargo test --workspace` também no
+`windows-latest`, mas com `continue-on-error`: o job reporta e não bloqueia o merge enquanto os itens
+de "O que falta" estiverem abertos. Ao fechar o porte, tire a linha do workflow e esta nota.
+
+Cuidados que os testes já seguem (e os novos devem seguir):
+
+- **Fim de linha.** O Git for Windows liga `core.autocrlf=true` no config do sistema. O
+  `.gitattributes` fixa LF no checkout (as fixtures de terminal em `tests/fixtures` ficam com os bytes
+  exatos), e os repositórios criados pelos testes rodam `git config core.autocrlf false` quando
+  comparam conteúdo depois de checkout/restauração.
+- **Caminho dentro de JSON.** `C:\Users\...` tem barras invertidas: monte o JSON com
+  `serde_json::to_string`, nunca com `format!("\"{}\"", path.display())`.
+- **URL `file://`.** No Windows é `file:///C:/...` (barras normais e uma barra a mais).
+- **Binários do sistema.** Nada de `/bin/sh` ou `echo` como executável: use `std::env::current_exe()`
+  quando só precisa de um arquivo que existe, e `cmd /C echo` no Windows.
+- **Ambiente da máquina.** Teste não depende de CLI instalada (`models::catalog()` consulta `codex` e
+  `agy`); use as listas fixas (`claude_models()`, `parse_agy_models`).
+- **Tempo.** Sem `sleep` no produtor para provar janela: só pisos garantidos pelo relógio monotônico
+  (a espera mínima) e tetos folgados.
+
+Nenhum teste foi escondido do Windows com `#[ignore]`. Os trechos `#[cfg(unix)]` dentro dos testes
+conferem o que só existe no Unix (modo 0600, link simbólico, sinais); os `#[ignore]` são os testes com
+agente ou conta de verdade, que rodam à mão em qualquer sistema.
 
 ## Verificar sem Windows (no Mac)
 

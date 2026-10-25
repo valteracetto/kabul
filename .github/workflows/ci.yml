@@ -36,8 +36,8 @@ jobs:
   rust:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # The Windows port is still in progress (docs/windows.md): the job runs and reports, but does
-    # not block merges yet. Remove this line once the Windows block lands.
+    # The Windows port is still in progress (docs/windows.md, "CI no Windows"): the job runs and
+    # reports, but does not block merges yet. Remove this line once the Windows block lands.
     continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false

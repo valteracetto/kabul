@@ -869,6 +869,11 @@ impl Harness for AcpHarness {
 mod tests {
     use super::*;
 
+    /// String JSON com aspas e escapes (caminhos do Windows têm `\`).
+    fn json_str(s: &str) -> String {
+        serde_json::to_string(s).unwrap()
+    }
+
     fn lines(out: &[String]) -> Vec<Value> {
         out.iter().map(|l| serde_json::from_str(l).unwrap()).collect()
     }
@@ -999,7 +1004,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("kabul-acp-goose-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let d = dir.display().to_string();
-        let fx = include_str!("../../tests/fixtures/acp_goose.ndjson").replace("/tmp/exemplo", &d);
+        // Dentro do JSON o caminho vai escapado (no Windows, `C:\Users\...` tem barras invertidas).
+        let fx = include_str!("../../tests/fixtures/acp_goose.ndjson").replace("/tmp/exemplo", json_str(&d).trim_matches('"'));
         let mut p = AcpProtocol::new(AcpOptions { cwd: d.clone(), ..Default::default() });
         assert!(p.user_message("Crie.").is_empty());
         let (ev, out) = conversa(&mut p, &fx);
@@ -1169,11 +1175,17 @@ mod tests {
             let _ = tx.lock().unwrap().send(l);
         }));
         let f = dir.join("a.txt");
-        let w = format!(r#"{{"jsonrpc":"2.0","id":"w1","method":"fs/write_text_file","params":{{"sessionId":"s","path":"{}","content":"um\ndois\ntres"}}}}"#, f.display());
+        let w = format!(r#"{{"jsonrpc":"2.0","id":"w1","method":"fs/write_text_file","params":{{"sessionId":"s","path":{},"content":"um\ndois\ntres"}}}}"#, json_str(&f.display().to_string()));
         assert_eq!(lines(&p.on_line(&w).1)[0]["result"], Value::Null);
-        let r = format!(r#"{{"jsonrpc":"2.0","id":"r1","method":"fs/read_text_file","params":{{"sessionId":"s","path":"{}","line":2,"limit":1}}}}"#, f.display());
+        let r = format!(r#"{{"jsonrpc":"2.0","id":"r1","method":"fs/read_text_file","params":{{"sessionId":"s","path":{},"line":2,"limit":1}}}}"#, json_str(&f.display().to_string()));
         assert_eq!(lines(&p.on_line(&r).1)[0]["result"]["content"], "dois");
-        let (_, o) = p.on_line(r#"{"jsonrpc":"2.0","id":3,"method":"terminal/create","params":{"sessionId":"s","command":"echo","args":["ola-terminal"]}}"#);
+        // `echo` é embutido do `cmd` no Windows (não há `echo.exe` garantido no PATH).
+        let create = if cfg!(windows) {
+            r#"{"jsonrpc":"2.0","id":3,"method":"terminal/create","params":{"sessionId":"s","command":"cmd","args":["/C","echo","ola-terminal"]}}"#
+        } else {
+            r#"{"jsonrpc":"2.0","id":3,"method":"terminal/create","params":{"sessionId":"s","command":"echo","args":["ola-terminal"]}}"#
+        };
+        let (_, o) = p.on_line(create);
         let tid = lines(&o)[0]["result"]["terminalId"].as_str().unwrap().to_string();
         let (_, o) = p.on_line(&format!(r#"{{"jsonrpc":"2.0","id":4,"method":"terminal/wait_for_exit","params":{{"sessionId":"s","terminalId":"{tid}"}}}}"#));
         assert!(o.is_empty(), "resposta adiada");
@@ -1181,7 +1193,7 @@ mod tests {
         assert_eq!((late[0]["id"].as_i64(), late[0]["result"]["exitCode"].as_i64()), (Some(4), Some(0)));
         std::thread::sleep(std::time::Duration::from_millis(100));
         let (_, o) = p.on_line(&format!(r#"{{"jsonrpc":"2.0","id":5,"method":"terminal/output","params":{{"sessionId":"s","terminalId":"{tid}"}}}}"#));
-        assert_eq!(lines(&o)[0]["result"]["output"], "ola-terminal\n");
+        assert_eq!(lines(&o)[0]["result"]["output"].as_str().map(|s| s.replace("\r\n", "\n")).as_deref(), Some("ola-terminal\n"));
         assert_eq!(lines(&p.on_line(&format!(r#"{{"jsonrpc":"2.0","id":6,"method":"terminal/release","params":{{"terminalId":"{tid}"}}}}"#)).1)[0]["result"], Value::Null);
         assert_eq!(lines(&p.on_line(r#"{"jsonrpc":"2.0","id":8,"method":"x/y","params":{}}"#).1)[0]["error"]["code"], -32601);
         // Erro de autenticação no prompt fecha o turno com dica.

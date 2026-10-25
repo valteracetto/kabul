@@ -97,6 +97,9 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         let g = |a: &[&str]| git(&d, a, &[]).unwrap();
         g(&["init", "-q", "-b", "main"]);
+        // O Git for Windows vem com `core.autocrlf=true` no config do sistema: o checkout devolveria
+        // `2\r\n`. O teste confere o conteúdo exato, então fixa o LF.
+        g(&["config", "core.autocrlf", "false"]);
         std::fs::write(d.join("a.txt"), "1\n").unwrap();
         g(&["add", "."]);
         g(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "i"]);
