@@ -4,6 +4,7 @@ import { DayChart, LimitBlocks, alertText, fmtDur, fmtTokens, fmtUsd, providerLa
 import { t } from "../i18n";
 import { trError } from "../i18n/errors";
 import { kcall } from "./kabuld";
+import { BackButton, NavBar } from "./ui";
 import { transport } from "../transport";
 
 /** Uso no celular (só o dono): gasto, limites por provedor/conta, gráfico por dia, modelos e sessões. */
@@ -32,17 +33,20 @@ export function MobileUsage({ onBack }: { onBack: () => void }) {
   };
   return (
     <div className="m-page" data-testid="m-usage-detail">
-      <header className="m-top">
-        <button className="m-btn ghost" onClick={onBack} aria-label={t("common.back")} data-testid="m-usage-back">‹</button>
-        <div className="m-top-title"><b>{t("usage.title")}</b><span className="dim small">{t("usage.m.last30")}</span></div>
-        <button className="m-btn small" onClick={refresh} disabled={busy}>{busy ? "…" : t("common.refresh")}</button>
-        <button className="m-btn small" onClick={() => void csv()} data-testid="m-usage-csv">CSV</button>
-      </header>
+      <NavBar
+        title={t("usage.title")}
+        sub={t("usage.m.last30")}
+        left={<BackButton onClick={onBack} testid="m-usage-back" />}
+      />
       {err && <div className="m-error">{trError(err)}</div>}
       <main className="m-scroll m-pad usage m-usage">
         {!o && !err && <div className="m-empty dim">{t("common.loading")}</div>}
         {o && (
           <>
+            <div className="m-usage-actions">
+              <button className="m-pill small" onClick={refresh} disabled={busy}>{busy ? "…" : t("common.refresh")}</button>
+              <button className="m-pill small" onClick={() => void csv()} data-testid="m-usage-csv">CSV</button>
+            </div>
             {o.alerts.map((a) => <div key={a.key} className={"usage-alert lv-" + (a.level === "crit" ? "critical" : "serious")} data-testid="m-usage-alert">{a.level === "crit" ? "■" : "▲"} {alertText(a)}</div>)}
             {o.suggestions.map((s, i) => <div key={i} className="usage-suggest dim small">{suggestionText(s)} {t("usage.m.suggestHint")}</div>)}
             <div className="stat-tiles">

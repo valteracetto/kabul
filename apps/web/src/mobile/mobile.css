@@ -553,3 +553,7 @@
 @media (min-width: 760px) {
   .m-app { max-width: 720px; margin: 0 auto; box-shadow: 0 0 0 .5px var(--m-sep); }
 }
+
+/* Custos e limites: ações em linha logo abaixo da barra (a barra fica só com voltar e o título). */
+.m-usage-actions { display: flex; gap: 8px; justify-content: flex-end; margin: 2px 0 12px; }
+.m-pill.small { height: 34px; font-size: 15px; padding: 0 14px; }
