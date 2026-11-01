@@ -1,0 +1,1 @@
+{"numStartups":3,"mcpServers":{"acmetool":{"type":"stdio","command":"{HOME}/.acmetool/bin/acmetool-mcp","args":[],"env":{"ACME_API_KEY":"sk-live-0000000000000000000000000000"}},"web":{"type":"http","url":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer abc"}}},"projects":{"{REPO}":{"mcpServers":{"team-db":{"command":"uvx","args":["db-mcp"]}}}}}

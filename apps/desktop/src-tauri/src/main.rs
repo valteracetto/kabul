@@ -48,6 +48,8 @@ struct App {
     chat_meta: Mutex<HashMap<String, tray::ChatInfo>>,
     /// Arquivo de modo plano do navegador de cada conversa (só leitura enquanto existir).
     plan_flags: Mutex<HashMap<String, PathBuf>>,
+    /// Ferramentas das IAs (inventário só leitura, em memória com atualização em segundo plano).
+    tools: Arc<kabul_core::tools::service::Service>,
 }
 
 impl App {
@@ -1320,6 +1322,39 @@ fn mcp_export_agy(app: State<App>, workspace_id: String, name: String) -> R<Opti
     Ok(kabul_core::mcp_share::export_agy(&kabul_core::mcp_share::for_global(sv), &kabul_core::mcp_share::agy_config_file()).map_err(e)?.map(|b| b.display().to_string()))
 }
 
+// ---------------- Ferramentas (skills, comandos, plugins, hooks, MCPs das IAs) ----------------
+
+/// Repositórios do Kabul e o do workspace (escopo "Este repo").
+fn tools_ctx(app: &App, workspace_id: Option<&str>) -> (Vec<kabul_core::tools::RepoRef>, Option<String>) {
+    let s = app.store.lock().unwrap();
+    let repos = s.state.repos.iter().map(|r| kabul_core::tools::RepoRef { id: r.id.clone(), name: r.name.clone(), path: PathBuf::from(&r.path) }).collect();
+    let repo_id = workspace_id.filter(|w| !w.is_empty()).and_then(|w| s.workspace(w).ok()).map(|w| w.repo_id.clone());
+    (repos, repo_id)
+}
+
+/// Inventário (só leitura). Com `stale` o resultado é do cache e `tools-changed` avisa quando atualizar.
+#[tauri::command]
+async fn tools_snapshot(app: State<'_, App>, workspace_id: Option<String>, scope: Option<String>, refresh: Option<bool>) -> R<kabul_core::tools::Snapshot> {
+    let (repos, repo_id) = tools_ctx(&app, workspace_id.as_deref());
+    let svc = app.tools.clone();
+    let q = kabul_core::tools::Query { scope, repo_id, refresh: refresh.unwrap_or(false) };
+    tauri::async_runtime::spawn_blocking(move || svc.snapshot(&repos, &q)).await.map_err(e)
+}
+
+/// Detalhe de um item (corpo do arquivo sob demanda, com teto).
+#[tauri::command]
+async fn tools_item(app: State<'_, App>, id: String, workspace_id: Option<String>) -> R<Option<kabul_core::tools::ItemDetail>> {
+    let (repos, _) = tools_ctx(&app, workspace_id.as_deref());
+    let svc = app.tools.clone();
+    tauri::async_runtime::spawn_blocking(move || svc.item(&repos, &id)).await.map_err(e)
+}
+
+/// Favorito, nota e categoria pessoais (estado do Kabul, nunca nas pastas das IAs).
+#[tauri::command]
+fn tools_prefs_set(app: State<App>, id: String, favorite: Option<bool>, note: Option<String>, category: Option<String>) -> R<kabul_core::tools::prefs::Prefs> {
+    app.tools.prefs_set(&kabul_core::tools::prefs::Change { id, favorite, note, category }).map_err(e)
+}
+
 // ---------------- Navegador do Kabul (aba Browser) ----------------
 
 /// Comandos da aba Browser: mesmos nomes e argumentos no kabuld (`browser_<cmd>`).
@@ -1657,6 +1692,7 @@ fn main() {
     AppSettings::load(&home.join("app-settings.json")).apply_bin_overrides();
     let prefix = AppSettings::load(&home.join("app-settings.json")).branch_prefix();
     let store = Store::open(file, root, prefix).expect("abrindo o estado do Kabul");
+    let tools = kabul_core::tools::service::Service::new(&home);
     let builder = tauri::Builder::default();
     // Seletor de arquivos pelo plugin fora do macOS (lá continua o osascript).
     #[cfg(not(target_os = "macos"))]
@@ -1674,6 +1710,7 @@ fn main() {
             kept: Default::default(),
             chat_meta: Default::default(),
             plan_flags: Default::default(),
+            tools,
         })
         .manage(remote::Remote::default())
         .manage(tray::TrayState::default())
@@ -1682,6 +1719,12 @@ fn main() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            {
+                let h = app.handle().clone();
+                app.state::<App>().tools.set_on_change(Arc::new(move || {
+                    let _ = h.emit("tools-changed", serde_json::json!({}));
+                }));
+            }
             resume_archives(app.handle());
             watch_state(app.handle());
             remote::autostart(app.handle());
@@ -1790,6 +1833,9 @@ fn main() {
             mcp_weigh,
             mcp_set_shared,
             mcp_export_agy,
+            tools_snapshot,
+            tools_item,
+            tools_prefs_set,
             browser_status,
             browser_open,
             browser_nav,

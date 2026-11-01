@@ -6,7 +6,7 @@ import { chatStore, statusOf, useChatSelect } from "../components/chatStore";
 import { usePopover } from "../components/useDismiss";
 import { t, type Key } from "../i18n";
 import "./SideNav.css";
-import { IBrain, ICube, IGauge, IGrid, IHistory, IHome, IList, IMore, IPlus, ISearch } from "../icons";
+import { IBrain, ICube, IGauge, IGrid, IHistory, IHome, IList, IMore, IPlus, ISearch, ITool } from "../icons";
 
 /**
  * Navegação do topo e do rodapé da barra lateral. O centro da barra é a lista de workspaces; aqui ficam só
@@ -76,7 +76,7 @@ export function SideNav({ route, onRoute, onCreate, onSearch }: { route: Route; 
         </button>
       ) : (
         <div className="side-icons" role="toolbar" aria-label={t("app.side.overview")}>
-          {([["home", IHome, "app.pal.n.home"], ["agents", ICube, "app.agents.title"], ["dashboard", IList, "app.board.title"], ["sessions", IGrid, "app.sessions.title"], ["routines", IHistory, "app.routine.title"], ["local", IBrain, "app.pal.n.local"]] as const).map(([k, Icon, label]) => (
+          {([["home", IHome, "app.pal.n.home"], ["agents", ICube, "app.agents.title"], ["dashboard", IList, "app.board.title"], ["sessions", IGrid, "app.sessions.title"], ["routines", IHistory, "app.routine.title"], ["local", IBrain, "app.pal.n.local"], ["tools", ITool, "tools.title"]] as const).map(([k, Icon, label]) => (
             <button key={k} className={"icon-btn" + (route.kind === k ? " on" : "")} title={t(label) + (k === "home" ? " (⌘⇧H)" : "")} aria-label={t(label)} onClick={() => onRoute({ kind: k })} data-testid={`nav-${k}`}>
               <Icon size={15} />
               {k === "agents" && <AgentsBadge testid="agents-count" />}
@@ -92,18 +92,22 @@ export function SideNav({ route, onRoute, onCreate, onSearch }: { route: Route; 
 export function SideFootNav({ route, onRoute }: { route: Route; onRoute: (r: Route) => void }) {
   const more = usePopover<HTMLSpanElement>();
   const pick = (r: Route) => (more.close(), onRoute(r));
+  // Selo das Ferramentas (links quebrados etc.): lido só quando o menu abre, sem varrer o disco no início do app.
+  const [toolErrors, setToolErrors] = useState(0);
+  useEffect(() => void (more.open && api.toolsSnapshot("all").then((s) => setToolErrors(s.findings.filter((f) => f.severity === "error").length), () => {})), [more.open]);
   return (
     <>
       <UsageMeter on={route.kind === "usage"} onOpen={() => onRoute({ kind: "usage" })} />
       <span className="grow" />
       {sideNavVariant() === "overview" && (
         <span className="picker" ref={more.ref}>
-          <button className={"icon-btn" + (more.open || ["routines", "local"].includes(route.kind) ? " on" : "")} title={t("app.side.more")} aria-label={t("app.side.more")} aria-expanded={more.open} onClick={more.toggle} data-testid="nav-more"><IMore /></button>
+          <button className={"icon-btn" + (more.open || ["routines", "local", "tools"].includes(route.kind) ? " on" : "")} title={t("app.side.more")} aria-label={t("app.side.more")} aria-expanded={more.open} onClick={more.toggle} data-testid="nav-more"><IMore /></button>
           {more.open && (
             <Floating className="status-pop more-pop" placement="top-end" gap={6} testid="more-pop">
               <div className={"pop-row" + (route.kind === "home" ? " on" : "")} onClick={() => pick({ kind: "home" })} data-testid="nav-home"><IHome size={14} /> {t("app.pal.n.home")}<span className="grow" /><span className="kbd-hint">⌘⇧H</span></div>
               <div className={"pop-row" + (route.kind === "routines" ? " on" : "")} onClick={() => pick({ kind: "routines" })} data-testid="nav-routines"><IHistory size={14} /> {t("app.routine.title")}</div>
               <div className={"pop-row" + (route.kind === "local" ? " on" : "")} onClick={() => pick({ kind: "local" })} data-testid="nav-local"><IBrain size={14} /> {t("app.pal.n.local")}</div>
+              <div className={"pop-row" + (route.kind === "tools" ? " on" : "")} onClick={() => pick({ kind: "tools" })} data-testid="nav-tools"><ITool size={14} /> {t("tools.title")}<span className="grow" />{toolErrors > 0 && <span className="nav-count waiting" title={t("tools.nav.errors", { count: toolErrors })} data-testid="nav-tools-badge">{toolErrors}</span>}<span className="kbd-hint">⌘⇧U</span></div>
               <div className="pop-sep" />
               <div className={"pop-row" + (route.kind === "usage" ? " on" : "")} onClick={() => pick({ kind: "usage" })} data-testid="nav-more-usage"><IGauge size={14} /> {t("app.side.usageTitle")}</div>
             </Floating>

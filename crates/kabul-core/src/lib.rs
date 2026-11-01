@@ -45,6 +45,7 @@ pub mod speech;
 pub mod store;
 pub mod term;
 pub mod tmux;
+pub mod tools;
 pub mod transcript;
 pub mod usage;
 pub mod watch;

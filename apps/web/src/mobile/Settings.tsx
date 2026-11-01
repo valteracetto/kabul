@@ -8,6 +8,7 @@ import { setListPrefs, useKabul, useListPrefs } from "./data";
 import { push } from "./nav";
 import { enablePush, pushBlocker, pushEnabled } from "./push";
 import { Avatar, BackButton, Group, I, NavBar, Row, useCollapse } from "./ui";
+import { ToolsIcon } from "./toolsIcon";
 import { LANG_NAMES, langPref, setLangPref, systemLang, t, type Lang, type LangPref } from "../i18n";
 import { trError } from "../i18n/errors";
 
@@ -41,6 +42,7 @@ export function Settings({ conn }: { conn: ConnState }) {
         </Group>
         <Group>
           {isOwner() && <Row icon={<I.key />} title={t("mobile.settings.accounts")} chevron onClick={() => push("v=settings/accounts")} testid="m-accounts" />}
+          {isOwner() && <Row icon={<ToolsIcon />} title={t("tools.title")} sub={t("tools.m.settingsSub")} chevron onClick={() => push("v=tools")} testid="m-tools-entry" />}
           <Row icon={<I.moon />} title={t("mobile.settings.theme")} value={themeLabel(theme)} chevron onClick={() => push("v=settings/theme")} testid="m-theme" />
           <Row icon={<I.globe />} title={t("settings.language")} value={langPref() === "system" ? t("settings.language.system", { lang: LANG_NAMES[systemLang()] }) : LANG_NAMES[langPref() as Lang]} chevron onClick={() => push("v=settings/language")} testid="m-language" />
         </Group>

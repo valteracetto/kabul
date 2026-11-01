@@ -14,6 +14,7 @@
   { "id": "zoom", "keys": "⌘+ / ⌘− / ⌘0", "cat": "view", "pt": "Zoom do app (50% a 300%)", "en": "App zoom (50% to 300%)" },
   { "id": "back", "keys": "⌘[ / ⌘]", "cat": "navigation", "pt": "Voltar / avançar", "en": "Back / forward" },
   { "id": "home", "keys": "⌘⇧H", "cat": "navigation", "pt": "Início", "en": "Home" },
+  { "id": "tools", "keys": "⌘⇧U", "cat": "navigation", "pt": "Ferramentas (skills, comandos, plugins e MCPs das IAs)", "en": "Tools (skills, commands, plugins and MCPs of your AIs)" },
   { "id": "ws-n", "keys": "⌘1 … ⌘9", "cat": "navigation", "pt": "Ir para o workspace N", "en": "Go to workspace N" },
   { "id": "ws-next", "keys": "⌘⌥↑ / ⌘⌥↓", "cat": "navigation", "pt": "Workspace anterior / próximo", "en": "Previous / next workspace" },
   { "id": "attention", "keys": "⌘⌥L", "cat": "navigation", "pt": "Próximo workspace que pede atenção", "en": "Next workspace needing attention" },

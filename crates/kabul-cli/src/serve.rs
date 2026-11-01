@@ -201,6 +201,20 @@ fn archive_call(shared: &Shared, queue: &Queue, home: &Path, cmd: &str, a: &Valu
     matches!(cmd, "workspace_archive" | "workspace_unarchive").then(run)
 }
 
+/// Ferramentas das IAs: mesmo serviço do app e do kabuld (um por processo, com o estado do `--home`).
+fn tools_call(st: &Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
+    use kabul_core::tools::{service::Service, Query, RepoRef};
+    static SVC: std::sync::OnceLock<std::sync::Arc<Service>> = std::sync::OnceLock::new();
+    let svc = SVC.get_or_init(|| Service::new(home));
+    let repos: Vec<RepoRef> = st.state.repos.iter().map(|r| RepoRef { id: r.id.clone(), name: r.name.clone(), path: PathBuf::from(&r.path) }).collect();
+    let repo_id = a.get("workspaceId").and_then(Value::as_str).and_then(|w| st.workspace(w).ok()).map(|w| w.repo_id.clone());
+    Ok(match cmd {
+        "tools_snapshot" => json!(svc.snapshot(&repos, &Query { scope: a.get("scope").and_then(Value::as_str).map(String::from), repo_id, refresh: a.get("refresh").and_then(Value::as_bool).unwrap_or(false) })),
+        "tools_item" => json!(svc.item(&repos, &s(a, "id")?)),
+        _ => json!(svc.prefs_set(&serde_json::from_value(a.clone())?)?),
+    })
+}
+
 fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
     let ws_repo = |st: &Store, id: &str| -> Result<(store::Workspace, store::Repo)> {
         let w = st.workspace(id)?.clone();
@@ -382,6 +396,7 @@ fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
             history::save(home, &serde_json::from_value(a["record"].clone())?)?;
             Value::Null
         }
+        "tools_snapshot" | "tools_item" | "tools_prefs_set" => tools_call(st, home, cmd, a)?,
         "slash_commands" => {
             let (w, _) = ws_repo(st, &s(a, "workspaceId")?)?;
             json!(history::slash_commands(Path::new(&w.path)))

@@ -129,6 +129,11 @@ enum Cmd {
         #[command(subcommand)]
         acao: RepoCmd,
     },
+    /// Ferramentas das IAs (skills, comandos, plugins, hooks, MCPs...): diagnóstico só leitura.
+    Tools {
+        #[command(subcommand)]
+        acao: ToolsCmd,
+    },
     /// Processo servidor do loadtest (interno).
     #[command(hide = true)]
     LoadtestWorker {
@@ -174,9 +179,35 @@ enum RepoCmd {
     },
 }
 
+#[derive(Subcommand)]
+enum ToolsCmd {
+    /// Lê as pastas de todas as IAs (e dos repositórios do Kabul) e mostra o inventário.
+    Ls {
+        /// Pasta de estado (padrão: KABUL_HOME ou a do app).
+        #[arg(long)]
+        home: Option<std::path::PathBuf>,
+        /// Snapshot completo em JSON.
+        #[arg(long)]
+        json: bool,
+        /// global | repo | all
+        #[arg(long, default_value = "all")]
+        scope: String,
+        /// Repositório do escopo `repo` (id ou nome).
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// Detalhe de um item (ex.: `skill:nome`), com o corpo.
+    Item {
+        id: String,
+        #[arg(long)]
+        home: Option<std::path::PathBuf>,
+    },
+}
+
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Repo { acao } => repo(acao),
+        Cmd::Tools { acao } => tools(acao),
         Cmd::Ls { sem_importadas } => ls(!sem_importadas),
         Cmd::Run { agente, nome, cwd, model, remote_control, worktree: wt } => run(&agente, nome, cwd, model, remote_control, wt),
         Cmd::Local => {
@@ -360,6 +391,48 @@ fn browser(acao: &str, url: Option<String>, workspace: Option<String>, home: Opt
     let v = browser::live::command(&home, cmd, &a)?;
     println!("{}", serde_json::to_string_pretty(&v)?);
     Ok(())
+}
+
+/// `kabul tools`: mesmo núcleo da tela Ferramentas, sem a interface (só leitura).
+fn tools(acao: ToolsCmd) -> Result<()> {
+    use kabul_core::tools::{build, fsx::FileCache, item_detail, prefs::Prefs, scan_all, Query, RepoRef, Roots};
+    let home = match &acao {
+        ToolsCmd::Ls { home, .. } | ToolsCmd::Item { home, .. } => home.clone(),
+    };
+    let st = open_store(home)?;
+    let state = st.file.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let repos: Vec<RepoRef> = st.state.repos.iter().map(|r| RepoRef { id: r.id.clone(), name: r.name.clone(), path: r.path.clone().into() }).collect();
+    // Diagnóstico só leitura: lê o disco agora, sem gravar o cache nem nada no estado.
+    let out = scan_all(&Roots::from_env(&state), &repos, &mut FileCache::default());
+    let prefs = Prefs::load(&state);
+    match acao {
+        ToolsCmd::Ls { json, scope, repo, .. } => {
+            let repo_id = repo.and_then(|x| repos.iter().find(|r| r.id == x || r.name == x).map(|r| r.id.clone()));
+            let snap = build(&out, &Query { scope: Some(scope), repo_id, refresh: true }, &prefs);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&snap)?);
+                return Ok(());
+            }
+            println!("{} itens · {} fontes · {} achados · {} pastas lidas · {} ms", snap.items.len(), snap.sources.len(), snap.findings.len(), snap.roots.len(), snap.scan_ms);
+            for h in &snap.harnesses {
+                println!("  {:<22} {}", h.label, h.count);
+            }
+            for it in &snap.items {
+                let hs = it.harnesses.join(",");
+                println!("{:<12} {:<40} {:<5} {:<40} {}", it.kind.as_str(), it.name.chars().take(40).collect::<String>(), it.status, hs.chars().take(40).collect::<String>(), it.source_id.as_deref().unwrap_or(""));
+            }
+            for f in &snap.findings {
+                println!("[{:?}] {:?} {} {}", f.severity, f.kind, f.item_ids.join(","), f.paths.first().map(String::as_str).unwrap_or(""));
+            }
+            Ok(())
+        }
+        ToolsCmd::Item { id, .. } => {
+            let snap = build(&out, &Query::default(), &prefs);
+            let d = item_detail(&out, &snap, &id).ok_or_else(|| anyhow::anyhow!("item {id} não encontrado"))?;
+            println!("{}", serde_json::to_string_pretty(&d)?);
+            Ok(())
+        }
+    }
 }
 
 /// Estado do Kabul: `--home`, senão KABUL_HOME, senão o do app (mesma regra do app desktop).

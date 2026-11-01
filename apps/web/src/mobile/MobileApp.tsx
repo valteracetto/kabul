@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ConnState } from "../transport/websocket";
 import { clearCred, deviceName, pairWith, parsePairLink, saveCred } from "../transport/credentials";
 import { isOwner, ws } from "./kabuld";
 import { I, PLATFORM, haptic } from "./ui";
 import { SessionView } from "./SessionView";
 import { MobileUsage } from "./MobileUsage";
+// Ferramentas: pedaço de JS à parte (só baixa quando a tela abre).
+const MobileTools = lazy(() => import("./Tools").then((x) => ({ default: x.MobileTools })));
 import { FilesScreen, filesRoute } from "./preview";
 import { Home } from "./Home";
 import { NewWorkspace } from "./NewWorkspace";
@@ -206,6 +208,7 @@ function Shell({ conn, route }: { conn: ConnState; route: Route }) {
   else if (route.kind === "settings") top = <SettingsPage sub={route.sub} conn={conn} onBack={back} />;
   // Custos e limites (uso.jsonl, limites por conta): só o dono, como no kabuld.
   else if (route.kind === "usage" && isOwner()) top = <MobileUsage onBack={back} />;
+  else if (route.kind === "tools" && isOwner()) top = <Suspense fallback={null}><MobileTools onBack={back} /></Suspense>;
   const topKey = route.kind === "session" ? `s:${route.id}` : route.kind === "settings" ? `v:${route.sub}` : route.kind;
   // Ao voltar, a tela de cima sai deslizando para a direita (mesma instância, só ganha a classe de saída).
   const last = useRef<{ key: string; node: ReactNode } | null>(null);

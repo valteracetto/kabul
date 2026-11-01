@@ -58,7 +58,7 @@ async function expectEnglish(page: Page, where: string, errors: string[]) {
   const around = (s: string) => { const i = text.indexOf(s); return text.slice(Math.max(0, i - 50), i + s.length + 50).replace(/\s+/g, " "); };
   const leaks = PT_ONLY.filter((s) => text.includes(s)).map((s) => `${s} ← …${around(s)}…`);
   const words = text.split("\n").filter((l) => PT_WORDS.test(l));
-  const keys = (text.match(/\b(common|app|chat|code|settings|usage|mobile|errors)\.[a-z][\w.]*[a-zA-Z]\b/g) ?? []).filter((k) => !/\.(toml|json|ts|tsx|md|js|ya?ml)$/.test(k));
+  const keys = (text.match(/\b(common|app|chat|code|settings|usage|tools|mobile|errors)\.[a-z][\w.]*[a-zA-Z]\b/g) ?? []).filter((k) => !/\.(toml|json|ts|tsx|md|js|ya?ml)$/.test(k));
   expect.soft(leaks, `${where}: texto pt-BR do dicionário na tela`).toEqual([]);
   expect.soft(words, `${where}: palavra em português na tela`).toEqual([]);
   expect.soft(keys, `${where}: chave sem texto na tela`).toEqual([]);

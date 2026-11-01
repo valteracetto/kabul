@@ -1,0 +1,7 @@
+{
+  // comentário de linha
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "notes": { "type": "local", "command": ["bunx", "notes-mcp@latest"], "enabled": true },
+  },
+}

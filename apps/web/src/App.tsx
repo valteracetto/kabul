@@ -32,6 +32,7 @@ const AgentsView = lazy(() => import("./views/AgentsView").then((m) => ({ defaul
 // Pedidos de aprovação do navegador do Kabul (banner global): fora do JS inicial.
 const BrowserApprovals = lazy(() => import("./components/BrowserApprovals").then((m) => ({ default: m.BrowserApprovals })));
 const UsageView = lazy(() => import("./views/UsageView").then((m) => ({ default: m.UsageView })));
+const ToolsView = lazy(() => import("./views/ToolsView").then((m) => ({ default: m.ToolsView })));
 
 export type AgentState = WsAgent;
 
@@ -57,6 +58,8 @@ export type Route =
   | { kind: "dashboard" }
   | { kind: "routines" }
   | { kind: "usage" }
+  /** Ferramentas das IAs (skills, comandos, plugins, hooks, MCPs). `item` abre o detalhe; sem `workspaceId`, usa o último workspace aberto (escopo "Este repo"). */
+  | { kind: "tools"; tab?: import("./views/ToolsView").ToolsTab; item?: string; workspaceId?: string }
   | { kind: "agents" }
   | { kind: "home" };
 
@@ -241,6 +244,9 @@ export function App() {
 
 
   const current = route.kind === "workspace" ? workspaces.find((w) => w.id === route.id && !w.archived) : undefined;
+  // Último workspace aberto (escopo "Este repo" das Ferramentas quando se chega pelo menu).
+  const lastWs = useRef<string | null>(null);
+  if (current) lastWs.current = current.id;
 
   // Links kabul:// (do sistema ou colados): abrir workspace/conversa, criar workspace, configurações.
   const openLink = useRef((_: string) => {});
@@ -397,6 +403,7 @@ export function App() {
       if (e.metaKey && e.shiftKey && e.key.toLowerCase() === "n") return (e.preventDefault(), setCreating({ from: "prs" }));
       if (e.metaKey && e.shiftKey && e.code === "KeyA" && current) return (e.preventDefault(), void archive(current.id));
       if (e.metaKey && e.shiftKey && e.code === "KeyH") return (e.preventDefault(), go({ kind: "home" }));
+      if (e.metaKey && e.shiftKey && !e.altKey && e.code === "KeyU") return (e.preventDefault(), go({ kind: "tools" }));
       if (e.metaKey && e.shiftKey && e.code === "KeyC" && current) return (e.preventDefault(), void navigator.clipboard.writeText(workspaceLink(current)));
       if (e.metaKey && e.altKey && e.code === "KeyF") return (e.preventDefault(), setFeedback(true));
       if (e.metaKey && !e.shiftKey && !e.altKey && (e.key === "=" || e.key === "+")) return (e.preventDefault(), applyZoom(1));
@@ -480,6 +487,7 @@ export function App() {
         {route.kind === "local" && <LocalModelsView onError={onError} />}
         {route.kind === "diagnostics" && <DiagnosticsView onError={onError} />}
         {route.kind === "usage" && <UsageView onError={onError} onRoute={go} />}
+        {route.kind === "tools" && <ToolsView workspaceId={route.workspaceId ?? lastWs.current} initialTab={route.tab} initialItem={route.item} onError={onError} />}
         </Suspense>
         {(route.kind === "home" || (route.kind === "workspace" && !current)) && <Home repos={repos} workspaces={workspaces} onRoute={go} onOpen={openProject} onClone={() => setAddDialog("clone")} onQuick={() => setAddDialog("quick")} />}
         {!sidebar && <button className="icon-btn sidebar-reopen" title={t("app.side.showSidebar")} onClick={() => setSidebar(true)}>☰</button>}

@@ -1,0 +1,1 @@
+{"enabledPlugins":{"acme-tools@acme-market":true,"ghost@acme-market":false},"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"{HOME}/.acmetool/bin/acmetool-guard --token abcdef1234567890abcdef1234567890 check"}]}],"Stop":[{"hooks":[{"type":"command","command":"node \"{HOME}/.acmetool/hooks/claude-hook.js\""}]}]}}

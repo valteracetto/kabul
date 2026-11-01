@@ -158,9 +158,48 @@ fn diff(c: &mut Criterion) {
     g.finish();
 }
 
+/// Ferramentas: home sintético com ~500 itens (skills canônicas, cópias em várias IAs, comandos e
+/// MCPs). Meta: snapshot quente (memória) < 100 ms; scan com o cache por arquivo e scan frio.
+fn tools(c: &mut Criterion) {
+    use kabul_core::tools::{build, fsx::FileCache, prefs::Prefs, scan_all, Query, Roots};
+    let dir = std::env::temp_dir().join(format!("kabul-bench-tools-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let home = dir.join("home");
+    let w = |rel: String, text: String| {
+        let p = home.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    };
+    for i in 0..200 {
+        let md = format!("---\nname: s{i}\ndescription: Skill {i} for testing and deploy. Use when needed.\n---\n\n# s{i}\n\n{}", "texto ".repeat(200));
+        w(format!(".agents/skills/s{i}/SKILL.md"), md.clone());
+        if i % 3 == 0 {
+            for h in [".claude", ".codex", ".gemini"] {
+                w(format!("{h}/skills/s{i}/SKILL.md"), md.clone());
+            }
+        }
+    }
+    for i in 0..150 {
+        w(format!(".claude/commands/grupo{}/c{i}.md", i % 10), format!("---\ndescription: Command {i}\n---\nDo {i}."));
+    }
+    let servers: Vec<String> = (0..50).map(|i| format!("\"m{i}\": {{\"command\": \"npx\", \"args\": [\"-y\", \"pkg-{i}\"]}}")).collect();
+    w(".claude.json".into(), format!("{{\"mcpServers\": {{{}}}}}", servers.join(",")));
+    let roots = Roots { state: dir.join("state"), ..Roots::for_os(std::env::consts::OS, &home) };
+    let mut g = c.benchmark_group("tools");
+    g.sample_size(10);
+    g.bench_function("scan_frio_500", |b| b.iter(|| scan_all(&roots, &[], &mut FileCache::default()).raws.len()));
+    let mut cache = FileCache::default();
+    let out = scan_all(&roots, &[], &mut cache);
+    g.bench_function("scan_cache_500", |b| b.iter(|| scan_all(&roots, &[], &mut cache).raws.len()));
+    let prefs = Prefs::default();
+    g.bench_function("snapshot_quente_500", |b| b.iter(|| build(black_box(&out), &Query::default(), &prefs).items.len()));
+    g.finish();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default().sample_size(30).warm_up_time(std::time::Duration::from_millis(500)).measurement_time(std::time::Duration::from_secs(2));
-    targets = harnesses, listing, aggregation, diff
+    targets = harnesses, listing, aggregation, diff, tools
 }
 criterion_main!(benches);

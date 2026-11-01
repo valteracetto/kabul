@@ -735,6 +735,14 @@ const handlers: Record<string, (a: any) => unknown> = {
 // Navegador falso (aba Browser): em módulo à parte, carregado no primeiro comando browser_* (fora do JS inicial).
 let browserMod: Promise<import("./mockBrowser").BrowserMock> | null = null;
 const browserMock = () => (browserMod ??= import("./mockBrowser").then((m) => m.makeBrowserMock({ emit, db, now, nextId: () => ++seq })));
+// Ferramentas (tools_*): home sintético em módulo à parte, carregado no primeiro comando.
+let toolsMod: Promise<import("./mockTools").ToolsMock> | null = null;
+const repoOfWs = (wid: string | null) => {
+  const w = wid ? ws(wid) : null;
+  const r = w && db.repos.find((x) => x.id === w.repo_id);
+  return r ? { id: r.id as string, name: r.name as string } : null;
+};
+const toolsMock = () => (toolsMod ??= import("./mockTools").then((m) => m.makeToolsMock({ repoOf: repoOfWs })));
 
 // Ganchos para os testes montarem estados de git/PR sem backend.
 if (typeof window !== "undefined") (window as any).__mock = {
@@ -792,7 +800,7 @@ export const mockTransport: Transport = {
     if (command.startsWith("browser_")) ((window as any).__browserCalls ??= []).push([command, args ?? {}]);
     if (demoReady) await demoReady;
     if (command === "checkpoint_create" && (window as any).__mock?.holdModels === true) ((window as any).__mock.holdModels = false, (window as any).__mock.releaseModels?.());
-    const h = command.startsWith("browser_") ? (await browserMock()).handlers[command] : handlers[command];
+    const h = command.startsWith("browser_") ? (await browserMock()).handlers[command] : command.startsWith("tools_") ? (await toolsMock()).handlers[command] : handlers[command];
     if (!h) throw new Error(`mock: comando desconhecido ${command}`);
     await new Promise((r) => setTimeout(r, 15));
     return (await h(args ?? {})) as T;

@@ -42,6 +42,7 @@ const en: DefaultTheme.SidebarItem[] = [
       { text: "MCP", link: "/guide/mcp" },
       { text: "Browser", link: "/guide/browser" },
       { text: "Usage, costs and limits", link: "/guide/usage" },
+      { text: "Tools (skills, plugins, MCPs)", link: "/guide/tools" },
     ],
   },
   {
@@ -99,6 +100,7 @@ const pt: DefaultTheme.SidebarItem[] = [
       { text: "MCP", link: "/pt-BR/guia/mcp" },
       { text: "Navegador", link: "/pt-BR/guia/navegador" },
       { text: "Uso, custos e limites", link: "/pt-BR/guia/uso" },
+      { text: "Ferramentas (skills, plugins, MCPs)", link: "/pt-BR/guia/ferramentas" },
     ],
   },
   {

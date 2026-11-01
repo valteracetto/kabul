@@ -56,6 +56,8 @@ pub struct Hub {
     pub watchers: kabul_core::watch::RepoWatchers,
     /// O próprio hub (para o fim dos arquivamentos em segundo plano gravar no estado).
     me: std::sync::OnceLock<std::sync::Weak<Hub>>,
+    /// Ferramentas das IAs (só leitura; só o dono — o policy não libera a convidados).
+    pub tools: Arc<kabul_core::tools::service::Service>,
 }
 
 fn s(a: &Value, k: &str) -> Result<String> {
@@ -89,7 +91,13 @@ impl Hub {
             let bus = bus.clone();
             kabul_core::watch::RepoWatchers::new(Arc::new(move |ws: &str| bus.emit("workspace-fs-changed", json!({"workspace_id": ws}), Some(ws.to_string()), None)))
         };
+        let tools = kabul_core::tools::service::Service::new(&home);
+        {
+            let bus = bus.clone();
+            tools.set_on_change(Arc::new(move || bus.emit("tools-changed", json!({}), None, None)));
+        }
         Ok(Arc::new(Self {
+            tools,
             auth: Auth::open(&home, secrets)?,
             terms: TermHub::new(bus.clone()),
             chats: ChatHub::new_arc(bus.clone()),
@@ -190,6 +198,13 @@ impl Hub {
     /// Estado do Kabul relido do disco quando o arquivo muda (o app desktop também escreve nele).
     fn with_store<T>(&self, f: impl FnOnce(&mut Store) -> Result<T>) -> Result<T> {
         f(&mut self.store.lock().unwrap())
+    }
+
+    /// Repositórios para as Ferramentas e o do workspace (escopo "Este repo").
+    fn tools_ctx(&self, a: &Value) -> (Vec<kabul_core::tools::RepoRef>, Option<String>) {
+        let (repos, wss) = self.snapshot();
+        let repo_id = opt(a, "workspaceId").and_then(|w| wss.iter().find(|x| x.id == w).map(|x| x.repo_id.clone()));
+        (repos.into_iter().map(|r| kabul_core::tools::RepoRef { id: r.id, name: r.name, path: PathBuf::from(r.path) }).collect(), repo_id)
     }
 
     fn snapshot(&self) -> (Vec<Repo>, Vec<Workspace>) {
@@ -685,6 +700,20 @@ impl Hub {
             "slash_commands" => {
                 let (w, _) = self.ws_repo(&s(a, "workspaceId")?)?;
                 json!(history::slash_commands(Path::new(&w.path)))
+            }
+            // ---------- Ferramentas das IAs (só o dono: o policy não libera a convidados) ----------
+            "tools_snapshot" => {
+                let (repos, repo_id) = self.tools_ctx(a);
+                let q = kabul_core::tools::Query { scope: opt(a, "scope"), repo_id, refresh: a.get("refresh").and_then(Value::as_bool).unwrap_or(false) };
+                json!(self.tools.snapshot(&repos, &q))
+            }
+            "tools_item" => {
+                let (repos, _) = self.tools_ctx(a);
+                json!(self.tools.item(&repos, &s(a, "id")?))
+            }
+            "tools_prefs_set" => {
+                let c: kabul_core::tools::prefs::Change = serde_json::from_value(a.clone()).context("argumentos")?;
+                json!(self.tools.prefs_set(&c)?)
             }
             // ---------- uso, custos e limites (só o dono: o policy não libera a convidados) ----------
             "usage_overview" => self.usage_overview(a),

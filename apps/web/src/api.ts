@@ -160,6 +160,26 @@ export interface LimitSource { name: string; ok: boolean; detail: string; provid
 export interface ExpectedBlock { provider: string; account: string; label: string; has_data: boolean; code?: string | null; detail?: string | null }
 export interface UsageAlert { key: string; kind: string; level: "warn" | "crit"; text: string; provider: string | null; account: string | null }
 export interface UsageSuggestion { provider: string; account: string | null; to_account: { id: string; nickname: string } | null; to_provider: string | null; text: string }
+/** Ferramentas (core `tools`): inventário só leitura das extensões das IAs. Espelha crates/kabul-core/src/tools/mod.rs. */
+export type ToolKind = "skill" | "command" | "prompt" | "agent" | "plugin" | "hook" | "mcp" | "extension" | "instructions" | "foreign";
+export type ToolLink = { kind: "real" } | { kind: "symlink"; target: string } | { kind: "broken"; target: string };
+export interface ToolPlacement { harness: string; account?: string; scope: "global" | "project"; repoId?: string; repo?: string; plugin?: string; path: string; link: ToolLink; hash?: string; version?: string; mtime?: number; enabled?: boolean; format: string; sourceId?: string; canonical: boolean; managed: boolean }
+export interface ToolInvoke { harness: string; how: "slash" | "mention" | "auto" | "dollar" | "tool"; text: string }
+export interface ToolItem {
+  id: string; kind: ToolKind; name: string; description?: string; purpose?: string; categories: string[]; extras: Record<string, string>;
+  placements: ToolPlacement[]; harnesses: string[]; sourceId?: string; weightTokens?: number; findingIds: string[]; lastUsed?: number;
+  risks: string[]; invoke: ToolInvoke[]; favorite: boolean; note?: string; status: "ok" | "info" | "warn" | "error";
+}
+export type ToolSourceKind = "skillsLock" | "gitRepo" | "marketplace" | "npmGlobal" | "nativeIntegration" | "uvTool" | "builtin" | "synced" | "local" | "project";
+export interface ToolFootprint { kind: string; label: string; path?: string }
+export interface ToolSource { id: string; kind: ToolSourceKind; label: string; url?: string; repo?: string; version?: string; commit?: string; installedAt?: string; updatedAt?: string; itemIds: string[]; footprint: ToolFootprint[]; exists: boolean; note?: string }
+export type ToolSeverity = "info" | "warn" | "error";
+export type ToolFindingKind = "brokenLink" | "drift" | "duplicateCopy" | "orphan" | "nameConflict" | "stalePluginVersion" | "unrecognized" | "parseError" | "missingDescription" | "heavy" | "nestedRepo" | "placeholder" | "hookRunsCode" | "unpinnedMcp" | "registryMissing" | "registryEdited" | "stackedInstall";
+export interface ToolFinding { id: string; severity: ToolSeverity; kind: ToolFindingKind; itemIds: string[]; paths: string[]; args: Record<string, string> }
+export interface ToolRoot { harness: string; what: string; path: string; status: "ok" | "missing" | "unreadable"; count: number; account?: string; repo?: string; env?: string }
+export interface ToolsSnapshot { schema: number; generatedAt: number; scanMs: number; stale: boolean; scope: ToolScope; repoId?: string; harnesses: { id: string; label: string; count: number }[]; roots: ToolRoot[]; items: ToolItem[]; sources: ToolSource[]; findings: ToolFinding[] }
+export type ToolScope = "global" | "repo" | "all";
+export interface ToolItemDetail { item: ToolItem; body?: string; frontmatter: Record<string, string>; files: string[]; truncated: boolean; absPath?: string; findings: ToolFinding[]; source?: ToolSource }
 export interface UsageOverview {
   schema_version: number; days: number; today_usd: number; month_usd: number; today_tokens: number; month_tokens: number; unpriced_turns: number;
   by_day: UsageRow[]; by_model: UsageRow[]; by_account: UsageRow[]; by_workspace: UsageRow[]; by_provider: UsageRow[]; sessions: UsageSession[];
@@ -382,6 +402,11 @@ export const api = {
   usageCsvSave: (days = 30) => c<string>("usage_csv_save", { days }),
   onUsageChanged: (h: () => void) => transport.subscribe("usage-changed", h),
   agentsRunning: () => c<RunningAgent[]>("agents_running"),
+  /** Ferramentas: snapshot do escopo (`stale` = veio do cache; o evento `tools-changed` avisa quando atualizar). */
+  toolsSnapshot: (scope: ToolScope, workspaceId: string | null = null, refresh = false) => c<ToolsSnapshot>("tools_snapshot", { scope, workspaceId, refresh }),
+  toolsItem: (id: string, workspaceId: string | null = null) => c<ToolItemDetail | null>("tools_item", { id, workspaceId }),
+  toolsPrefsSet: (p: { id: string; favorite?: boolean; note?: string; category?: string }) => c<unknown>("tools_prefs_set", p),
+  onToolsChanged: (h: () => void) => transport.subscribe("tools-changed", h),
   trayAction: (action: "open" | "open-workspace" | "new-workspace" | "usage" | "pause-all" | "check-updates", workspaceId: string | null = null) => c<void>("tray_action", { action, workspaceId }),
   trayHide: () => c<void>("tray_hide"),
   onTrayAction: (h: (p: { action: string; workspace_id: string | null }) => void) => transport.subscribe("tray-action", h),

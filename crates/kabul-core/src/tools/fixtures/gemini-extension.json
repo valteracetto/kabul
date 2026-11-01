@@ -1,0 +1,1 @@
+{"name":"acme-ext","version":"0.3.0","description":"Acme helpers for Gemini","contextFileName":"ACME.md","mcpServers":{"acme-ext-mcp":{"command":"node","args":["server.js"]}}}

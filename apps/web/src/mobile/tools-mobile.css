@@ -1,0 +1,17 @@
+/* Ferramentas no celular (só leitura). */
+.m-tools .m-segmented { margin: 6px 0 12px; }
+.m-tools-search { width: 100%; box-sizing: border-box; height: 38px; border-radius: 10px; border: 0; background: var(--m-fill); color: var(--m-label); padding: 0 12px; font-size: 16px; margin-bottom: 4px; }
+.m-tools-ais { font-size: 12px; color: var(--m-label-2); max-width: 38vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-tools-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
+.m-tools-dot.sev-error { background: var(--m-red); }
+.m-tools-dot.sev-warn { background: var(--m-amber); }
+.m-tools-dot.sev-info { background: var(--m-tint); }
+.m-tools-detail { padding: 0 16px 24px; display: flex; flex-direction: column; gap: 10px; }
+.m-tools-detail p { margin: 0; color: var(--m-label); }
+.m-tools-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.m-tools-chip { font-size: 12px; border-radius: 999px; padding: 2px 9px; background: var(--m-fill); color: var(--m-label-2); }
+.m-tools-chip.warn { color: var(--m-amber); }
+.m-tools-glyph.st-link { color: var(--m-tint); }
+.m-tools-glyph.st-drift { color: var(--m-amber); }
+.m-tools-glyph.st-broken { color: var(--m-red); }
+.m-tools-body { font-size: 14px; border-top: 1px solid var(--m-sep); padding-top: 8px; overflow-wrap: anywhere; }

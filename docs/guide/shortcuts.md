@@ -36,6 +36,7 @@ On Windows, `⌘` will be `Ctrl`. The same list is in **Settings › Shortcuts**
 |---|---|
 | `⌘[ / ⌘]` | Back / forward |
 | `⌘⇧H` | Home |
+| `⌘⇧U` | Tools (skills, commands, plugins and MCPs of your AIs) |
 | `⌘1 … ⌘9` | Go to workspace N |
 | `⌘⌥↑ / ⌘⌥↓` | Previous / next workspace |
 | `⌘⌥L` | Next workspace needing attention |

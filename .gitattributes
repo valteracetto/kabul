@@ -3,3 +3,6 @@
 * text=auto eol=lf
 # Saídas gravadas de terminal: bytes exatos (algumas têm \r\n de propósito).
 **/tests/fixtures/** -text
+
+# Só no repo privado: fica fora do snapshot público (git archive)
+ONDE-PARAMOS.md export-ignore

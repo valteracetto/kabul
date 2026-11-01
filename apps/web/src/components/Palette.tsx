@@ -7,6 +7,8 @@ import { cloudList } from "./RunsOn";
 import { checkForUpdates } from "./Updates";
 import type { Route } from "../App";
 import { t } from "../i18n";
+import { paletteLabel, toolsForPalette } from "./tools";
+import type { ToolItem } from "../api";
 
 export type PaletteTab = "all" | "workspaces" | "projects" | "actions" | "settings";
 const tabs = (): [PaletteTab, string][] => [["all", t("app.pal.tab.all")], ["workspaces", t("app.pal.tab.workspaces")], ["projects", t("app.pal.tab.projects")], ["actions", t("app.pal.tab.actions")], ["settings", t("app.pal.tab.settings")]];
@@ -27,6 +29,13 @@ export function Palette({ repos, workspaces, current, archived, onClose, onRoute
   const [archivedTab, setArchivedTab] = useState(!!archived);
   const [sel, setSel] = useState(0);
   const [hits, setHits] = useState<[string, string, string, string][]>([]);
+  // Itens das Ferramentas (Skill: x, Comando: /x, MCP: x): só com busca digitada, do snapshot em cache.
+  const [tools, setTools] = useState<ToolItem[]>([]);
+  useEffect(() => {
+    if (!q.trim()) return;
+    const timer = setTimeout(() => toolsForPalette(current?.id ?? null).then(setTools, () => setTools([])), 120);
+    return () => clearTimeout(timer);
+  }, [q, current?.id]);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -97,6 +106,8 @@ export function Palette({ repos, workspaces, current, archived, onClose, onRoute
     n(t("app.pal.n.routines"), go({ kind: "routines" }));
     n(t("app.pal.n.local"), go({ kind: "local" }));
     n(t("app.pal.n.usage"), go({ kind: "usage" }));
+    n(t("tools.title"), go({ kind: "tools", workspaceId: current?.id }), "⌘⇧U");
+    n(t("tools.pal.health"), go({ kind: "tools", tab: "health", workspaceId: current?.id }));
     n(t("app.pal.n.archived"), () => (setTab("workspaces"), setArchivedTab(true)));
     n(t("app.help.shortcuts"), go({ kind: "settings", tab: "atalhos" }), "⌘⌥/");
     // Configurações
@@ -117,8 +128,9 @@ export function Palette({ repos, workspaces, current, archived, onClose, onRoute
     if (tab === "all" && !n) v = v.filter((i) => i.kind === "ws" || i.kind === "current" || i.kind === "nav").slice(0, 30);
     if (n) v = v.filter((i) => `${i.label} ${i.hint ?? ""} ${i.group} ${i.words ?? ""}`.toLowerCase().includes(n));
     const conv: Item[] = tab === "all" || tab === "workspaces" ? hits.map(([wsId, , title, snip]) => ({ group: t("app.pal.group.chats"), tab: "all", label: `💬 ${title}`, hint: snip.replace(/[{}"[\]]/g, " ").slice(0, 60), run: () => onRoute({ kind: "workspace", id: wsId }) })) : [];
-    return [...v, ...conv];
-  }, [items, tab, archivedTab, n, hits]);
+    const tl: Item[] = n && tab === "all" ? tools.filter((i) => `${paletteLabel(i)} ${i.description ?? ""}`.toLowerCase().includes(n)).slice(0, 20).map((i) => ({ group: t("tools.title"), tab: "all", label: paletteLabel(i), hint: i.purpose?.slice(0, 60), run: () => onRoute({ kind: "tools", item: i.id, workspaceId: current?.id }) })) : [];
+    return [...v, ...tl, ...conv];
+  }, [items, tab, archivedTab, n, hits, tools]);
   useEffect(() => setSel(0), [tab, archivedTab, q]);
   useEffect(() => void list.current?.querySelector(".pop-row.on")?.scrollIntoView({ block: "nearest" }), [sel]);
   const pick = (i: Item) => (onClose(), i.run());

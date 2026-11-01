@@ -1,0 +1,12 @@
+model = "gpt-5"
+
+[mcp_servers.docs-search]
+command = "npx"
+args = ["-y", "docs-search-mcp"]
+env = { DOCS_TOKEN = "YOUR_DOCS_TOKEN_HERE" }
+
+[mcp_servers.remote]
+url = "https://mcp.example.com/sse?api_key=s3cr3t-value-123456"
+
+[plugins."acme-tools@acme-curated"]
+enabled = true

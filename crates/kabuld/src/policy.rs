@@ -90,6 +90,12 @@ mod tests {
             assert!(check(&ed, c, Some("w1")).is_err(), "{c}");
             assert!(check(&dono, c, None).is_ok(), "{c}");
         }
+        // Ferramentas das IAs: inventário da máquina do dono (caminhos, configs), nunca de convidado.
+        for c in ["tools_snapshot", "tools_item", "tools_prefs_set"] {
+            assert!(check(&ed, c, Some("w1")).is_err(), "{c}");
+            assert!(check(&obs, c, None).is_err(), "{c}");
+            assert!(check(&dono, c, None).is_ok(), "{c}");
+        }
         for c in ["workspace_create", "workspace_update", "workspace_unarchive", "accounts_list", "account_update", "cloud_start"] {
             assert!(check(&ed, c, Some("w1")).is_err(), "{c} é só do dono");
         }

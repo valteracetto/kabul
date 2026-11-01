@@ -1,0 +1,1 @@
+{"schema_version":1,"agent":"claude","pack_version":"2.0.0","installed_at":"2025-04-04T00:00:00Z","operations":[{"file":"{HOME}/.claude/settings.json","kind":"claude-settings","before_sha256":"sha256:aa","after_sha256":"sha256:bb"},{"file":"{HOME}/.claude.json","kind":"claude-mcp"}]}

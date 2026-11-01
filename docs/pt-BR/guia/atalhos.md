@@ -36,6 +36,7 @@ No Windows, `⌘` será `Ctrl`. A mesma lista está em **Configurações › Ata
 |---|---|
 | `⌘[ / ⌘]` | Voltar / avançar |
 | `⌘⇧H` | Início |
+| `⌘⇧U` | Ferramentas (skills, comandos, plugins e MCPs das IAs) |
 | `⌘1 … ⌘9` | Ir para o workspace N |
 | `⌘⌥↑ / ⌘⌥↓` | Workspace anterior / próximo |
 | `⌘⌥L` | Próximo workspace que pede atenção |

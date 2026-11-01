@@ -7,6 +7,7 @@ import { ago, modelFor, workspaceFor } from "../components/external";
 import { AGENT_LABEL, canWrite, isOwner, k, me, ws, type LiveSession, type Ticket } from "./kabuld";
 import { archiveWorkspace, refresh, setListPrefs, useKabul, useListPrefs, type ListPrefs } from "./data";
 import { openSession, push } from "./nav";
+import { ToolsIcon } from "./toolsIcon";
 import { ModelSheet } from "./ModelSheet";
 import { FilesButton } from "./preview";
 import { openFiles } from "./preview/route";
@@ -104,6 +105,7 @@ export function Home({ conn, onSettings }: { conn: ConnState; onSettings: () => 
         }
         right={
           <>
+            {isOwner() && <RoundButton onClick={() => push("v=tools")} label={t("tools.title")} testid="m-tools-shortcut"><ToolsIcon size={20} /></RoundButton>}
             <RoundButton onClick={() => setSheet({ kind: "sort" })} label={t("mobile.home.sortFilter")} testid="m-sort"><I.filter /></RoundButton>
             <button className="m-pill" onClick={(e) => (haptic(e.currentTarget), setSheet({ kind: "machine" }))} data-testid="m-machine-pill">
               <span className={`m-conn m-conn-${conn}`} title={conn === "open" ? t("mobile.home.connected") : t("mobile.home.reconnecting")} data-testid="m-conn" />

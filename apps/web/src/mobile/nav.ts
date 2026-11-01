@@ -4,7 +4,7 @@
  * navegador) e o ‹ da barra fazem a mesma coisa. Folhas abertas também ocupam uma entrada, para o
  * voltar do Android fechá-las primeiro.
  */
-export type Route = { kind: "root" } | { kind: "session"; id: string } | { kind: "new" } | { kind: "settings"; sub: string } | { kind: "usage" };
+export type Route = { kind: "root" } | { kind: "session"; id: string } | { kind: "new" } | { kind: "settings"; sub: string } | { kind: "usage" } | { kind: "tools" };
 
 export function parseRoute(hash = location.hash): Route {
   const p = new URLSearchParams(hash.slice(1));
@@ -14,6 +14,8 @@ export function parseRoute(hash = location.hash): Route {
   if (v === "new") return { kind: "new" };
   // Custos e limites (só o dono): `#uso` ou `#v=usage`.
   if (p.has("uso") || v === "usage") return { kind: "usage" };
+  // Ferramentas das IAs (só o dono, só leitura).
+  if (v === "tools") return { kind: "tools" };
   if (v?.startsWith("settings/")) return { kind: "settings", sub: v.slice(9) };
   return { kind: "root" };
 }
