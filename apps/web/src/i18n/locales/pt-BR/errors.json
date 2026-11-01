@@ -121,5 +121,17 @@
   "errors.browserNoDevtools": "o navegador não abriu o DevTools em 20 s",
   "errors.browserUnzip": "não consegui descompactar o navegador baixado",
   "errors.browserNoBack": "não há página anterior",
-  "errors.browserNoForward": "não há próxima página"
+  "errors.browserNoForward": "não há próxima página",
+  "errors.sshHostExists": "já existe um host {alias}",
+  "errors.sshBlockMoved": "o bloco de {alias} mudou de lugar no arquivo: sincronize e tente de novo",
+  "errors.sshChangedSincePreview": "{file} mudou desde a prévia: revise de novo antes de salvar",
+  "errors.sshAliasWildcard": "alias inválido: sem curingas (* ? !), # nem vírgula",
+  "errors.sshAliasInvalid": "alias inválido: {alias}",
+  "errors.sshAliasRequired": "alias obrigatório",
+  "errors.sshPortInvalid": "porta inválida: {port}",
+  "errors.sshValueInvalid": "{what} inválido",
+  "errors.sshKeygenMissing": "ssh-keygen não encontrado (instale o cliente OpenSSH)",
+  "errors.sshMissing": "ssh não encontrado (instale o cliente OpenSSH)",
+  "errors.sshNotInConfig": "{alias} não está no {file}",
+  "errors.sshKeyName": "nome de chave inválido: use letras, números, ponto, _ ou -"
 }

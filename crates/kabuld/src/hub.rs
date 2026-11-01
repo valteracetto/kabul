@@ -697,6 +697,15 @@ impl Hub {
                 self.bus.emit("usage-changed", json!({}), None, None);
                 json!(snap)
             }
+            // ---------- hosts SSH desta máquina (só o dono: o policy não libera a convidados) ----------
+            // Leitura e teste; editar o ~/.ssh/config fica no app desktop.
+            "ssh_hosts" => json!(kabul_core::ssh::overview(&kabul_core::ssh::Roots::user())),
+            "ssh_keys" => json!(kabul_core::ssh::keys::list(&kabul_core::ssh::Roots::user())),
+            "ssh_effective" => {
+                let aliases: Vec<String> = serde_json::from_value(a["aliases"].clone()).unwrap_or_default();
+                json!(kabul_core::ssh::run::effective_many(&kabul_core::ssh::Roots::user(), &aliases))
+            }
+            "ssh_test" => json!(kabul_core::ssh::run::test(&kabul_core::ssh::Roots::user(), &s(a, "alias")?)?),
             _ => bail!("kabuld: comando {cmd} não disponível"),
         })
     }

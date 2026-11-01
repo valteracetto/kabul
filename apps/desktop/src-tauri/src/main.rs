@@ -24,6 +24,7 @@ mod i18n;
 mod menu;
 mod os;
 mod remote;
+mod sshcmds;
 mod tray;
 mod updates;
 
@@ -1875,6 +1876,17 @@ fn main() {
             gitcmds::git_identity_set,
             gitcmds::repo_remotes,
             gitcmds::pr_open_url,
+            sshcmds::ssh_hosts,
+            sshcmds::ssh_effective,
+            sshcmds::ssh_test,
+            sshcmds::ssh_keys,
+            sshcmds::ssh_preview,
+            sshcmds::ssh_apply,
+            sshcmds::ssh_keygen,
+            sshcmds::ssh_terminal,
+            sshcmds::ssh_open_targets,
+            sshcmds::ssh_open_in,
+            sshcmds::ssh_pick_key,
             remote::kabuld_status,
             remote::kabuld_start,
             remote::kabuld_stop,

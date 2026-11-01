@@ -114,7 +114,7 @@ export const WorkspaceView = memo(function WorkspaceView({ ws, repo, active, sid
     open({ kind: "term", session, title: preset ? `${preset.split(" ")[0]} ${n}` : t("code.ws.terminalN", { n }), preset });
   };
 
-  useEffect(() => (mountedWs.add(ws.id), () => void mountedWs.delete(ws.id)), [ws.id]);
+  useEffect(() => (mountedWs.add(ws.id), localStorage.setItem("kabul.lastWs", ws.id), () => void mountedWs.delete(ws.id)), [ws.id]);
   // Sessões salvas viram abas; se não houver, uma conversa nova.
   useEffect(() => {
     // Remontando com a tela guardada: só acrescenta a aba de um "continuar"/fork pedido enquanto estava fora.
@@ -310,7 +310,12 @@ export const WorkspaceView = memo(function WorkspaceView({ ws, repo, active, sid
     };
     // Terminal (⌘⇧B), deep link kabul://browser e paleta: traz a aba Browser (a URL vai pelo pendingBrowserUrl).
     const openB = (e: Event) => (e as CustomEvent).detail.ws === ws.id && open({ kind: "browser" });
-    const ev: [string, (e: Event) => void][] = [["kabul:fork-tab", forkTab], ["kabul:fork-ws", forkWs], ["kabul:new-chat-with", newWith], ["kabul:open-file", openFile], ["kabul:browser-open", openB]];
+    // Sessão de terminal já criada fora daqui (Hosts SSH › Abrir terminal): vira aba.
+    const openT = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d.ws === ws.id) open({ kind: "term", session: d.session, title: d.title });
+    };
+    const ev: [string, (e: Event) => void][] = [["kabul:fork-tab", forkTab], ["kabul:fork-ws", forkWs], ["kabul:new-chat-with", newWith], ["kabul:open-file", openFile], ["kabul:browser-open", openB], ["kabul:open-term", openT]];
     ev.forEach(([n, h]) => window.addEventListener(n, h));
     return () => ev.forEach(([n, h]) => window.removeEventListener(n, h));
   }, [ws.id, tabs, changes]);

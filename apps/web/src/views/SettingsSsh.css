@@ -1,0 +1,51 @@
+/* Configurações › Hosts SSH */
+.ssh-page { display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
+.ssh-toolbar { display: flex; align-items: center; gap: 8px; }
+.ssh-toolbar .btn { padding: 6px 12px; font-size: 13px; }
+.ssh-sep { border: none; border-top: 1px solid var(--line-2); margin: 4px 0; width: 100%; }
+.ssh-more { position: relative; display: inline-flex; }
+.ssh-pop { min-width: 220px; padding: 6px; }
+.ssh-pop .pop-title { padding: 6px 10px 2px; }
+.ssh-notice { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 8px 10px; border-radius: 8px; background: var(--add-bg); border: 1px solid var(--add-line); color: var(--add-fg); font-size: 12.5px; }
+.ssh-warning { padding-left: 2px; }
+.ssh-page .gh-warn { margin: 0; }
+.ssh-countbar { display: flex; align-items: center; gap: 12px; }
+.ssh-search { flex: 1; max-width: 360px; padding: 6px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--pop); }
+.ssh-search input { font-size: 13px; }
+.ssh-batch { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--sel); font-size: 12.5px; }
+.ssh-group { border: 1px solid var(--line-2); border-radius: 12px; overflow: hidden; }
+.ssh-group-head { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--pop); border-bottom: 1px solid var(--line-2); font-size: 13px; color: var(--text); }
+.ssh-item + .ssh-item { border-top: 1px solid var(--line-2); }
+.ssh-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; min-height: 44px; }
+.ssh-row:hover { background: var(--pop-hover); }
+.ssh-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; border: none; background: none; padding: 0; text-align: left; color: var(--text); }
+.ssh-alias { font-size: 14px; font-weight: 500; white-space: nowrap; }
+.ssh-addr { font-family: var(--mono); font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssh-key { color: var(--dim); }
+.ssh-status { font-size: 11.5px; border-radius: 5px; padding: 1px 7px; border: 1px solid var(--line-2); white-space: nowrap; }
+.ssh-status.ok { color: var(--add); border-color: var(--add-line); }
+.ssh-status.bad { color: var(--del); border-color: var(--del-line); }
+.ssh-status.run { color: var(--muted); }
+.btn.ghost { border-color: transparent; background: none; }
+.ssh-detail { padding: 4px 14px 12px 42px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+.ssh-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; margin: 0; }
+.ssh-detail dt { color: var(--muted); }
+.ssh-detail dd { margin: 0; overflow-wrap: anywhere; }
+.ssh-detail .mono, .ssh-rule .mono { font-family: var(--mono); font-size: 11.5px; }
+.ssh-error { border: 1px solid var(--del-line); background: var(--del-bg); color: var(--del-fg); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.ssh-error pre { margin: 0; white-space: pre-wrap; color: var(--text); }
+.ssh-empty { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 18px; border: 1px dashed var(--line-2); border-radius: 12px; }
+.ssh-rules { display: flex; flex-direction: column; gap: 6px; }
+.ssh-rules h3 { margin: 8px 0 0; }
+.ssh-rule { padding: 6px 10px; border: 1px solid var(--line-2); border-radius: 8px; }
+.ssh-form { width: min(600px, calc(100vw - 40px)); }
+.ssh-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ssh-form .row select { flex: 1; min-width: 0; }
+.ssh-review { width: min(760px, calc(100vw - 40px)); }
+.ssh-diff { margin: 0; max-height: 50vh; overflow: auto; border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 0; background: var(--panel); }
+.ssh-diff > div { padding: 0 10px; white-space: pre; }
+.ssh-diff .ln { display: inline-block; width: 3.2em; color: var(--faint); user-select: none; }
+.ssh-diff .op { display: inline-block; width: 1.4em; user-select: none; }
+.ssh-diff .add { background: var(--add-bg); color: var(--add-fg); }
+.ssh-diff .del { background: var(--del-bg); color: var(--del-fg); }
+.ssh-diff .gap { color: var(--faint); height: 10px; }

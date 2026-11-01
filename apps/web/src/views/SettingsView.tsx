@@ -9,6 +9,7 @@ import type { Route } from "../App";
 import { AccountsPanel } from "../components/Accounts";
 import { GitSettings } from "./SettingsGit";
 import { BrowserSettings } from "./SettingsBrowser";
+import { SshHostsPage } from "./SettingsSsh";
 import { ImportSettings, SettingsWarnings } from "../components/SettingsCompat";
 import { CATEGORIES, shortcutLabel, SHORTCUTS, t, type Key } from "../i18n";
 import { tNode } from "../i18n/react";
@@ -21,7 +22,7 @@ const GROUPS: [Key, string[]][] = [
   ["settings.group.personal", ["geral", "contas", "aparencia", "modelos", "git", "integracoes", "navegador"]],
   ["settings.group.env", ["ambiente"]],
   ["settings.group.repo", ["repo", "acoes", "diversos"]],
-  ["settings.group.more", ["remoto", "celular", "avancado", "atalhos"]],
+  ["settings.group.more", ["remoto", "ssh", "celular", "avancado", "atalhos"]],
 ];
 const tabLabel = (k: string) => t(`settings.tab.${k}` as Key);
 
@@ -54,6 +55,7 @@ export function SettingsView({ tab, repoId, repos, onError, onRoute }: { tab: st
           {tab === "navegador" && <BrowserSettings onError={onError} />}
           {tab === "repo" && <RepoSettings repos={repos} repoId={repoId ?? repos[0]?.id} onError={onError} onRoute={onRoute} />}
           {tab === "remoto" && <Machines />}
+          {tab === "ssh" && <SshHostsPage onError={onError} />}
           {tab === "celular" && <RemotePanel onError={onError} />}
           {tab === "atalhos" && <Shortcuts />}
         </div>

@@ -394,6 +394,13 @@ fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
         }
         "app_settings_get" => json!(settings::AppSettings::load(&home.join("app-settings.json"))),
         "open_targets" => json!([]),
+        // Hosts SSH: leitura e escrita do config (o E2E aponta KABUL_SSH_HOME para um HOME sintético).
+        // Sem `ssh -G`, teste nem terminal: o serve nunca abre conexão.
+        "ssh_hosts" => json!(kabul_core::ssh::overview(&kabul_core::ssh::Roots::user())),
+        "ssh_keys" => json!(kabul_core::ssh::keys::list(&kabul_core::ssh::Roots::user())),
+        "ssh_effective" | "ssh_open_targets" => json!([]),
+        "ssh_preview" => json!(kabul_core::ssh::edit::plan(&kabul_core::ssh::Roots::user(), &serde_json::from_value(a["op"].clone())?)?),
+        "ssh_apply" => json!(kabul_core::ssh::edit::apply(&kabul_core::ssh::Roots::user(), &serde_json::from_value(a["op"].clone())?, &s(a, "digest")?)?),
         "github_status" => json!(kabul_core::github::status()),
         "github_token_set" => json!(kabul_core::github::get_token().is_some()),
         "github_repo_access" => {

@@ -107,6 +107,28 @@ export interface GhAccount { host: string; login: string; active: boolean; scope
 export interface RepoAccess { slug: string | null; ok: boolean; permission: string | null; message: string | null }
 export interface AccountRow { id: string; provider: string; nickname: string; email: string | null; plan: string | null; dir: string | null; default: boolean; logged_in: boolean | null; env_var: string | null; env_confirmed: boolean }
 export interface OpenTarget { id: string; name: string; kind: "finder" | "editor" | "terminal"; app: string; icon: string | null }
+/** Hosts SSH (core `ssh`): alias concreto do `~/.ssh/config` (ou de um `Include`), com o bloco lido como está. */
+export interface SshHost {
+  alias: string; file: string; file_display: string; line: number; siblings: string[];
+  hostname: string | null; user: string | null; port: string | null; identity_files: string[]; proxy_jump: string | null; proxy_command: string | null; forward_agent: string | null;
+  local_forwards: string[]; remote_forwards: string[]; other: [string, string][]; comment: string | null; conditional: boolean;
+}
+/** `Host` com curinga ou `Match`: mostrado como regra, sem interpretar. */
+export interface SshRule { kind: "host" | "match"; patterns: string; file: string; file_display: string; line: number; directives: [string, string][] }
+export interface SshOverview {
+  config: string; config_display: string; config_exists: boolean; ssh_dir_display: string;
+  files: { path: string; display: string; exists: boolean; included_from: string | null; error: string | null }[];
+  hosts: SshHost[]; rules: SshRule[]; warnings: { file: string; line: number | null; kind: string; detail: string }[];
+  ssh_available: boolean; keygen_available: boolean;
+}
+/** Valor efetivo (`ssh -G`). */
+export interface SshEffective { alias: string; hostname: string | null; user: string | null; port: string | null; identity_files: string[]; proxy_jump: string | null; proxy_command: string | null; forward_agent: string | null; error: string | null }
+export type SshTestKind = "ok" | "host_key_unknown" | "host_key_changed" | "permission_denied" | "timeout" | "dns" | "refused" | "unreachable" | "passphrase" | "other";
+export interface SshTest { ok: boolean; kind: SshTestKind; message: string; ms: number; command: string }
+export interface SshKey { path: string; display: string; has_private: boolean; has_public: boolean; kind: string | null; bits: number | null; fingerprint: string | null; comment: string | null }
+export interface SshForm { alias: string; hostname?: string | null; user?: string | null; port?: string | null; identity_file?: string | null; proxy_jump?: string | null }
+export type SshOp = { op: "add"; host: SshForm } | { op: "update"; file: string; line: number; alias: string; host: SshForm } | { op: "remove"; file: string; line: number; alias: string };
+export interface SshPlan { file: string; file_display: string; creates: boolean; before: string; after: string; diff: { op: " " | "+" | "-" | "…"; text: string; old: number | null; new: number | null }[]; digest: string }
 export interface PrCheck { name: string; state: string; bucket: string; link: string; workflow: string; description?: string }
 export interface TermInfo { session: string; pane: string; snapshot: string }
 
@@ -337,6 +359,20 @@ export const api = {
   sessions: () => c<Sessions>("sessions_list"),
   openTargets: () => c<OpenTarget[]>("open_targets"),
   openIn: (target: string, path: string) => c<void>("open_in", { target, path }),
+  sshHosts: () => c<SshOverview>("ssh_hosts"),
+  sshEffective: (aliases: string[]) => c<SshEffective[]>("ssh_effective", { aliases }),
+  sshTest: (alias: string) => c<SshTest>("ssh_test", { alias }),
+  sshKeys: () => c<SshKey[]>("ssh_keys"),
+  /** Prévia (diff) da mudança no config; nada é gravado. */
+  sshPreview: (op: SshOp) => c<SshPlan>("ssh_preview", { op }),
+  /** Grava com backup; `digest` é o da prévia (recusa se o arquivo mudou no meio). */
+  sshApply: (op: SshOp, digest: string) => c<{ file: string; backup: string | null }>("ssh_apply", { op, digest }),
+  sshKeygen: (name: string, comment: string) => c<SshKey>("ssh_keygen", { name, comment }),
+  /** Sessão de terminal com `ssh <alias>` (o nome volta para abrir como aba). */
+  sshTerminal: (alias: string) => c<string>("ssh_terminal", { alias }),
+  sshOpenTargets: () => c<{ id: string; name: string }[]>("ssh_open_targets"),
+  sshOpenIn: (target: string, alias: string) => c<void>("ssh_open_in", { target, alias }),
+  sshPickKey: () => c<string | null>("ssh_pick_key"),
   prChecks: (workspaceId: string) => c<{ checks: PrCheck[]; message: string | null }>("pr_checks", { workspaceId }),
   authStatus: () => c<AuthStatus[]>("auth_status"),
   authLogin: (kind: HarnessKind) => c<void>("auth_login", { kind }),

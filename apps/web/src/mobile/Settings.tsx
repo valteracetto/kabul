@@ -10,6 +10,7 @@ import { enablePush, pushBlocker, pushEnabled } from "./push";
 import { Avatar, BackButton, Group, I, NavBar, Row, useCollapse } from "./ui";
 import { LANG_NAMES, langPref, setLangPref, systemLang, t, type Lang, type LangPref } from "../i18n";
 import { trError } from "../i18n/errors";
+import { SshHosts } from "./SshHosts";
 
 const themeLabel = (p: ThemePref) => ({ system: t("mobile.settings.themeSystem"), light: t("mobile.settings.themeLight"), dark: t("mobile.settings.themeDark") })[p];
 const roleLabel = (r: string) => ({ owner: t("mobile.settings.roleOwner"), editor: t("mobile.settings.roleEditor"), observer: t("mobile.settings.roleObserver") } as Record<string, string>)[r] ?? r;
@@ -41,6 +42,7 @@ export function Settings({ conn }: { conn: ConnState }) {
         </Group>
         <Group>
           {isOwner() && <Row icon={<I.key />} title={t("mobile.settings.accounts")} chevron onClick={() => push("v=settings/accounts")} testid="m-accounts" />}
+          {isOwner() && <Row icon={<I.laptop />} title={t("ssh.mobile.title")} chevron onClick={() => push("v=settings/ssh")} testid="m-ssh" />}
           <Row icon={<I.moon />} title={t("mobile.settings.theme")} value={themeLabel(theme)} chevron onClick={() => push("v=settings/theme")} testid="m-theme" />
           <Row icon={<I.globe />} title={t("settings.language")} value={langPref() === "system" ? t("settings.language.system", { lang: LANG_NAMES[systemLang()] }) : LANG_NAMES[langPref() as Lang]} chevron onClick={() => push("v=settings/language")} testid="m-language" />
         </Group>
@@ -87,7 +89,7 @@ function PushGroup() {
 
 /** Subtelas das configurações (pilha: ‹ circular e título no centro). */
 export function SettingsPage({ sub, conn, onBack }: { sub: string; conn: ConnState; onBack: () => void }) {
-  const title = ({ remote: t("mobile.settings.remote"), accounts: t("mobile.settings.accounts"), theme: t("mobile.settings.theme"), language: t("settings.language"), about: t("mobile.settings.about") } as Record<string, string>)[sub] ?? t("mobile.settings.title");
+  const title = ({ remote: t("mobile.settings.remote"), accounts: t("mobile.settings.accounts"), theme: t("mobile.settings.theme"), language: t("settings.language"), about: t("mobile.settings.about"), ssh: t("ssh.mobile.title") } as Record<string, string>)[sub] ?? t("mobile.settings.title");
   return (
     <div className="m-page" data-testid={`m-settings-${sub}`}>
       <NavBar title={title} left={<BackButton onClick={onBack} />} />
@@ -97,6 +99,7 @@ export function SettingsPage({ sub, conn, onBack }: { sub: string; conn: ConnSta
         {sub === "theme" && <ThemePage />}
         {sub === "language" && <LanguagePage />}
         {sub === "about" && <About />}
+        {sub === "ssh" && <SshHosts />}
         <div className="m-scroll-end" />
       </main>
     </div>

@@ -105,5 +105,11 @@ mod tests {
         assert!(check(&obs, "repo_avatar", None).is_ok());
         assert!(check(&ed, "repo_update", Some("w1")).is_err());
         assert!(check(&dono, "repo_update", None).is_ok());
+        // Hosts SSH (lista, chaves, teste de conexão) são do dono.
+        for c in ["ssh_hosts", "ssh_keys", "ssh_effective", "ssh_test"] {
+            assert!(check(&ed, c, Some("w1")).is_err(), "{c}");
+            assert!(check(&obs, c, None).is_err(), "{c}");
+            assert!(check(&dono, c, None).is_ok(), "{c}");
+        }
     }
 }

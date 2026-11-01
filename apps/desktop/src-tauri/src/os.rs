@@ -210,6 +210,120 @@ fn launch_command(id: &str, app: &Path, path: &str) -> Command {
     c
 }
 
+// ---------------- "Abrir em" para um host SSH ----------------
+
+/// Apps que abrem uma sessão SSH: terminais (rodam `ssh <alias>`) e editores com Remote-SSH.
+pub fn ssh_capable(id: &str) -> bool {
+    matches!(id, "terminal" | "iterm" | "warp" | "ghostty" | "wt" | "pwsh" | "gitbash" | "vscode" | "cursor" | "windsurf")
+}
+
+/// Alias que pode ir para outra linha de comando (terminal externo, `wt`, `--remote`): sem aspas, `;`,
+/// `&`, espaço etc. O terminal do próprio Kabul aceita qualquer alias (vai como argumento, sem shell).
+fn alias_plain(alias: &str) -> bool {
+    !alias.is_empty() && !alias.starts_with('-') && alias.chars().all(|c| c.is_ascii_alphanumeric() || "._-@/:+%".contains(c))
+}
+
+/// Abre `ssh <alias>` no app escolhido. `config`: `-F` quando o Kabul lê um config fora do padrão.
+pub fn open_ssh(spec: &AppSpec, app: &Path, alias: &str, config: Option<&Path>, dir: &Path) -> R<()> {
+    if !alias_plain(alias) {
+        return Err(crate::i18n::tr("esse alias tem caracteres que o app externo não recebe; use o terminal do Kabul", "this alias has characters the external app can't take; use Kabul's terminal").into());
+    }
+    let mut ssh_args: Vec<String> = vec![];
+    if let Some(c) = config {
+        ssh_args.push("-F".into());
+        ssh_args.push(c.display().to_string());
+    }
+    ssh_args.push(alias.into());
+    let mut c = ssh_launch(spec.id, app, alias, &ssh_args, dir)?;
+    c.spawn().map_err(e)?;
+    Ok(())
+}
+
+/// Linha `ssh ...` com aspas de sh (script `.command` do macOS).
+#[cfg(target_os = "macos")]
+fn sh_line(args: &[String]) -> String {
+    let q = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+    format!("exec ssh {}", args.iter().map(|a| q(a)).collect::<Vec<_>>().join(" "))
+}
+
+#[cfg(target_os = "macos")]
+fn ssh_launch(id: &str, app: &Path, alias: &str, ssh_args: &[String], dir: &Path) -> R<Command> {
+    let remote = format!("ssh-remote+{alias}");
+    let editor_cli = |bin: &str| app.join("Contents/Resources/app/bin").join(bin);
+    Ok(match id {
+        "vscode" | "cursor" | "windsurf" => {
+            let bin = editor_cli(match id {
+                "vscode" => "code",
+                other => other,
+            });
+            let mut c = Command::new(bin);
+            c.args(["--new-window", "--remote", &remote]);
+            c
+        }
+        _ => {
+            // Script próprio (o Kabul escreve; o alias já foi validado) aberto no terminal: Terminal,
+            // iTerm e Warp rodam `.command`; Ghostty recebe o comando por `-e`.
+            std::fs::create_dir_all(dir).map_err(e)?;
+            let f = dir.join(format!("{}.command", kabul_core::paths::safe_file_name(alias).replace(['/', ' '], "_")));
+            std::fs::write(&f, format!("#!/bin/sh\n{}\n", sh_line(ssh_args))).map_err(e)?;
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o700)).map_err(e)?;
+            }
+            let mut c = Command::new("open");
+            if id == "ghostty" {
+                c.arg("-na").arg(app).arg("--args").arg("-e").arg(&f);
+            } else {
+                c.arg("-a").arg(app).arg(&f);
+            }
+            c
+        }
+    })
+}
+
+#[cfg(windows)]
+fn ssh_launch(id: &str, app: &Path, alias: &str, ssh_args: &[String], _dir: &Path) -> R<Command> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+    Ok(match id {
+        "vscode" | "cursor" => {
+            let bin = app.parent().map(|d| d.join("bin").join(if id == "vscode" { "code.cmd" } else { "cursor.cmd" })).ok_or("app sem pasta")?;
+            let mut c = Command::new(bin);
+            c.args(["--new-window", "--remote", &format!("ssh-remote+{alias}")]);
+            c
+        }
+        "wt" => {
+            let mut c = Command::new(app);
+            c.arg("new-tab").arg("ssh").args(ssh_args);
+            c
+        }
+        "pwsh" => {
+            let mut c = Command::new(app);
+            c.arg("-NoExit").arg("-Command").arg("ssh").args(ssh_args).creation_flags(CREATE_NEW_CONSOLE);
+            c
+        }
+        _ => {
+            let mut c = Command::new(app);
+            c.arg("-c").arg(format!("ssh {}", ssh_args.join(" ")));
+            c
+        }
+    })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn ssh_launch(id: &str, app: &Path, alias: &str, ssh_args: &[String], _dir: &Path) -> R<Command> {
+    let mut c = Command::new(app);
+    match id {
+        "vscode" | "cursor" | "windsurf" => {
+            c.args(["--new-window", "--remote", &format!("ssh-remote+{alias}")]);
+        }
+        _ => {
+            c.arg("-e").arg("ssh").args(ssh_args);
+        }
+    }
+    Ok(c)
+}
+
 /// Ícones dos apps (PNG em `dir/<id>.png`). Só no macOS por enquanto (JXA + NSWorkspace); nos outros a
 /// UI mostra a inicial.
 #[cfg(target_os = "macos")]
@@ -261,6 +375,13 @@ mod tests {
         assert_eq!(windows_sound_alias("Glass"), "SystemNotification");
         assert_eq!(windows_sound_alias("Basso"), "SystemHand");
         assert_eq!(windows_sound_alias("outro"), "SystemDefault");
+    }
+
+    #[test]
+    fn alias_para_app_externo() {
+        assert!(alias_plain("Acme/Prod") && alias_plain("web-01.example.com") && alias_plain("dev@box"));
+        assert!(!alias_plain("-oProxyCommand=x") && !alias_plain("a;b") && !alias_plain("a b") && !alias_plain("a'b") && !alias_plain(""));
+        assert!(ssh_capable("terminal") && ssh_capable("vscode") && !ssh_capable("finder"));
     }
 
     #[test]

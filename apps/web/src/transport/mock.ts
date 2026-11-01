@@ -734,6 +734,8 @@ const handlers: Record<string, (a: any) => unknown> = {
 
 // Navegador falso (aba Browser): em módulo à parte, carregado no primeiro comando browser_* (fora do JS inicial).
 let browserMod: Promise<import("./mockBrowser").BrowserMock> | null = null;
+let sshMod: Promise<Record<string, (a: any) => unknown>> | null = null;
+const sshMock = () => (sshMod ??= import("./mockSsh").then((m) => m.makeSshMock()));
 const browserMock = () => (browserMod ??= import("./mockBrowser").then((m) => m.makeBrowserMock({ emit, db, now, nextId: () => ++seq })));
 
 // Ganchos para os testes montarem estados de git/PR sem backend.
@@ -792,7 +794,7 @@ export const mockTransport: Transport = {
     if (command.startsWith("browser_")) ((window as any).__browserCalls ??= []).push([command, args ?? {}]);
     if (demoReady) await demoReady;
     if (command === "checkpoint_create" && (window as any).__mock?.holdModels === true) ((window as any).__mock.holdModels = false, (window as any).__mock.releaseModels?.());
-    const h = command.startsWith("browser_") ? (await browserMock()).handlers[command] : handlers[command];
+    const h = command.startsWith("browser_") ? (await browserMock()).handlers[command] : command.startsWith("ssh_") ? (await sshMock())[command] : handlers[command];
     if (!h) throw new Error(`mock: comando desconhecido ${command}`);
     await new Promise((r) => setTimeout(r, 15));
     return (await h(args ?? {})) as T;

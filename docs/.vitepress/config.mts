@@ -49,6 +49,7 @@ const en: DefaultTheme.SidebarItem[] = [
     items: [
       { text: "Cloud and mobile", link: "/guide/cloud-and-mobile" },
       { text: "Collaboration", link: "/guide/collaboration" },
+      { text: "SSH hosts", link: "/guide/ssh" },
     ],
   },
   {
@@ -106,6 +107,7 @@ const pt: DefaultTheme.SidebarItem[] = [
     items: [
       { text: "Nuvem e celular", link: "/pt-BR/guia/nuvem-e-celular" },
       { text: "Colaboração", link: "/pt-BR/guia/colaboracao" },
+      { text: "Hosts SSH", link: "/pt-BR/guia/ssh" },
     ],
   },
   {

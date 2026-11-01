@@ -133,6 +133,19 @@ export const BACKEND_ERRORS: [RegExp, Key][] = [
   [/^salvando (?<p>[^:]+)(?=:|$)/, "errors.ctxSaving"],
   [/^apagando (?<p>[^:]+)(?=:|$)/, "errors.ctxDeleting"],
   [/saída inesperada de claude auth status/, "errors.noResponseCodexbar"],
+  // Hosts SSH (core `ssh`).
+  [/já existe um host (?<alias>\S+)/, "errors.sshHostExists"],
+  [/o bloco de (?<alias>\S+) mudou de lugar no arquivo: sincronize e tente de novo/, "errors.sshBlockMoved"],
+  [/(?<file>\S+) mudou desde a prévia: revise de novo antes de salvar/, "errors.sshChangedSincePreview"],
+  [/alias inválido: sem curingas \(\* \? !\), # nem vírgula/, "errors.sshAliasWildcard"],
+  [/alias inválido: (?<alias>.+)/, "errors.sshAliasInvalid"],
+  [/alias obrigatório/, "errors.sshAliasRequired"],
+  [/porta inválida: (?<port>\S+)/, "errors.sshPortInvalid"],
+  [/(?<what>HostName|User|ProxyJump|IdentityFile) inválido/, "errors.sshValueInvalid"],
+  [/ssh-keygen não encontrado/, "errors.sshKeygenMissing"],
+  [/ssh não encontrado/, "errors.sshMissing"],
+  [/(?<alias>\S+) não está no (?<file>\S+)/, "errors.sshNotInConfig"],
+  [/nome de chave inválido/, "errors.sshKeyName"],
 ];
 
 /** Mensagem de erro do backend no idioma da interface. Aceita Error, string ou qualquer coisa. */

@@ -121,5 +121,17 @@
   "errors.browserNoDevtools": "the browser did not open DevTools within 20 s",
   "errors.browserUnzip": "could not unpack the downloaded browser",
   "errors.browserNoBack": "there is no previous page",
-  "errors.browserNoForward": "there is no next page"
+  "errors.browserNoForward": "there is no next page",
+  "errors.sshHostExists": "a host named {alias} already exists",
+  "errors.sshBlockMoved": "the block for {alias} moved in the file: sync and try again",
+  "errors.sshChangedSincePreview": "{file} changed since the preview: review it again before saving",
+  "errors.sshAliasWildcard": "invalid alias: no wildcards (* ? !), # or comma",
+  "errors.sshAliasInvalid": "invalid alias: {alias}",
+  "errors.sshAliasRequired": "alias is required",
+  "errors.sshPortInvalid": "invalid port: {port}",
+  "errors.sshValueInvalid": "invalid {what}",
+  "errors.sshKeygenMissing": "ssh-keygen not found (install the OpenSSH client)",
+  "errors.sshMissing": "ssh not found (install the OpenSSH client)",
+  "errors.sshNotInConfig": "{alias} is not in {file}",
+  "errors.sshKeyName": "invalid key name: use letters, numbers, dot, _ or -"
 }

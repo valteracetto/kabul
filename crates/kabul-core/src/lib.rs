@@ -42,6 +42,7 @@ pub mod settings_compat;
 pub mod shell;
 pub mod shell_env;
 pub mod speech;
+pub mod ssh;
 pub mod store;
 pub mod term;
 pub mod tmux;

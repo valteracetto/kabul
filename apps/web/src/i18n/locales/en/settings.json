@@ -172,6 +172,7 @@
   "settings.tab.repo": "Scripts",
   "settings.tab.acoes": "Actions",
   "settings.tab.diversos": "Miscellaneous",
+  "settings.tab.ssh": "SSH hosts",
   "settings.tab.remoto": "Machines",
   "settings.tab.celular": "Phone & remote",
   "settings.tab.avancado": "Advanced",
