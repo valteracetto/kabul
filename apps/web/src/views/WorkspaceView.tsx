@@ -8,7 +8,7 @@ import { Floating } from "../components/Floating";
 import { noSuggest } from "../noSuggest";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDismiss, usePopover } from "../components/useDismiss";
-import { api, STATUS_LABEL, wsTitle, type Checkpoint, type FileChange, type PrOptions, type PrResult, type Repo, type Workspace } from "../api";
+import { api, wsTitle, type Checkpoint, type FileChange, type PrOptions, type PrResult, type Repo, type Workspace } from "../api";
 import { ChatTab } from "./ChatTab";
 import { TerminalTab } from "./TerminalLazy";
 import { BrowserTab } from "./BrowserLazy";
@@ -32,6 +32,8 @@ import { mountedWs, pendingActivate, pendingFork, pendingForkWs, pendingModel, t
 import { useSettings } from "../components/useSettings";
 import { RunsOnBadge, cloudAdd, cloudList, cloudRemove, cloudRunsOn } from "../components/RunsOn";
 import type { CloudInfo, RepoAccess } from "../api";
+import { boardFor, moveCard, statusColumn, useBoardConfig } from "../board";
+import { ColIcon } from "../components/BoardBits";
 
 type CenterTab = { kind: "chat"; id: string; title: string } | { kind: "cloud"; tmux: string; info: CloudInfo } | { kind: "term"; session: string; title: string; preset?: string } | { kind: "diff"; path: string } | { kind: "file"; path: string; line?: number } | { kind: "browser" };
 type Bottom = "setup" | "run" | "terminal" | `t${number}`;
@@ -81,6 +83,8 @@ export const WorkspaceView = memo(function WorkspaceView({ ws, repo, active, sid
   const [editing, setEditing] = useState<"title" | "branch" | null>(null);
   const [draft, setDraft] = useState("");
   const [statusOpen, setStatusOpen] = useState(false);
+  const boardCfg = useBoardConfig();
+  const wsCol = statusColumn(boardCfg, ws);
   const statusRef = useRef<HTMLDivElement>(null), menuRef = useRef<HTMLDivElement>(null), prRef = useRef<HTMLDivElement>(null);
   useDismiss(statusRef, statusOpen, useCallback(() => setStatusOpen(false), []));
   useDismiss(menuRef, menu, useCallback(() => setMenu(false), []));
@@ -547,11 +551,11 @@ ${l.slice(-2500)}
           )}
           {ws.linear && <button className="issue-chip" title={ws.linear.title} onClick={() => api.openExternal(ws.linear!.url)}>{ws.linear.identifier} ↗</button>}
           <div className="picker hdr-extra" ref={statusRef}>
-            <button className={"status-pill st-" + ws.status} onClick={() => setStatusOpen(!statusOpen)} data-testid="status-pill">{STATUS_LABEL[ws.status] ?? ws.status} <IChevronDown size={10} /></button>
+            <button className={"status-pill st-" + ws.status} onClick={() => setStatusOpen(!statusOpen)} data-testid="status-pill"><ColIcon icon={wsCol.icon} color={wsCol.color} size={11} /> {wsCol.name} <IChevronDown size={10} /></button>
             {statusOpen && (
               <Floating className="status-pop" placement="bottom-start">
-                {Object.entries(STATUS_LABEL).map(([k, v]) => (
-                  <div key={k} className={"pop-row" + (k === ws.status ? " on" : "")} onClick={() => api.updateWorkspace(ws.id, { status: k }).then(() => (setStatusOpen(false), onChange()), (e) => onError(String(e)))}><span className={"dot st-" + k} /> {v}</div>
+                {boardFor(boardCfg, ws.repo_id).columns.map((c) => (
+                  <div key={c.id} className={"pop-row" + (c.id === wsCol.id ? " on" : "")} onClick={() => (setStatusOpen(false), c.id !== wsCol.id && void moveCard(ws, c.id, onChange))} data-testid={`status-opt-${c.id}`}><ColIcon icon={c.icon} color={c.color} size={12} /> {c.name}</div>
                 ))}
               </Floating>
             )}

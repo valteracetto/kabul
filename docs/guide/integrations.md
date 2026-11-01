@@ -12,6 +12,8 @@ Connect with a personal API key in **Settings › Integrations**. Create workspa
 
 **Why a personal key and not "Sign in with Linear" (OAuth)?** Linear OAuth requires an OAuth app registered with Linear (client id and, in the usual flow, a client secret) plus a redirect URL. Kabul is local and open source: a client secret shipped inside the app would not be secret, and everyone would have to register their own app. A personal key gives the same access, is stored in the system vault (Keychain / Credential Manager) and can be revoked in Linear at any time. Once there is a public Kabul OAuth app with PKCE, the sign-in callback will use the `kabul://` link the app already handles.
 
+**Issue status on the Board.** A workspace linked to a Linear issue or a GitHub issue can keep the issue status in step with its card: moving the card updates the issue, and changes made in the tracker can move the card back. See [Board](./board.md).
+
 
 ## `kabul://` links
 

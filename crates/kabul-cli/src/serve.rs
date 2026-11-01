@@ -235,6 +235,25 @@ fn call(st: &mut Store, home: &Path, cmd: &str, a: &Value) -> Result<Value> {
             json!(store::branches(Path::new(&r.path)).unwrap_or_default())
         }
         "linear_status" => json!({"connected": false, "who": null, "error": null}),
+        "board_get" => json!(kabul_core::board::config(&st.state)),
+        "board_save" => {
+            let board = match a.get("board") {
+                Some(b) if !b.is_null() => Some(serde_json::from_value(b.clone())?),
+                _ => None,
+            };
+            let reassign = a.get("reassign").filter(|r| !r.is_null()).map(|r| serde_json::from_value(r.clone())).transpose()?.unwrap_or_default();
+            json!(kabul_core::board::save(st, a.get("repoId").and_then(Value::as_str).filter(|r| !r.is_empty()), board, &reassign)?)
+        }
+        // Sem rastreadores aqui (o E2E nunca fala com Linear/GitHub): só move o card.
+        "board_move" => {
+            let (id, column) = (s(a, "workspaceId")?, s(a, "column")?);
+            let w = st.workspace(&id)?.clone();
+            if !kabul_core::board::effective(&st.state, &w.repo_id).has(&column) {
+                anyhow::bail!("coluna não existe neste quadro: {column}");
+            }
+            let moved = st.update_workspace(&id, |x| x.status = column.clone())?;
+            json!({"workspace": moved, "from_column": w.status, "sync": {"status": "off", "tracker": null, "issue": null, "url": null, "from": null, "to": null, "project": null, "error": null, "before": null}})
+        }
         "workspace_changes" => {
             let (w, r) = ws_repo(st, &s(a, "workspaceId")?)?;
             json!(gitops::changes(&r, &w, gitops::Scope::parse(a.get("scope").and_then(Value::as_str)))?)

@@ -10,6 +10,7 @@ import { ConfirmHost, confirmClosing, liveChats } from "./components/Confirm";
 import { Resizer, usePanelSize } from "./components/Resizer";
 import { WorkspaceView } from "./views/WorkspaceView";
 import { LinearPicker } from "./components/LinearPicker";
+import { BoardFeedback } from "./components/BoardBits";
 import { CreateModal } from "./components/CreateModal";
 import { IBranch } from "./icons";
 import { cycleTheme } from "./theme";
@@ -453,6 +454,7 @@ export function App() {
       {sidebar && <Resizer axis="x" dir={1} {...side} onSize={side.setSize} onCollapse={() => setSidebar(false)} testid="resize-sidebar" />}
       <main className="main">
         <UpdateBanner />
+        <BoardFeedback onChange={reload} />
         <Suspense fallback={null}><BrowserApprovals workspaces={workspaces} onOpen={(id) => (go({ kind: "workspace", id }), setTimeout(() => openBrowser(id), 150))} /></Suspense>
         {toasts.length > 0 && (
           <div className="toasts">

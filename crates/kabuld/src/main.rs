@@ -61,6 +61,12 @@ fn main() -> anyhow::Result<()> {
         let v = srv.hub.call(&owner, 0, "pair_create", &serde_json::json!({}))?;
         eprintln!("kabuld: link de pareamento (vale 5 min): {}", v["url"].as_str().unwrap_or_default());
     }
+    // Quadro: sincronia inversa (issue mudou no Linear/GitHub → o card acompanha), a cada 90 s.
+    let hub = srv.hub.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(90));
+        hub.board_poll();
+    });
     // Espera Ctrl-C.
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {

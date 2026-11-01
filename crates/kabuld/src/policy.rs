@@ -28,6 +28,8 @@ const GUEST_READ: &[&str] = &[
     // Navegador do workspace só para ver (captura atualizada).
     "browser_status",
     "browser_screenshot",
+    // Colunas do Quadro (nomes e cores dos status); mudar o quadro e mover cards é do dono.
+    "board_get",
 ];
 
 /// Escrita liberada ao editor convidado.
@@ -35,7 +37,7 @@ const GUEST_WRITE: &[&str] = &["chat_send", "chat_approve", "chat_stop", "chat_q
 
 /// Comandos sem alvo (listas filtradas pelo próprio hub).
 /// `presence_set` confere o escopo no próprio hub (sair do workspace manda `workspaceId` nulo).
-const UNTARGETED: &[&str] = &["whoami", "live_sessions", "workspaces_list", "repos_list", "repo_avatar", "machine_info", "models_list", "chat_list", "push_key", "push_subscribe", "presence_set", "transcribe"];
+const UNTARGETED: &[&str] = &["board_get", "whoami", "live_sessions", "workspaces_list", "repos_list", "repo_avatar", "machine_info", "models_list", "chat_list", "push_key", "push_subscribe", "presence_set", "transcribe"];
 
 /// `target_ws`: workspace a que o comando se refere (resolvido pelo hub a partir de workspaceId, chatId
 /// ou sessão). `None` quando o comando não tem alvo ou o alvo não pertence a workspace nenhum.
@@ -104,6 +106,12 @@ mod tests {
         // Avatar do repo: leitura (o hub confere o repo do workspace); mudar o repo é do dono.
         assert!(check(&obs, "repo_avatar", None).is_ok());
         assert!(check(&ed, "repo_update", Some("w1")).is_err());
+        // Quadro: convidado lê as colunas; configurar, mover, sincronizar e vincular issue é do dono.
+        assert!(check(&obs, "board_get", None).is_ok());
+        for c in ["board_save", "board_move", "board_sync", "board_preview", "workspace_link_issue"] {
+            assert!(check(&ed, c, Some("w1")).is_err(), "{c} é só do dono");
+            assert!(check(&dono, c, None).is_ok(), "{c}");
+        }
         assert!(check(&dono, "repo_update", None).is_ok());
     }
 }

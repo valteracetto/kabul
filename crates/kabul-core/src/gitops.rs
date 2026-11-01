@@ -775,6 +775,7 @@ mod tests {
             user_set_branch: false,
             files_copied: 0,
             linear: None,
+            issue: None,
             ..Default::default()
         };
         let o = checks_rerun(&ws, &["https://github.com/dev/demo/actions/runs/123/job/1".into(), "https://github.com/dev/demo/actions/runs/123/job/2".into(), "https://github.com/dev/demo/actions/runs/124/job/3".into()], true).unwrap();

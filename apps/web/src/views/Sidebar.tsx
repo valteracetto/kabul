@@ -2,7 +2,9 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Floating } from "../components/Floating";
 import { createPortal } from "react-dom";
 import { RepoIcon } from "../components/RepoIcon";
-import { api, STATUS_LABEL, STATUS_ORDER, wsTitle, type Repo, type Section, type Workspace } from "../api";
+import { api, wsTitle, type Repo, type Section, type Workspace } from "../api";
+import { boardFor, moveCard, sidebarColumns, statusColumn, statusLabel, useBoardConfig } from "../board";
+import { ColIcon } from "../components/BoardBits";
 import type { AgentState, Route } from "../App";
 import { RunsOnBadge, cloudList, cloudRunsOn, type CloudRecord } from "../components/RunsOn";
 import { MachinePicker } from "../components/MachinePicker";
@@ -32,7 +34,7 @@ const WsRow = memo(function WsRow({ w, s, ag, on, dragging, dragActive, byStatus
       onContextMenu={(e) => h.current!.ctx(w, e)}
       onMouseEnter={() => !dragActive && h.current!.enter(w)} onMouseLeave={() => h.current!.leave()} onMouseDown={() => h.current!.mdown()}
       data-testid="ws-row" data-ws={w.id}>
-      {ag === "working" ? <span className="spinner tiny" title={t("app.side.agentWorking")} /> : ag === "waiting" ? <span className="agent-dot waiting" title={t("app.agents.status.waiting")} /> : ag === "queued" ? <span className="agent-dot queued" title={t("app.side.agentQueued")} data-testid="ws-queued" /> : w.state === "setting_up" ? <span className="spinner tiny" title={t("app.side.settingUp")} /> : byStatus ? <RepoIcon repo={repo} name={repoName || "?"} size={14} /> : w.pr_url ? <span className="ws-ico" data-status={w.status} title={`PR · ${STATUS_LABEL[w.status] ?? w.status}`}><IPR size={14} /></span> : <span className="ws-ico" data-status={w.status} title={STATUS_LABEL[w.status] ?? w.status}><IBranch size={14} /></span>}
+      {ag === "working" ? <span className="spinner tiny" title={t("app.side.agentWorking")} /> : ag === "waiting" ? <span className="agent-dot waiting" title={t("app.agents.status.waiting")} /> : ag === "queued" ? <span className="agent-dot queued" title={t("app.side.agentQueued")} data-testid="ws-queued" /> : w.state === "setting_up" ? <span className="spinner tiny" title={t("app.side.settingUp")} /> : byStatus ? <RepoIcon repo={repo} name={repoName || "?"} size={14} /> : w.pr_url ? <span className="ws-ico" data-status={w.status} title={`PR · ${statusLabel(w)}`}><IPR size={14} /></span> : <span className="ws-ico" data-status={w.status} title={statusLabel(w)}><IBranch size={14} /></span>}
       <span className="ws-title">{wsTitle(w)}</span>
       {cloud && <RunsOnBadge r={cloudRunsOn(cloud)} size={12} />}
       {w.unread && !on && <span className="unread-dot" title={t("app.side.unread")} />}
@@ -44,7 +46,7 @@ const WsRow = memo(function WsRow({ w, s, ag, on, dragging, dragActive, byStatus
           <div onMouseEnter={() => h.current!.stay()} onMouseLeave={() => h.current!.leave()} onClick={(e) => e.stopPropagation()}>
             <div className="peek-title">{wsTitle(w)}</div>
             <div className="dim small">{repoName} · <span className="mono">{w.branch}</span></div>
-            <div className="peek-row"><span className={"st-icon st-" + w.status} /> {STATUS_LABEL[w.status] ?? w.status}{ag && <span className="dim"> · {ag === "working" ? t("app.side.peek.working") : ag === "queued" ? t("app.side.peek.queued") : t("app.side.peek.waiting")}</span>}</div>
+            <div className="peek-row"><PeekStatus w={w} />{ag && <span className="dim"> · {ag === "working" ? t("app.side.peek.working") : ag === "queued" ? t("app.side.peek.queued") : t("app.side.peek.waiting")}</span>}</div>
             {s && (s[0] > 0 || s[1] > 0) && <div className="peek-row mono small"><span className="add">+{s[0]}</span> <span className="del">−{s[1]}</span> <span className="dim">{t("app.side.lines")}</span></div>}
             {w.pr_url && <div className="peek-row small">{"PR" /* i18n-ignore */} <span className="mono">{w.pr_url.split("/").pop()}</span></div>}
             {w.notes && <div className="peek-notes small">{w.notes}</div>}
@@ -94,6 +96,12 @@ const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/,
 type Menu = { kind: "ws"; w: Workspace; x: number; y: number } | { kind: "repo"; r: Repo; x: number; y: number } | { kind: "section"; s: Section; x: number; y: number };
 type Drop = { kind: "section"; id: string } | { kind: "pinned" } | { kind: "repo"; id: string } | { kind: "status"; id: string };
 
+/** Status do workspace na prévia (coluna do quadro do repo dele). */
+function PeekStatus({ w }: { w: Workspace }) {
+  const c = statusColumn(useBoardConfig(), w);
+  return <><ColIcon icon={c.icon} color={c.color} size={12} /> {c.name}</>;
+}
+
 export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route, onRoute, onChange, onError, onSearch, onCollapse, onCreate, onAddProject, onHelp }: Props) {
   const [cloudBump, bump] = useState(0);
   useEffect(() => {
@@ -125,6 +133,7 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
   }, []);
 
   const patch = (w: Workspace, p: Parameters<typeof api.updateWorkspace>[1]) => api.updateWorkspace(w.id, p).then(onChange, (e) => onError(String(e)));
+  const boardCfg = useBoardConfig();
   const archived = workspaces.filter((w) => w.archived);
   const live = workspaces.filter((w) => !w.archived);
   const act = activity();
@@ -168,7 +177,11 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
       if (d.kind === "pinned") patch(w, { pinned: true, pin_order: pinned.length });
       else if (d.kind === "section") patch(w, { section: d.id, pinned: false });
       else if (d.kind === "repo") patch(w, { section: "", pinned: false });
-      else if (d.kind === "status") patch(w, { status: d.id, pinned: false, section: "" });
+      else if (d.kind === "status") {
+        // Status pelo Quadro (sincroniza a issue vinculada); fixado/seção à parte.
+        if (w.pinned || w.section) void patch(w, { pinned: false, section: "" });
+        if (statusColumn(boardCfg, w).id !== d.id) void moveCard(w, d.id, onChange);
+      }
     };
     const esc = (e: KeyboardEvent) => e.key === "Escape" && (start.current || drag) && ((start.current = null), setDrag(null));
     window.addEventListener("pointermove", move);
@@ -278,13 +291,14 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
           );
         })}
         {prefs.groupBy === "status"
-          ? STATUS_ORDER.map((st) => {
-              const list = free.filter((w) => w.status === st).sort(sortFn);
+          ? sidebarColumns(boardCfg).map((col) => {
+              const st = col.id;
+              const list = free.filter((w) => statusColumn(boardCfg, w).id === st).sort(sortFn);
               const key = `status-${st}`;
               if (!list.length && !drag) return null;
               return (
                 <div key={st} className={"repo-group" + over(key)} {...dropProps(key, { kind: "status", id: st })} data-testid="status-group">
-                  {groupHead(key, <><span className={"st-icon st-" + st} /><span className="repo-name">{STATUS_LABEL[st]}</span></>, list.length, undefined, { kind: "status", id: st })}
+                  {groupHead(key, <><ColIcon icon={col.icon} color={col.color} size={12} /><span className="repo-name">{col.name}</span></>, list.length, undefined, { kind: "status", id: st })}
                   {!collapsed.includes(key) && list.map(row)}
                 </div>
               );
@@ -333,7 +347,7 @@ export function Sidebar({ repos, workspaces, stats, agents, onBack, onFwd, route
                 <div className="pop-row sub" onMouseEnter={() => setSub("status")} onClick={() => setSub("status")} data-testid="ctx-status">{t("app.side.groupStatus")} <span className="grow" />▸
                   {sub === "status" && (
                     <div className="popover status-pop submenu-pop">
-                      {STATUS_ORDER.map((st) => <div key={st} className={"pop-row" + (w.status === st ? " on" : "")} onClick={(e) => (e.stopPropagation(), close(), patch(w, { status: st }))} data-testid={`ctx-status-${st}`}><span className={"st-icon st-" + st} /> {STATUS_LABEL[st]}</div>)}
+                      {boardFor(boardCfg, w.repo_id).columns.map((c) => <div key={c.id} className={"pop-row" + (statusColumn(boardCfg, w).id === c.id ? " on" : "")} onClick={(e) => (e.stopPropagation(), close(), statusColumn(boardCfg, w).id !== c.id && void moveCard(w, c.id, onChange))} data-testid={`ctx-status-${c.id}`}><ColIcon icon={c.icon} color={c.color} size={12} /> {c.name}</div>)}
                     </div>
                   )}
                 </div>

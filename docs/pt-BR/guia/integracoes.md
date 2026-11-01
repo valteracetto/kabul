@@ -12,6 +12,8 @@ Conecte com uma chave de API pessoal em **Configurações › Integrações**. C
 
 **Por que chave pessoal e não "Entrar com o Linear" (OAuth)?** O OAuth do Linear exige um app OAuth registrado no Linear (client id e, no fluxo comum, client secret) e uma URL de retorno. O Kabul é local e de código aberto: um client secret embutido no app deixaria de ser secreto, e cada pessoa teria que registrar o próprio app. A chave pessoal dá o mesmo acesso, fica no cofre do sistema (Keychain / Credential Manager) e pode ser revogada no Linear a qualquer momento. Quando houver um app OAuth público do Kabul com PKCE, a volta do login usa o link `kabul://` que o app já trata.
 
+**Status da issue no Quadro.** Um workspace vinculado a uma issue do Linear ou do GitHub pode manter o status da issue junto com o do card: mover o card atualiza a issue, e mudanças feitas no rastreador podem mover o card de volta. Veja [Quadro](./quadro.md).
+
 
 ## Links `kabul://`
 

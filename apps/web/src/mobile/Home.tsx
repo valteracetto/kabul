@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ConnState } from "../transport/websocket";
 import { RepoIcon } from "../components/RepoIcon";
 import type { ExternalSessions, Model, Repo, Workspace } from "../api";
-import { STATUS_LABEL as WS_STATUS } from "../api";
+import { statusColumn, useBoardConfig } from "../board";
 import { ago, modelFor, workspaceFor } from "../components/external";
 import { AGENT_LABEL, canWrite, isOwner, k, me, ws, type LiveSession, type Ticket } from "./kabuld";
 import { archiveWorkspace, refresh, setListPrefs, useKabul, useListPrefs, type ListPrefs } from "./data";
@@ -272,7 +272,9 @@ function WsBlock({ n, manual, narrow, onDrop, onChat, onInvite, onMore, os, mach
     actions.push({ label: w.archived ? t("mobile.home.restore") : t("mobile.home.archive"), tone: w.archived ? "blue" : "gray", icon: <ArchiveIcon />, onClick: () => void archiveWorkspace(w.id, !w.archived), testid: "m-ws-archive" });
   }
   const drag = useDragHandle(n.id, onDrop, setOver);
-  const status = w ? WS_STATUS[w.status] ?? w.status : null;
+  const boardCfg = useBoardConfig();
+  // Nome da coluna do Quadro (configurável), como no desktop.
+  const status = w ? statusColumn(boardCfg, w).name : null;
   const can = { files: !!w && !w.archived, invite: owner && !w?.archived, chat: canWrite() && !w?.archived };
   return (
     <div className={"m-ws" + (w?.archived ? " archived" : "") + (over ? " drop" : "")} data-ws-row={n.id}>

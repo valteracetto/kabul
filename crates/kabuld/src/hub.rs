@@ -35,7 +35,7 @@ pub struct Hub {
     pub home: PathBuf,
     pub port: u16,
     pub machine: String,
-    store: SharedStore,
+    store: Arc<SharedStore>,
     pub bus: Bus,
     pub auth: Auth,
     pub terms: TermHub,
@@ -101,7 +101,7 @@ impl Hub {
             home,
             port,
             machine: kabul_core::machine::computer_name(),
-            store: SharedStore::new(store),
+            store: Arc::new(SharedStore::new(store)),
             bus,
             live: RwLock::new(vec![]),
             alive: AtomicBool::new(true),
@@ -188,6 +188,34 @@ impl Hub {
     }
 
     /// Estado do Kabul relido do disco quando o arquivo muda (o app desktop também escreve nele).
+    /// Evento do Kabul no Quadro: move e sincroniza em segundo plano; avisa os clientes.
+    fn board_event(&self, ws: String, ev: kabul_core::board::AutoEvent) {
+        let moves = self.with_store(|st| {
+            let w = st.workspace(&ws)?;
+            Ok(kabul_core::board::auto_target(&kabul_core::board::effective(&st.state, &w.repo_id), &w.status, ev).is_some())
+        });
+        if !moves.unwrap_or(false) {
+            return;
+        }
+        let (store, bus) = (self.store.clone(), self.bus.clone());
+        std::thread::spawn(move || {
+            if let Some(m) = kabul_core::board::on_event(&store, &kabul_core::tracker::Trackers::real(), &ws, ev) {
+                bus.emit("board-moved", json!({ "source": "event", "event": ev, "result": m }), None, None);
+                bus.emit("workspaces-changed", json!({}), None, None);
+            }
+        });
+    }
+
+    /// Uma rodada da sincronia inversa (o `kabuld` sozinho roda em laço; embutido, quem roda é o app).
+    pub fn board_poll(&self) -> Vec<kabul_core::board::Moved> {
+        let moved = kabul_core::board::poll_once(&self.store, &kabul_core::tracker::Trackers::real());
+        if !moved.is_empty() {
+            self.bus.emit("board-moved", json!({ "source": "poll", "moved": moved }), None, None);
+            self.bus.emit("workspaces-changed", json!({}), None, None);
+        }
+        moved
+    }
+
     fn with_store<T>(&self, f: impl FnOnce(&mut Store) -> Result<T>) -> Result<T> {
         f(&mut self.store.lock().unwrap())
     }
@@ -439,7 +467,15 @@ impl Hub {
 
             // ---------- chat ----------
             "chat_start" => json!(self.chat_start(a)?),
-            "chat_send" => self.chats.send(&s(a, "chatId")?, who, &s(a, "text")?)?,
+            "chat_send" => {
+                let id = s(a, "chatId")?;
+                let v = self.chats.send(&id, who, &s(a, "text")?)?;
+                // Quadro: agente começou → coluna configurada (só para a frente), com sincronia da issue.
+                if let Some(ws) = self.chats.workspace_of(&id) {
+                    self.board_event(ws, kabul_core::board::AutoEvent::AgentStarted);
+                }
+                v
+            }
             // ---------- governança (ESCALA) ----------
             "agents_status" => json!(self.chats.governor.status()),
             "agents_config" => self.agents_config(a)?,
@@ -560,6 +596,40 @@ impl Hub {
                     }
                 };
                 self.bus.emit("workspace-state", json!({"id": id, "state": w.state}), Some(id.clone()), None);
+                self.bus.emit("workspaces-changed", json!({}), None, None);
+                json!(w)
+            }
+            // ---------- Quadro (colunas e sincronia com Linear/GitHub; só o dono altera) ----------
+            "board_get" => self.with_store(|st| Ok(json!(kabul_core::board::config(&st.state))))?,
+            "board_save" => {
+                let repo = opt(a, "repoId").filter(|r| !r.is_empty());
+                let board: Option<kabul_core::board::Board> = match a.get("board") {
+                    Some(b) if !b.is_null() => Some(serde_json::from_value(b.clone()).context("quadro inválido")?),
+                    _ => None,
+                };
+                let reassign: std::collections::BTreeMap<String, String> = a.get("reassign").filter(|r| !r.is_null()).map(|r| serde_json::from_value(r.clone())).transpose().context("reassign inválido")?.unwrap_or_default();
+                let cfg = self.with_store(|st| kabul_core::board::save(st, repo.as_deref(), board, &reassign))?;
+                self.bus.emit("workspaces-changed", json!({}), None, None);
+                json!(cfg)
+            }
+            "board_move" => {
+                let restore: Option<kabul_core::board::Snapshot> = a.get("restore").filter(|r| !r.is_null()).map(|r| serde_json::from_value(r.clone())).transpose().context("restore inválido")?;
+                let r = kabul_core::board::move_card(&self.store, &kabul_core::tracker::Trackers::real(), &s(a, "workspaceId")?, &s(a, "column")?, restore.as_ref())?;
+                self.bus.emit("workspaces-changed", json!({}), None, None);
+                json!(r)
+            }
+            "board_sync" => json!(kabul_core::board::sync_card(&self.store, &kabul_core::tracker::Trackers::real(), &s(a, "workspaceId")?)?),
+            "board_preview" => {
+                let b = self.with_store(|st| {
+                    Ok(match opt(a, "repoId").filter(|r| !r.is_empty()) {
+                        Some(r) => kabul_core::board::effective(&st.state, &r),
+                        None => kabul_core::board::global(&st.state),
+                    })
+                })?;
+                json!(kabul_core::board::previews(&kabul_core::tracker::Trackers::real(), &b))
+            }
+            "workspace_link_issue" => {
+                let w = kabul_core::board::link_issue(&self.store, &kabul_core::tracker::Trackers::real(), &s(a, "workspaceId")?, &s(a, "input")?)?;
                 self.bus.emit("workspaces-changed", json!({}), None, None);
                 json!(w)
             }

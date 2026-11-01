@@ -312,6 +312,61 @@ function usageCsv(days: number) {
   return ["data,provedor,harness,modelo,conta,workspace,sessao,entrada,saida,cache_lido,cache_gravado,custo_usd,duracao_ms", ...rows].join("\n") + "\n";
 }
 
+// ---------- Quadro: colunas configuráveis e rastreadores de mentira (espelha kabul_core::board) ----------
+// `__mock.boardFail`: o rastreador responde erro; `__mock.linearOff`: Linear sem chave. Chamadas em `__mock.boardCalls`.
+const AUTO = { mode: "auto" };
+const bcol = (id: string, name: string, icon: string, color: string) => ({ id, name, icon, color, map: { linear: AUTO, github: AUTO, project: AUTO, github_label: null } });
+const defaultBoard = () => ({ sync: false, reverse_sync: false, github_projects: false, auto: { enabled: true, agent_started: "in-progress", pr_opened: "in-review", pr_merged: "done" }, columns: [bcol("backlog", "Todo", "todo", "gray"), bcol("in-progress", "In progress", "progress", "yellow"), bcol("in-review", "In review", "review", "green"), bcol("done", "Done", "done", "brown")] });
+const board = { global: defaultBoard() as any, repos: {} as Record<string, any> };
+const LINEAR_STATES = [["s-backlog", "Backlog", "backlog"], ["s-todo", "Todo", "unstarted"], ["s-prog", "In Progress", "started"], ["s-rev", "In Review", "started"], ["s-done", "Done", "completed"], ["s-canc", "Canceled", "canceled"]].map(([id, name, kind]) => ({ id, name, kind }));
+const GH_STATES = [{ id: "open", name: "Open", kind: "unstarted" }, { id: "closed", name: "Closed", kind: "completed" }, { id: "not_planned", name: "Closed as not planned", kind: "canceled" }];
+const linearIssues: Record<string, any> = {};
+const bnorm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+const CANON: [string, string[]][] = [["backlog", ["backlog"]], ["todo", ["todo", "to do", "a fazer"]], ["progress", ["in progress", "doing", "em andamento"]], ["review", ["in review", "review", "em revisao"]], ["done", ["done", "closed", "concluido", "feito"]], ["canceled", ["canceled", "cancelled", "cancelado"]]];
+const canonName = (n: string) => CANON.find(([, l]) => l.includes(bnorm(n)))?.[0];
+const KIND_CANON: Record<string, string> = { backlog: "backlog", unstarted: "todo", started: "progress", completed: "done", canceled: "canceled" };
+const ICON_CANON: Record<string, string> = { backlog: "backlog", todo: "todo", progress: "progress", review: "review", done: "done", canceled: "canceled" };
+const resolveIn = (c: any, states: any[], o: any) => {
+  if (o.mode === "off") return null;
+  if (o.mode === "state") return states.find((x) => bnorm(x.name) === bnorm(o.value) || x.id === o.value) ?? null;
+  const same = states.find((x) => bnorm(x.name) === bnorm(c.name));
+  if (same) return same;
+  const k = canonName(c.name) ?? ICON_CANON[c.icon];
+  const chain = k === "review" ? ["review", "progress"] : k === "backlog" ? ["backlog", "todo"] : k === "todo" ? ["todo", "backlog"] : k ? [k] : [];
+  for (const want of chain) { const hit = states.find((x) => (canonName(x.name) ?? KIND_CANON[x.kind]) === want); if (hit) return hit; }
+  return null;
+};
+const resolveGh = (c: any) => { const o = c.map.github; if (o.mode === "off") return null; const id = o.mode === "state" ? o.value : ({ done: "closed", canceled: "not_planned" } as any)[canonName(c.name) ?? ICON_CANON[c.icon]] ?? "open"; return GH_STATES.find((x) => x.id === id) ?? null; };
+const boardOf = (repoId: string) => board.repos[repoId] ?? board.global;
+const boardCfg = () => ({ global: board.global, repos: board.repos, icons: ["backlog", "todo", "progress", "review", "done", "canceled", "blocked", "star"], colors: ["gray", "blue", "teal", "green", "yellow", "orange", "red", "pink", "purple", "brown"] });
+const mockState = () => ((window as any).__mock ??= {});
+const remoteOf = (w: any) => {
+  const l = w.issue;
+  if (l.tracker === "linear") return (linearIssues[l.id] ??= { state: LINEAR_STATES[1], labels: [] as string[] });
+  return (linearIssues[l.id] ??= { state: GH_STATES[0], labels: [] as string[] });
+};
+function boardSync(w: any, b: any, colId: string, restore: any) {
+  const l = w.issue ?? (w.linear ? { tracker: "linear", id: w.linear.identifier, identifier: w.linear.identifier, url: w.linear.url, title: w.linear.title } : null);
+  const res: any = { status: "off", tracker: l?.tracker ?? null, issue: l?.identifier ?? null, url: l?.url ?? null, from: null, to: null, project: null, error: null, before: null };
+  if (!l) return { ...res, status: "no_link" };
+  if (!b.sync) return res;
+  if (l.tracker === "linear" && mockState().linearOff) return { ...res, status: "not_connected" };
+  w.issue = l;
+  const r = remoteOf(w);
+  res.from = r.state;
+  const c = b.columns.find((x: any) => x.id === colId);
+  const to = restore ? restore.state : l.tracker === "linear" ? resolveIn(c, LINEAR_STATES, c.map.linear) : resolveGh(c);
+  if (!to) return { ...res, status: "no_match" };
+  if (to.id === r.state.id) return { ...res, status: "unchanged", to };
+  res.before = { state: r.state, labels: [...r.labels], project_option: null };
+  (mockState().boardCalls ??= []).push({ issue: l.identifier, tracker: l.tracker, to: to.name });
+  const fail = mockState().boardFail;
+  if (fail) return { ...res, status: "error", error: String(fail) };
+  r.state = to;
+  w.issue = { ...l, state: to, updated_at: new Date().toISOString() };
+  return { ...res, status: "ok", to };
+}
+
 const handlers: Record<string, (a: any) => unknown> = {
   usage_overview: ({ days }) => usageOverview(days ?? 30),
   usage_refresh: () => ((window as any).__usageRefreshed = ((window as any).__usageRefreshed ?? 0) + 1, emit("usage-changed", null), usageOverview(30).limits),
@@ -715,7 +770,44 @@ const handlers: Record<string, (a: any) => unknown> = {
   linear_connect: ({ key }) => { if (!String(key).startsWith("lin_api_")) throw new Error("Linear: chave inválida"); db.linear = true; return "Dev · Acme"; },
   linear_disconnect: () => void (db.linear = false),
   linear_issues: ({ search }) => [{ id: "i1", identifier: "ENG-12", title: "Corrigir login no Safari", url: "https://linear.app/acme/issue/ENG-12", description: "O botão de login some no Safari 18.", state: "Todo", branchName: "dev/eng-12-corrigir-login-no-safari", priority: "High", assignee: "Dev", team: "ENG" }, { id: "i2", identifier: "ENG-15", title: "Exportar relatório em PDF", url: "https://linear.app/acme/issue/ENG-15", description: null, state: "In Progress", branchName: "dev/eng-15-exportar-relatorio", priority: "Medium", assignee: "Dev", team: "ENG" }].filter((i) => !search || (i.identifier + i.title).toLowerCase().includes(String(search).toLowerCase())),
-  workspace_from_issue: ({ repoId, issue }) => { const w: any = handlers.workspace_create({ repoId }); Object.assign(w, { branch: issue.branchName, title: `${issue.identifier} ${issue.title}`, linear: { identifier: issue.identifier, title: issue.title, url: issue.url }, user_set_branch: true }); return w; },
+  workspace_from_issue: ({ repoId, issue }) => { const w: any = handlers.workspace_create({ repoId }); Object.assign(w, { branch: issue.branchName, title: `${issue.identifier} ${issue.title}`, linear: { identifier: issue.identifier, title: issue.title, url: issue.url }, issue: { tracker: "linear", id: issue.id, identifier: issue.identifier, title: issue.title, url: issue.url }, user_set_branch: true }); return w; },
+  board_get: () => boardCfg(),
+  board_save: ({ repoId, board: b, reassign }) => {
+    if (b && (!b.columns?.length || b.columns.some((c: any) => !String(c.name).trim()))) throw new Error("dê um nome a cada coluna");
+    if (!repoId) board.global = b ?? defaultBoard();
+    else if (b) board.repos[repoId] = b;
+    else delete board.repos[repoId];
+    for (const w of db.workspaces) {
+      if (repoId ? w.repo_id !== repoId : board.repos[w.repo_id]) continue;
+      const bb = boardOf(w.repo_id);
+      if (!bb.columns.some((c: any) => c.id === w.status)) w.status = reassign?.[w.status] && bb.columns.some((c: any) => c.id === reassign[w.status]) ? reassign[w.status] : bb.columns[0].id;
+    }
+    return boardCfg();
+  },
+  board_move: async ({ workspaceId, column, restore }) => {
+    const w = ws(workspaceId), b = boardOf(w.repo_id);
+    if (!b.columns.some((c: any) => c.id === column)) throw new Error(`coluna não existe neste quadro: ${column}`);
+    const from = w.status;
+    w.status = column;
+    const ms = mockState().boardMs ?? 150;
+    if (w.issue || w.linear) await new Promise((r) => setTimeout(r, ms));
+    return { workspace: { ...w }, from_column: from, sync: boardSync(w, b, column, restore) };
+  },
+  board_sync: ({ workspaceId }) => { const w = ws(workspaceId); return boardSync(w, boardOf(w.repo_id), w.status, null); },
+  board_preview: ({ repoId }) => {
+    const b = repoId ? boardOf(repoId) : board.global;
+    const lin = !mockState().linearOff;
+    return { linear_connected: lin, github_connected: true, errors: [], previews: [...(lin ? [{ tracker: "linear", workflow: "ENG", states: LINEAR_STATES, columns: b.columns.map((c: any) => resolveIn(c, LINEAR_STATES, c.map.linear)) }] : []), { tracker: "github", workflow: "Issues", states: GH_STATES, columns: b.columns.map(resolveGh) }] };
+  },
+  workspace_link_issue: ({ workspaceId, input }) => {
+    const w = ws(workspaceId), v = String(input).trim();
+    if (!v) return Object.assign(w, { issue: null, linear: null });
+    const lin = /^(?:https:\/\/linear\.app\/[^/]+\/issue\/)?([A-Za-z][A-Za-z0-9]*-\d+)/.exec(v);
+    const gh = /github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)/.exec(v) ?? /^([\w.-]+)\/([\w.-]+)#(\d+)$/.exec(v) ?? (/^#(\d+)$/.exec(v) && ["", "acme", "demo", v.slice(1)]);
+    if (gh) return Object.assign(w, { linear: null, issue: { tracker: "github", id: `${gh[1]}/${gh[2]}#${gh[3]}`, identifier: `#${gh[3]}`, title: "Issue do GitHub", url: `https://github.com/${gh[1]}/${gh[2]}/issues/${gh[3]}`, state: GH_STATES[0] } });
+    if (lin) { const ident = lin[1].toUpperCase(); return Object.assign(w, { linear: { identifier: ident, title: "Issue do Linear", url: `https://linear.app/acme/issue/${ident}` }, issue: { tracker: "linear", id: ident, identifier: ident, title: "Issue do Linear", url: `https://linear.app/acme/issue/${ident}`, state: LINEAR_STATES[1] } }); }
+    throw new Error("cole a URL da issue (GitHub ou Linear), owner/repo#12, #12 ou ENG-12");
+  },
   open_targets: () => [
     { id: "finder", name: "Finder", kind: "finder", app: "/System/Library/CoreServices/Finder.app", icon: null },
     { id: "vscode", name: "VS Code", kind: "editor", app: "/Applications/Visual Studio Code.app", icon: null },

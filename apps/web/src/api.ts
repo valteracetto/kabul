@@ -13,6 +13,8 @@ export interface Workspace {
   id: string; repo_id: string; name: string; branch: string; path: string; archived: boolean; created_at: number;
   title: string | null; status: string; state: string; pinned: boolean; notes: string; port: number;
   target_branch: string | null; pr_url: string | null; archive_checkpoint: string | null; user_set_branch: boolean; files_copied: number; linear?: LinearLink | null;
+  /** Issue vinculada (Linear ou GitHub) que o Quadro sincroniza. */
+  issue?: IssueLink | null;
   unread?: boolean; section?: string | null; pin_order?: number | null;
 }
 export interface Section { id: string; name: string; emoji: string; order: number }
@@ -102,6 +104,26 @@ export interface McpEntry { name: string; scope: string; source: string; transpo
 export interface McpShared { name: string; transport: string; target: string; origins: { harness: string; scope: string; source: string }[]; conflict: boolean; shared: boolean; env_keys: string[]; weight: { tools: number; tokens: number } | null }
 export interface LinearIssue { id: string; identifier: string; title: string; url: string; description: string | null; state: string | null; branchName: string | null; priority: string | null; assignee: string | null; team: string | null }
 export interface LinearLink { identifier: string; title: string; url: string }
+// ---------- Quadro (colunas configuráveis e rastreadores; espelha kabul_core::board / tracker) ----------
+export type TrackerKind = "linear" | "github";
+export type StateKind = "triage" | "backlog" | "unstarted" | "started" | "completed" | "canceled";
+export interface RemoteState { id: string; name: string; kind: StateKind; color?: string | null }
+export interface IssueLink { tracker: TrackerKind; id: string; identifier: string; title: string; url: string; state?: RemoteState | null; updated_at?: string | null }
+/** Estado fixado à mão para a coluna num rastreador. */
+export type Override = { mode: "auto" } | { mode: "off" } | { mode: "state"; value: string };
+export interface ColumnMap { linear: Override; github: Override; github_label?: string | null; project: Override }
+export interface BoardColumn { id: string; name: string; icon: string; color: string; map: ColumnMap }
+export interface AutoMoves { enabled: boolean; agent_started: string | null; pr_opened: string | null; pr_merged: string | null }
+export interface Board { sync: boolean; reverse_sync: boolean; github_projects: boolean; auto: AutoMoves; columns: BoardColumn[] }
+export interface BoardConfig { global: Board; repos: Record<string, Board>; icons: string[]; colors: string[] }
+export type SyncStatus = "ok" | "off" | "no_link" | "no_match" | "unchanged" | "not_connected" | "error";
+export interface Snapshot { state: RemoteState | null; labels: string[]; project_option: RemoteState | null }
+export interface SyncResult { status: SyncStatus; tracker: TrackerKind | null; issue: string | null; url: string | null; from: RemoteState | null; to: RemoteState | null; project?: string | null; error: string | null; before: Snapshot | null }
+export interface MoveResult { workspace: Workspace; from_column: string; sync: SyncResult }
+export interface BoardPreview { tracker: TrackerKind; workflow: string; states: RemoteState[]; columns: (RemoteState | null)[] }
+export interface BoardPreviews { previews: BoardPreview[]; linear_connected: boolean; github_connected: boolean; errors: string[] }
+/** Card movido pelo polling (a issue mudou lá). */
+export interface BoardMoved { workspace_id: string; issue: string; tracker: TrackerKind; from: string; to: string; state: string }
 export interface CloudInfo { id: string | null; url: string | null; title: string | null; warning: string | null; exited: number | null; runs_on?: { kind: string; provider?: string; host?: string } | null }
 export interface GhAccount { host: string; login: string; active: boolean; scopes: string[]; source: string; ok: boolean }
 export interface RepoAccess { slug: string | null; ok: boolean; permission: string | null; message: string | null }
@@ -306,6 +328,17 @@ export const api = {
   linearDisconnect: () => c<void>("linear_disconnect"),
   linearIssues: (search: string | null) => c<LinearIssue[]>("linear_issues", { search }),
   workspaceFromIssue: (repoId: string, issue: LinearIssue) => c<Workspace>("workspace_from_issue", { repoId, issue }),
+  boardGet: () => c<BoardConfig>("board_get"),
+  /** `repoId` vazio = quadro global; `board` nulo num repo = volta a herdar o global. `reassign`: coluna apagada → destino dos cards. */
+  boardSave: (repoId: string | null, board: Board | null, reassign: Record<string, string> = {}) => c<BoardConfig>("board_save", { repoId, board, reassign }),
+  /** Move o card e (com a sincronia ligada) atualiza a issue; `restore` = o "Desfazer" (estado exato de antes). */
+  boardMove: (workspaceId: string, column: string, restore: Snapshot | null = null) => c<MoveResult>("board_move", { workspaceId, column, restore }),
+  boardSync: (workspaceId: string) => c<SyncResult>("board_sync", { workspaceId }),
+  boardPreview: (repoId: string | null) => c<BoardPreviews>("board_preview", { repoId }),
+  /** Vincula uma issue (URL do GitHub/Linear, owner/repo#12, #12, ENG-12); vazio desvincula. */
+  workspaceLinkIssue: (workspaceId: string, input: string) => c<Workspace>("workspace_link_issue", { workspaceId, input }),
+  /** Card movido por evento do Kabul ou pelo polling (issue mudou lá). */
+  onBoardMoved: (h: (p: { source: "event" | "poll"; moved?: BoardMoved[]; result?: MoveResult }) => void) => transport.subscribe("board-moved", h),
   chatSend: (chatId: string, text: string) => c<void>("chat_send", { chatId, text }),
   chatApprove: (chatId: string, requestId: string, allow: boolean, extra: { tool?: string; updatedInput?: unknown; always?: boolean } = {}) => c<void>("chat_approve", { chatId, requestId, allow, ...extra }),
   chatStop: (chatId: string) => c<void>("chat_stop", { chatId }),

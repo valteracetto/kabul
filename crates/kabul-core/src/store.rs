@@ -62,6 +62,9 @@ pub struct Workspace {
     /// Issue do Linear de onde o workspace nasceu.
     #[serde(default)]
     pub linear: Option<LinearLink>,
+    /// Issue vinculada (Linear ou GitHub) que o Quadro sincroniza ([`crate::board`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue: Option<crate::tracker::IssueLink>,
     /// Terminou um turno sem ser visto (negrito na barra lateral).
     #[serde(default)]
     pub unread: bool,
@@ -153,6 +156,12 @@ pub struct State {
     pub comments: Vec<DiffComment>,
     #[serde(default)]
     pub sections: Vec<Section>,
+    /// Quadro global (colunas, sincronia com rastreadores). Ausente = o padrão.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<crate::board::Board>,
+    /// Repositórios com quadro próprio (os outros herdam o global).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub repo_boards: std::collections::BTreeMap<String, crate::board::Board>,
 }
 
 pub const CIDADES: &[&str] = &[
@@ -473,6 +482,7 @@ impl Store {
             user_set_branch: false,
             files_copied,
             linear: None,
+            issue: None,
             ..Default::default()
         };
         self.state.workspaces.push(w.clone());
@@ -522,6 +532,7 @@ impl Store {
             user_set_branch: true,
             files_copied,
             linear: None,
+            issue: None,
             ..Default::default()
         };
         self.state.workspaces.push(w.clone());

@@ -40,7 +40,8 @@ pub fn clear_key() {
     crate::secrets::delete(SERVICE)
 }
 
-fn gql(query: &str, vars: Value) -> Result<Value> {
+/// GraphQL com a chave do cofre (usado também por [`crate::tracker::linear`]).
+pub(crate) fn gql(query: &str, vars: Value) -> Result<Value> {
     let key = get_key().context("Linear não conectado")?;
     let body = json!({ "query": query, "variables": vars }).to_string();
     // HTTP no próprio processo: a chave vai no cabeçalho, nunca na linha de comando (`ps`).

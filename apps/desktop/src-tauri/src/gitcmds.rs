@@ -5,7 +5,7 @@ use kabul_core::settings;
 use kabul_core::store::{Repo, Section};
 use std::collections::BTreeMap;
 use std::path::Path;
-use tauri::State;
+use tauri::{Emitter, Manager, State};
 
 /// Dry-run se pedido ou se "Simular ações do GitHub" estiver ligado.
 fn dry(app: &App, asked: Option<bool>) -> bool {
@@ -43,24 +43,26 @@ pub async fn workspace_grep(app: State<'_, App>, workspace_id: String, query: St
 }
 
 #[tauri::command]
-pub async fn pr_view(app: State<'_, App>, workspace_id: String) -> R<Option<PrInfo>> {
+pub async fn pr_view(handle: tauri::AppHandle, app: State<'_, App>, workspace_id: String) -> R<Option<PrInfo>> {
     let (w, _) = ws_repo(&app, &workspace_id)?;
     let pr = gitops::pr_view_cached(&w).map_err(e)?;
-    // Guarda o link e acompanha o estado do PR no status do workspace.
+    // Guarda o link e acompanha o estado do PR no Quadro (colunas configuráveis, só para a frente).
     if let Some(p) = &pr {
-        let status = match p.state.as_str() {
-            "MERGED" => Some("done"),
-            "OPEN" if !p.is_draft => Some("in-review"),
+        if w.pr_url.as_deref() != Some(p.url.as_str()) {
+            let _ = app.store.lock().unwrap().update_workspace(&workspace_id, |x| x.pr_url = Some(p.url.clone()));
+        }
+        let ev = match p.state.as_str() {
+            "MERGED" => Some(kabul_core::board::AutoEvent::PrMerged),
+            "OPEN" if !p.is_draft => Some(kabul_core::board::AutoEvent::PrOpened),
             _ => None,
         };
-        let _ = app.store.lock().unwrap().update_workspace(&workspace_id, |x| {
-            x.pr_url = Some(p.url.clone());
-            if let Some(s) = status {
-                if x.status != "canceled" {
-                    x.status = s.into();
-                }
+        if let Some(ev) = ev {
+            let st = app.store.lock().unwrap();
+            if kabul_core::board::auto_target(&kabul_core::board::effective(&st.state, &w.repo_id), &w.status, ev).is_some() {
+                drop(st);
+                crate::boardcmds::event(&handle, &workspace_id, ev);
             }
-        });
+        }
     }
     Ok(pr)
 }
@@ -78,7 +80,16 @@ pub async fn pr_merge(handle: tauri::AppHandle, app: State<'_, App>, workspace_i
         // Arquivar depois do merge: o mesmo caminho em segundo plano do botão Arquivar.
         let plan = {
             let mut st = app.store.lock().unwrap();
-            let w = st.update_workspace(&workspace_id, |x| x.status = "done".into()).map_err(e)?;
+            // Quadro: merge → coluna configurada (padrão: concluído); a issue sincroniza depois.
+            if kabul_core::board::auto_move(&mut st, &workspace_id, kabul_core::board::AutoEvent::PrMerged).map_err(e)?.is_some() {
+                let (h, id) = (handle.clone(), workspace_id.clone());
+                std::thread::spawn(move || {
+                    if let Ok(r) = kabul_core::board::sync_card(&h.state::<App>().store, &kabul_core::tracker::Trackers::real(), &id) {
+                        let _ = h.emit("board-moved", serde_json::json!({ "source": "event", "event": "pr_merged", "sync": r, "workspace_id": id }));
+                    }
+                });
+            }
+            let w = st.workspace(&workspace_id).map_err(e)?.clone();
             if archive && !w.archived {
                 Some(st.begin_archive(&workspace_id, delete).map_err(e)?)
             } else {

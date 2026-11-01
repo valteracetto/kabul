@@ -27,7 +27,7 @@ test("Quadro: colunas por status; arrastar o cartão muda o status; clique abre 
   await expect(page.getByTestId("col-in-review").getByTestId("kb-card")).toHaveCount(1);
   await page.getByTestId("col-in-review").getByTestId("kb-card").click();
   await expect(host(page).getByTestId("composer")).toBeVisible();
-  await expect(host(page).getByTestId("status-pill")).toContainText("Em revisão");
+  await expect(host(page).getByTestId("status-pill")).toContainText("In review");
 });
 
 test("Rotinas: cron validado (mínimo 15 min), próximas execuções, salvar ⌘S, rodar agora abre conversa; evento de PR (merge) dispara", async ({ page }) => {

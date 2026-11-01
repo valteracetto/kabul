@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+mod boardcmds;
 mod gitcmds;
 mod i18n;
 mod menu;
@@ -386,7 +387,7 @@ async fn workspaces_stats(app: State<'_, App>) -> R<HashMap<String, (u32, u32)>>
 }
 
 #[tauri::command]
-async fn workspace_pr(app: State<'_, App>, workspace_id: String, mut options: PrOptions) -> R<PrResult> {
+async fn workspace_pr(handle: AppHandle, app: State<'_, App>, workspace_id: String, mut options: PrOptions) -> R<PrResult> {
     let (w, r) = ws_repo(&app, &workspace_id)?;
     // Configurações › Git: link do workspace, auto-merge, upstream e simulação.
     let set = app.app_settings();
@@ -400,10 +401,9 @@ async fn workspace_pr(app: State<'_, App>, workspace_id: String, mut options: Pr
     }
     let res = store::create_pr(&r, &w, &options).map_err(e)?;
     if let Some(u) = &res.url {
-        let _ = app.store.lock().unwrap().update_workspace(&workspace_id, |x| {
-            x.pr_url = Some(u.clone());
-            x.status = "in-review".into();
-        });
+        let _ = app.store.lock().unwrap().update_workspace(&workspace_id, |x| x.pr_url = Some(u.clone()));
+        // Quadro: PR aberto → coluna configurada (padrão: em revisão), com sincronia da issue.
+        boardcmds::event(&handle, &workspace_id, kabul_core::board::AutoEvent::PrOpened);
     }
     Ok(res)
 }
@@ -754,6 +754,10 @@ fn chat_send(handle: AppHandle, app: State<App>, chat_id: String, text: String) 
         m.working = true;
     }
     remote::local_send(&handle, &chat_id, &text);
+    // Quadro: agente começou → coluna configurada (padrão: em andamento; só para a frente).
+    if let Some(ws) = app.chat_meta.lock().unwrap().get(&chat_id).map(|m| m.workspace_id.clone()) {
+        boardcmds::event(&handle, &ws, kabul_core::board::AutoEvent::AgentStarted);
+    }
     Ok(())
 }
 
@@ -1448,6 +1452,9 @@ async fn workspace_from_issue(handle: AppHandle, app: State<'_, App>, repo_id: S
     st.update_workspace(&w.id, |x| {
         x.title = Some(format!("{} {}", issue.identifier, issue.title));
         x.linear = Some(store::LinearLink { identifier: issue.identifier.clone(), title: issue.title.clone(), url: issue.url.clone() });
+        // Vínculo do Quadro com o UUID (a sincronia e o polling usam o id).
+        x.issue =
+            Some(kabul_core::tracker::IssueLink { tracker: kabul_core::tracker::TrackerKind::Linear, id: issue.id.clone(), identifier: issue.identifier.clone(), title: issue.title.clone(), url: issue.url.clone(), state: None, updated_at: None });
     })
     .map_err(e)
 }
@@ -1684,6 +1691,7 @@ fn main() {
         .setup(|app| {
             resume_archives(app.handle());
             watch_state(app.handle());
+            boardcmds::start_poller(app.handle());
             remote::autostart(app.handle());
             tray::apply(app.handle());
             tray::start_loop(app.handle());
@@ -1834,6 +1842,12 @@ fn main() {
             linear_disconnect,
             linear_issues,
             workspace_from_issue,
+            boardcmds::board_get,
+            boardcmds::board_save,
+            boardcmds::board_move,
+            boardcmds::board_sync,
+            boardcmds::board_preview,
+            boardcmds::workspace_link_issue,
             auth_status,
             auth_login,
             auth_code,

@@ -15,8 +15,8 @@ use std::path::Path;
 /// Versão do app (a mesma em todos os crates, `[workspace.package]`).
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// `state.json` (repos, workspaces, comentários, seções).
-pub const STATE: u32 = 1;
+/// `state.json` (repos, workspaces, comentários, seções). v2: `board` (colunas do Quadro).
+pub const STATE: u32 = 2;
 /// `app-settings.json` (Configurações do app). v2: `tray_icon` (o que o ícone da barra mostra).
 pub const APP_SETTINGS: u32 = 2;
 /// `settings.toml` / `settings.local.toml` (do repo e do usuário).
@@ -101,8 +101,9 @@ pub fn load_json(file: &Path, current: u32, migrations: &[Migration]) -> Option<
 
 // ---------------- migrações por arquivo ----------------
 
-/// `state.json`: v0 -> v1 só carimba a versão.
-pub const STATE_MIGRATIONS: &[Migration] = &[stamp];
+/// `state.json`: v0 -> v1 só carimba a versão; v1 -> v2 cria o quadro com as colunas padrão (os status de
+/// antes viram colunas).
+pub const STATE_MIGRATIONS: &[Migration] = &[stamp, crate::board::migrate_state_v2];
 /// `app-settings.json`: v1 -> v2 acrescenta `tray_icon` com o comportamento de antes (os dois limites mais
 /// apertados em barras, com a porcentagem ao lado no macOS).
 pub const APP_SETTINGS_MIGRATIONS: &[Migration] = &[stamp, app_settings_v1_to_v2];
@@ -246,7 +247,7 @@ mod tests {
         let f = d.join("state.json");
         std::fs::write(&f, r#"{"repos": []}"#).unwrap();
         let (doc, out) = load_json(&f, STATE, STATE_MIGRATIONS).unwrap();
-        assert_eq!((out, doc["schema_version"].as_u64()), (Outcome::Migrated { from: 0 }, Some(1)));
+        assert_eq!((out, doc["schema_version"].as_u64()), (Outcome::Migrated { from: 0 }, Some(STATE as u64)));
         assert_eq!(std::fs::read_to_string(d.join("state.json.v0.bak")).unwrap(), r#"{"repos": []}"#);
         std::fs::write(&f, r#"{"schema_version": 9, "repos": [], "novidade": 1}"#).unwrap();
         let (_, out) = load_json(&f, STATE, STATE_MIGRATIONS).unwrap();

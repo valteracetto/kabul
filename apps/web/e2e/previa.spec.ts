@@ -20,7 +20,7 @@ test("cartão de prévia do workspace: abre após 700 ms de hover, some 200 ms d
   await expect(page.getByTestId("ws-peek")).toHaveCount(0);
   await expect(page.getByTestId("ws-peek")).toBeVisible({ timeout: 1500 });
   await expect(page.getByTestId("ws-peek")).toContainText("demo");
-  await expect(page.getByTestId("ws-peek")).toContainText("Em andamento");
+  await expect(page.getByTestId("ws-peek")).toContainText("In progress");
   const box = (await page.getByTestId("ws-peek").boundingBox())!;
   expect(box.width).toBeGreaterThanOrEqual(280);
   expect(box.width).toBeLessThanOrEqual(340);
